@@ -26,54 +26,14 @@ It targets three behaviors:
 
 The diagram below is a faithful Mermaid rendering of the reference schema in [`docs/architecture/CONTX_architecture_OptMem_final.excalidraw`](./docs/architecture/CONTX_architecture_OptMem_final.excalidraw). Open that file in [excalidraw.com](https://excalidraw.com) for the original hand-laid version.
 
-```mermaid
-flowchart TB
-    classDef stage fill:#111827,color:#f8fafc,stroke:#334155,stroke-width:2px,rx:6
-    classDef guard fill:#1e293b,color:#e2e8f0,stroke:#475569,stroke-width:1px,rx:6
-    classDef branch fill:#0f172a,color:#cbd5e1,stroke:#334155,stroke-width:1px,stroke-dasharray:4 3,rx:6
+![CONTX architecture](docs/architecture/CONTX_architecture_OptMem_final.png)
 
-    subgraph A["A. CAPTURER ET COMPRENDRE"]
-        direction LR
-        S1["SOURCES"]:::stage
-        S2["COLLECTEURS LOCAUX"]:::stage
-        S3["BASE BRUTE LOCALE"]:::stage
-        S4["TRAITEMENT LOCAL SÛR"]:::stage
-        S5["BASE ENRICHIE"]:::stage
-        S1 -->|"donnée détectée"| S2
-        S2 -->|"enregistrement brut"| S3
-        S3 -->|"élément brut"| S4
-        S4 -->|"événement sûr"| S5
-    end
+<details>
+<summary>Editable source</summary>
 
-    S5 -->|"batch d’événements enrichis sûrs"| S6
+The schema above is rendered from the Excalidraw source: [`docs/architecture/CONTX_architecture_OptMem_final.excalidraw`](./docs/architecture/CONTX_architecture_OptMem_final.excalidraw) — open it in [excalidraw.com](https://excalidraw.com) to edit.
 
-    subgraph B["B. CONSTRUIRE ET DISTRIBUER LA MÉMOIRE"]
-        direction LR
-        S6["AGENT DE MÉMOIRE"]:::stage
-        S7["OPTMEM"]:::stage
-        S8["INTERFACE DE CONTEXTE"]:::stage
-        S9["AGENTS CONSOMMATEURS"]:::stage
-        S6 -->|"souvenir court"| S7
-        S7 -->|"vue mémoire"| S8
-        S8 -->|"paquet de contexte"| S9
-    end
-
-    S9 -.->|"retour : souvenir candidat, correction ou oubli"| S6
-
-    subgraph C["C. GARDE-FOUS TRANSVERSAUX — S’APPLIQUENT À TOUTE LA CHAÎNE"]
-        direction LR
-        G1["CONFIDENTIALITÉ"]:::guard
-        G2["TRANSPARENCE"]:::guard
-        G3["CONTRÔLE UTILISATEUR"]:::guard
-        G4["SOBRIÉTÉ"]:::guard
-    end
-
-    subgraph D["D. BRANCHES OPTIONNELLES"]
-        direction LR
-        D1["MODÈLE DISTANT"]:::branch
-        D2["EXPORT MARKDOWN"]:::branch
-    end
-```
+</details>
 
 ### What each stage does
 
