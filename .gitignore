@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Runtime data — never commit user data, captures, or databases
+.contx/
+*.db
+*.db-wal
+*.db-shm
+
+# macOS
+.DS_Store
+
+# Vendored third-party reference clone of OptMem (read-only, kept out of
+# this repository for now — vendoring strategy is a Milestone 0 decision)
+optmem/
