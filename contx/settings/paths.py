@@ -24,7 +24,9 @@ window_titles_enabled = false
 background_collection_enabled = false
 retain_excluded_activity = false
 poll_interval_seconds = 1.0
+segment_max_duration_seconds = 60
 idle_threshold_seconds = 300
+purge_interval_seconds = 900
 screenshots_enabled = false
 raw_disk_budget_mb = 5120
 """

@@ -28,6 +28,8 @@ def test_defaults_are_safe(tmp_path: Path) -> None:
     assert settings.collection.window_titles_enabled is False
     assert settings.collection.background_collection_enabled is False
     assert settings.collection.retain_excluded_activity is False
+    assert settings.collection.segment_max_duration_seconds == 60
+    assert settings.collection.purge_interval_seconds == 900
     assert settings.collection.screenshots_enabled is False
     assert settings.collection.raw_disk_budget_mb == 5120
 

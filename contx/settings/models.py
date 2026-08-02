@@ -28,7 +28,9 @@ class CollectionSettings(BaseModel):
     background_collection_enabled: bool = False
     retain_excluded_activity: bool = False
     poll_interval_seconds: float = Field(default=1.0, ge=0.25, le=10.0)
+    segment_max_duration_seconds: int = Field(default=60, ge=5, le=300)
     idle_threshold_seconds: int = Field(default=300, ge=30, le=3600)
+    purge_interval_seconds: int = Field(default=900, ge=60, le=3600)
     screenshots_enabled: bool = False
     raw_disk_budget_mb: int = Field(default=5120, ge=64, le=5120)
 
