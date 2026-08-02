@@ -11,6 +11,11 @@ from contx.collection.policy import (
     CollectionPolicy,
     ExclusionDecision,
 )
+from contx.collection.screenshot_capture import (
+    ScreenshotCaptureResult,
+    ScreenshotSource,
+    SelectiveScreenshotService,
+)
 from contx.collection.screenshots import (
     ScreenshotDecision,
     ScreenshotTrigger,
@@ -28,6 +33,9 @@ __all__ = [
     "ContinuousActivityCollector",
     "ExclusionDecision",
     "ScreenshotDecision",
+    "ScreenshotCaptureResult",
+    "ScreenshotSource",
     "ScreenshotTrigger",
     "SelectiveScreenshotPlanner",
+    "SelectiveScreenshotService",
 ]

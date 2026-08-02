@@ -17,6 +17,7 @@ class SourceType(StrEnum):
     ACTIVE_APP = "active_app"
     SYSTEM_STATE = "system_state"
     EXCLUDED_ACTIVITY = "excluded_activity"
+    SCREENSHOT = "screenshot"
 
 
 class ActivityState(StrEnum):
