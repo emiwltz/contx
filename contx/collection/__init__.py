@@ -5,6 +5,7 @@ from contx.collection.continuous import (
     ActivitySampler,
     ContinuousActivityCollector,
 )
+from contx.collection.continuous_observations import ContinuousObservationCollector
 from contx.collection.controlled_collector import ControlledMetadataCollector
 from contx.collection.policy import (
     CollectionContext,
@@ -31,6 +32,7 @@ __all__ = [
     "CollectionPolicy",
     "ControlledMetadataCollector",
     "ContinuousActivityCollector",
+    "ContinuousObservationCollector",
     "ExclusionDecision",
     "ScreenshotDecision",
     "ScreenshotCaptureResult",

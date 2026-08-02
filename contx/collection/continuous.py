@@ -201,6 +201,18 @@ class ContinuousActivityCollector:
 
         sample = self._sampler.sample()
         rules = self._controls.rules(enabled_only=True)
+        return self.collect_sample(sample, control=control, rules=rules)
+
+    def collect_sample(
+        self,
+        sample: ActivitySample,
+        *,
+        control: CollectionControl,
+        rules: tuple[ExclusionRule, ...],
+    ) -> tuple[Observation, ...]:
+        """Segment one already-read sample for a shared collection cycle."""
+        if control.is_paused(at=sample.observed_at):
+            return self._interrupt(at=sample.observed_at)
         records = list(
             self._system_segments.observe(
                 _SegmentIdentity(
@@ -257,6 +269,10 @@ class ContinuousActivityCollector:
             )
         )
         return tuple(records)
+
+    def interrupt(self, *, at: datetime) -> tuple[Observation, ...]:
+        """Flush open segments without consulting any collection source."""
+        return self._interrupt(at=at)
 
     def close(self) -> tuple[Observation, ...]:
         """Flush non-empty segments during an orderly daemon shutdown."""
