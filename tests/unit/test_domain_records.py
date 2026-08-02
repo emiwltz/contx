@@ -89,6 +89,7 @@ def _observation(**changes: object) -> Observation:
         "ended_at": NOW + timedelta(minutes=10),
         "app_name": "Synthetic Editor",
         "app_bundle_id": "test.synthetic.editor",
+        "expires_at": NOW + timedelta(hours=48),
         "created_at": NOW,
     }
     values.update(changes)

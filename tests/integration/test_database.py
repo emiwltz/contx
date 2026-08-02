@@ -48,7 +48,62 @@ def test_empty_database_upgrades_to_packaged_head(tmp_path: Path) -> None:
         "candidate_events",
         "memory_links",
         "processing_runs",
+        "collection_control",
+        "exclusion_rules",
     } <= tables
+
+
+def test_v001_observations_gain_bounded_expiry_on_upgrade(tmp_path: Path) -> None:
+    database_path = tmp_path / "contx.db"
+    upgrade_database(database_path, revision="20260802_0001")
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            """INSERT INTO observations (
+                id, idempotency_key, source_type, captured_at, started_at,
+                ended_at, app_name, app_bundle_id, window_title, artifact_path,
+                content_hash, perceptual_hash, excluded, exclusion_reason,
+                processing_status, expires_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "00000000-0000-0000-0000-000000000001",
+                "a" * 64,
+                "active_app",
+                "2026-08-02T10:00:00.000000Z",
+                "2026-08-02T10:00:00.000000Z",
+                "2026-08-02T10:00:00.000000Z",
+                "Editor",
+                "com.example.editor",
+                None,
+                None,
+                None,
+                None,
+                0,
+                None,
+                "processed",
+                None,
+                "2026-08-02T10:00:00.000000Z",
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    upgrade_database(database_path)
+
+    connection = sqlite3.connect(database_path)
+    try:
+        row = connection.execute(
+            "SELECT activity_state, expires_at FROM observations"
+        ).fetchone()
+        columns = {
+            item[1]: item[3]
+            for item in connection.execute("PRAGMA table_info(observations)")
+        }
+    finally:
+        connection.close()
+    assert row == ("active", "2026-08-04T10:00:00.000Z")
+    assert columns["expires_at"] == 1
 
 
 def test_migration_matches_persistence_metadata(tmp_path: Path) -> None:

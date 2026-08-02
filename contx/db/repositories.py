@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -9,8 +10,10 @@ from sqlalchemy.orm import Session
 
 from contx.db.models import (
     CandidateEventModel,
+    CollectionControlModel,
     EventModel,
     EventObservationModel,
+    ExclusionRuleModel,
     MemoryCandidateModel,
     MemoryLinkModel,
     ObservationModel,
@@ -18,9 +21,14 @@ from contx.db.models import (
 )
 from contx.errors import DatabaseError
 from contx.models import (
+    ActivityState,
     CandidateStatus,
+    CollectionControl,
     EpistemicStatus,
     Event,
+    ExclusionRule,
+    ExclusionRuleType,
+    ExclusionScope,
     MemoryCandidate,
     MemoryLink,
     MemoryLinkStatus,
@@ -198,11 +206,98 @@ class PipelineRepository:
             raise DatabaseError("Memory provenance does not match event observations")
 
 
+class CollectionRepository:
+    """Persist collection control and pre-capture exclusion policy."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get_control(self, *, default_at: datetime) -> CollectionControl:
+        timestamp = parse_utc(format_utc(default_at))
+        model = self._session.get(CollectionControlModel, 1)
+        if model is None:
+            model = CollectionControlModel(
+                id=1,
+                paused_at=None,
+                pause_until=None,
+                updated_at=format_utc(timestamp),
+            )
+            self._session.add(model)
+            self._session.flush()
+        return _collection_control_from_model(model)
+
+    def save_control(self, control: CollectionControl) -> CollectionControl:
+        model = self._session.get(CollectionControlModel, 1)
+        if model is None:
+            model = CollectionControlModel(id=1)
+            self._session.add(model)
+        model.paused_at = (
+            None if control.paused_at is None else format_utc(control.paused_at)
+        )
+        model.pause_until = (
+            None if control.pause_until is None else format_utc(control.pause_until)
+        )
+        model.updated_at = format_utc(control.updated_at)
+        self._session.flush()
+        return control
+
+    def save_exclusion_rule(self, rule: ExclusionRule) -> ExclusionRule:
+        existing = self._session.scalar(
+            select(ExclusionRuleModel).where(
+                ExclusionRuleModel.rule_type == rule.rule_type.value,
+                ExclusionRuleModel.pattern == rule.pattern,
+                ExclusionRuleModel.scope == rule.scope.value,
+            )
+        )
+        if existing is not None:
+            return _exclusion_rule_from_model(existing)
+        self._session.add(_exclusion_rule_to_model(rule))
+        self._session.flush()
+        return rule
+
+    def list_exclusion_rules(
+        self, *, enabled_only: bool = False
+    ) -> tuple[ExclusionRule, ...]:
+        statement = select(ExclusionRuleModel).order_by(
+            ExclusionRuleModel.built_in.desc(),
+            ExclusionRuleModel.rule_type,
+            ExclusionRuleModel.pattern,
+        )
+        if enabled_only:
+            statement = statement.where(ExclusionRuleModel.enabled.is_(True))
+        return tuple(
+            _exclusion_rule_from_model(model)
+            for model in self._session.scalars(statement)
+        )
+
+    def set_exclusion_rule_enabled(
+        self, rule_id: UUID, *, enabled: bool, updated_at: datetime
+    ) -> ExclusionRule:
+        timestamp = parse_utc(format_utc(updated_at))
+        model = self._session.get(ExclusionRuleModel, str(rule_id))
+        if model is None:
+            raise DatabaseError("The exclusion rule does not exist")
+        model.enabled = enabled
+        model.updated_at = format_utc(timestamp)
+        self._session.flush()
+        return _exclusion_rule_from_model(model)
+
+    def delete_exclusion_rule(self, rule_id: UUID) -> None:
+        model = self._session.get(ExclusionRuleModel, str(rule_id))
+        if model is None:
+            raise DatabaseError("The exclusion rule does not exist")
+        if model.built_in:
+            raise DatabaseError("Built-in exclusion rules can be disabled, not deleted")
+        self._session.delete(model)
+        self._session.flush()
+
+
 def _observation_to_model(record: Observation) -> ObservationModel:
     return ObservationModel(
         id=str(record.id),
         idempotency_key=record.idempotency_key,
         source_type=record.source_type.value,
+        activity_state=record.activity_state.value,
         captured_at=format_utc(record.captured_at),
         started_at=None if record.started_at is None else format_utc(record.started_at),
         ended_at=None if record.ended_at is None else format_utc(record.ended_at),
@@ -215,8 +310,42 @@ def _observation_to_model(record: Observation) -> ObservationModel:
         excluded=record.excluded,
         exclusion_reason=record.exclusion_reason,
         processing_status=record.processing_status.value,
-        expires_at=None if record.expires_at is None else format_utc(record.expires_at),
+        expires_at=format_utc(record.expires_at),
         created_at=format_utc(record.created_at),
+    )
+
+
+def _collection_control_from_model(model: CollectionControlModel) -> CollectionControl:
+    return CollectionControl(
+        paused_at=None if model.paused_at is None else parse_utc(model.paused_at),
+        pause_until=None if model.pause_until is None else parse_utc(model.pause_until),
+        updated_at=parse_utc(model.updated_at),
+    )
+
+
+def _exclusion_rule_to_model(record: ExclusionRule) -> ExclusionRuleModel:
+    return ExclusionRuleModel(
+        id=str(record.id),
+        rule_type=record.rule_type.value,
+        pattern=record.pattern,
+        scope=record.scope.value,
+        enabled=record.enabled,
+        built_in=record.built_in,
+        created_at=format_utc(record.created_at),
+        updated_at=format_utc(record.updated_at),
+    )
+
+
+def _exclusion_rule_from_model(model: ExclusionRuleModel) -> ExclusionRule:
+    return ExclusionRule(
+        id=UUID(model.id),
+        rule_type=ExclusionRuleType(model.rule_type),
+        pattern=model.pattern,
+        scope=ExclusionScope(model.scope),
+        enabled=model.enabled,
+        built_in=model.built_in,
+        created_at=parse_utc(model.created_at),
+        updated_at=parse_utc(model.updated_at),
     )
 
 
@@ -225,6 +354,7 @@ def _observation_from_model(model: ObservationModel) -> Observation:
         id=UUID(model.id),
         idempotency_key=model.idempotency_key,
         source_type=SourceType(model.source_type),
+        activity_state=ActivityState(model.activity_state),
         captured_at=parse_utc(model.captured_at),
         started_at=None if model.started_at is None else parse_utc(model.started_at),
         ended_at=None if model.ended_at is None else parse_utc(model.ended_at),
@@ -237,7 +367,7 @@ def _observation_from_model(model: ObservationModel) -> Observation:
         excluded=model.excluded,
         exclusion_reason=model.exclusion_reason,
         processing_status=ObservationStatus(model.processing_status),
-        expires_at=None if model.expires_at is None else parse_utc(model.expires_at),
+        expires_at=parse_utc(model.expires_at),
         created_at=parse_utc(model.created_at),
     )
 

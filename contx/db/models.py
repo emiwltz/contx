@@ -4,7 +4,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    CheckConstraint,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from contx.db.base import Base
@@ -21,6 +31,7 @@ class ObservationModel(Base):
     id: Mapped[Identifier] = mapped_column(String(36), primary_key=True)
     idempotency_key: Mapped[str] = mapped_column(String(64), unique=True)
     source_type: Mapped[str] = mapped_column(String(64), index=True)
+    activity_state: Mapped[str] = mapped_column(String(32), index=True)
     captured_at: Mapped[UtcTimestamp] = mapped_column(String(32), index=True)
     started_at: Mapped[UtcTimestamp | None] = mapped_column(String(32))
     ended_at: Mapped[UtcTimestamp | None] = mapped_column(String(32))
@@ -33,7 +44,7 @@ class ObservationModel(Base):
     excluded: Mapped[bool] = mapped_column(Boolean, default=False)
     exclusion_reason: Mapped[str | None] = mapped_column(String(255))
     processing_status: Mapped[str] = mapped_column(String(32), index=True)
-    expires_at: Mapped[UtcTimestamp | None] = mapped_column(String(32), index=True)
+    expires_at: Mapped[UtcTimestamp] = mapped_column(String(32), index=True)
     created_at: Mapped[UtcTimestamp] = mapped_column(String(32))
 
 
@@ -146,3 +157,40 @@ class ProcessingRunModel(Base):
     output_count: Mapped[int] = mapped_column(Integer, default=0)
     error_code: Mapped[str | None] = mapped_column(String(64))
     error_summary: Mapped[str | None] = mapped_column(String(255))
+
+
+class CollectionControlModel(Base):
+    """Singleton state controlling whether collection may run."""
+
+    __tablename__ = "collection_control"
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_collection_control_singleton"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    paused_at: Mapped[UtcTimestamp | None] = mapped_column(String(32))
+    pause_until: Mapped[UtcTimestamp | None] = mapped_column(String(32))
+    updated_at: Mapped[UtcTimestamp] = mapped_column(String(32))
+
+
+class ExclusionRuleModel(Base):
+    """One pre-capture application, window, or situation rule."""
+
+    __tablename__ = "exclusion_rules"
+    __table_args__ = (
+        UniqueConstraint(
+            "rule_type",
+            "pattern",
+            "scope",
+            name="uq_exclusion_rules_identity",
+        ),
+    )
+
+    id: Mapped[Identifier] = mapped_column(String(36), primary_key=True)
+    rule_type: Mapped[str] = mapped_column(String(32), index=True)
+    pattern: Mapped[str] = mapped_column(String(255))
+    scope: Mapped[str] = mapped_column(String(32))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    built_in: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[UtcTimestamp] = mapped_column(String(32))
+    updated_at: Mapped[UtcTimestamp] = mapped_column(String(32))

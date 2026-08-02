@@ -15,14 +15,14 @@ from contx.errors import DatabaseError
 from contx.settings.paths import PRIVATE_FILE_MODE
 
 
-def upgrade_database(database_path: Path) -> str:
-    """Upgrade a database atomically to the packaged schema head."""
+def upgrade_database(database_path: Path, *, revision: str = "head") -> str:
+    """Upgrade a database atomically to one packaged schema revision."""
     engine = create_database_engine(database_path)
     config = _alembic_config()
     try:
         with engine.begin() as connection:
             config.attributes["connection"] = connection
-            command.upgrade(config, "head")
+            command.upgrade(config, revision)
     except Exception as error:
         if isinstance(error, DatabaseError):
             raise
@@ -35,10 +35,10 @@ def upgrade_database(database_path: Path) -> str:
         raise DatabaseError(
             f"Cannot protect CONTX database: {database_path}"
         ) from error
-    revision = current_database_revision(database_path)
-    if revision is None:
+    current_revision = current_database_revision(database_path)
+    if current_revision is None:
         raise DatabaseError("CONTX database migration completed without a revision")
-    return revision
+    return current_revision
 
 
 def head_database_revision() -> str:

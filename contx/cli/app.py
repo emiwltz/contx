@@ -1,8 +1,11 @@
 """Top-level CONTX command-line application."""
 
+import re
+from datetime import timedelta
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Never
+from uuid import UUID
 
 import typer
 from sqlalchemy import Engine
@@ -10,6 +13,12 @@ from sqlalchemy import Engine
 from contx import __version__
 from contx.application import PipelineService
 from contx.candidates.rules import VerticalSliceCandidateProducer
+from contx.collection import (
+    CollectionControlService,
+    CollectionPolicy,
+    ControlledMetadataCollector,
+)
+from contx.collectors import Collector
 from contx.collectors.macos import ActiveApplicationCollector
 from contx.collectors.synthetic import SyntheticCollector
 from contx.db import (
@@ -26,7 +35,12 @@ from contx.memory_store import (
     resolve_optmem_executable,
 )
 from contx.memory_worker import ThresholdMemoryWorker
-from contx.models import SystemClock, UuidIdentifierSource
+from contx.models import (
+    CollectionControl,
+    ExclusionRuleType,
+    SystemClock,
+    UuidIdentifierSource,
+)
 from contx.settings import (
     initialize_runtime_paths,
     load_settings,
@@ -38,6 +52,8 @@ app = typer.Typer(
     help="Local-first personal context memory for AI agents.",
     no_args_is_help=True,
 )
+exclusions_app = typer.Typer(help="Manage pre-capture exclusion rules.")
+app.add_typer(exclusions_app, name="exclusions")
 
 
 class RunSource(StrEnum):
@@ -66,13 +82,19 @@ def root(
 @app.command("init")
 def initialize() -> None:
     """Create private local runtime paths without enabling collection."""
+    engine: Engine | None = None
     try:
         paths = resolve_runtime_paths()
         initialize_runtime_paths(paths)
         load_settings(paths)
         revision = upgrade_database(paths.database_file)
+        engine = create_database_engine(paths.database_file)
+        CollectionControlService(engine=engine, clock=SystemClock()).initialize()
     except ContxError as error:
         _abort(error)
+    finally:
+        if engine is not None:
+            engine.dispose()
     typer.echo(
         f"CONTX initialized at database revision {revision}; "
         "background collection is disabled."
@@ -82,13 +104,23 @@ def initialize() -> None:
 @app.command()
 def status() -> None:
     """Show local initialization and safety state."""
+    engine: Engine | None = None
+    control: CollectionControl | None = None
     try:
         paths = resolve_runtime_paths()
         settings = load_settings(paths)
         current_revision = current_database_revision(paths.database_file)
         head_revision = head_database_revision()
+        if current_revision == head_revision:
+            engine = create_database_engine(paths.database_file)
+            controls = CollectionControlService(engine=engine, clock=SystemClock())
+            controls.initialize()
+            control = controls.control()
     except ContxError as error:
         _abort(error)
+    finally:
+        if engine is not None:
+            engine.dispose()
 
     config_state = "present" if paths.config_file.is_file() else "missing"
     database_state = "present" if paths.database_file.is_file() else "missing"
@@ -114,6 +146,14 @@ def status() -> None:
         "window titles: "
         + ("enabled" if settings.collection.window_titles_enabled else "disabled")
     )
+    collection_state = (
+        "unavailable"
+        if control is None
+        else ("paused" if control.is_paused(at=SystemClock().now()) else "active")
+    )
+    typer.echo(f"collection: {collection_state}")
+    if control is not None and control.pause_until is not None:
+        typer.echo(f"pause until: {control.pause_until.isoformat()}")
 
 
 @app.command("run-once")
@@ -128,17 +168,38 @@ def run_once(
     try:
         paths = resolve_runtime_paths()
         initialize_runtime_paths(paths)
-        load_settings(paths)
+        settings = load_settings(paths)
         upgrade_database(paths.database_file)
         engine = create_database_engine(paths.database_file)
         memory_store = _build_memory_store(paths.memory)
         clock = SystemClock()
         identifiers = UuidIdentifierSource()
-        collector = (
-            SyntheticCollector.default(clock=clock, identifiers=identifiers)
+        controls = CollectionControlService(engine=engine, clock=clock)
+        controls.initialize()
+        retention = timedelta(hours=settings.collection.raw_retention_hours)
+        collector: Collector = (
+            SyntheticCollector.default(
+                clock=clock,
+                identifiers=identifiers,
+                retention=retention,
+            )
             if source is RunSource.SYNTHETIC
-            else ActiveApplicationCollector(clock=clock, identifiers=identifiers)
+            else ActiveApplicationCollector(
+                clock=clock,
+                identifiers=identifiers,
+                retention=retention,
+            )
         )
+        if source is RunSource.ACTIVE_APP:
+            collector = ControlledMetadataCollector(
+                collector,
+                controls=controls,
+                policy=CollectionPolicy(),
+                clock=clock,
+                identifiers=identifiers,
+                retention=retention,
+                retain_excluded_activity=(settings.collection.retain_excluded_activity),
+            )
         result = PipelineService(
             engine=engine,
             event_builder=VerticalSliceEventBuilder(
@@ -169,6 +230,118 @@ def run_once(
 
 
 @app.command()
+def pause(
+    duration: Annotated[
+        str | None,
+        typer.Option(
+            "--for",
+            help="Optional duration such as 15m, 2h, or 1d; omit for indefinite.",
+        ),
+    ] = None,
+) -> None:
+    """Pause real collection immediately."""
+    engine: Engine | None = None
+    try:
+        engine, controls = _open_collection_controls()
+        parsed = None if duration is None else _parse_duration(duration)
+        control = controls.pause(duration=parsed)
+    except ContxError as error:
+        _abort(error)
+    finally:
+        if engine is not None:
+            engine.dispose()
+    if control.pause_until is None:
+        typer.echo("collection: paused indefinitely")
+    else:
+        typer.echo(f"collection: paused until {control.pause_until.isoformat()}")
+
+
+@app.command()
+def resume() -> None:
+    """Resume collection after an explicit pause."""
+    engine: Engine | None = None
+    try:
+        engine, controls = _open_collection_controls()
+        controls.resume()
+    except ContxError as error:
+        _abort(error)
+    finally:
+        if engine is not None:
+            engine.dispose()
+    typer.echo("collection: active")
+
+
+@exclusions_app.command("list")
+def list_exclusions() -> None:
+    """List built-in and user exclusion rules."""
+    engine: Engine | None = None
+    try:
+        engine, controls = _open_collection_controls()
+        rules = controls.rules()
+    except ContxError as error:
+        _abort(error)
+    finally:
+        if engine is not None:
+            engine.dispose()
+    for rule in rules:
+        state = "enabled" if rule.enabled else "disabled"
+        origin = "built-in" if rule.built_in else "user"
+        typer.echo(f"{rule.id} {rule.rule_type.value} {state} {origin} {rule.pattern}")
+
+
+@exclusions_app.command("add")
+def add_exclusion(
+    pattern: Annotated[str, typer.Argument(help="Exact value or contained text.")],
+    rule_type: Annotated[
+        ExclusionRuleType,
+        typer.Option("--type", help="Metadata field matched before capture."),
+    ] = ExclusionRuleType.APP_BUNDLE_ID,
+) -> None:
+    """Add one user-controlled exclusion rule."""
+    engine: Engine | None = None
+    try:
+        engine, controls = _open_collection_controls()
+        rule = controls.add_rule(
+            rule_id=UuidIdentifierSource().new(),
+            rule_type=rule_type,
+            pattern=pattern,
+        )
+    except ContxError as error:
+        _abort(error)
+    finally:
+        if engine is not None:
+            engine.dispose()
+    typer.echo(f"exclusion added: {rule.id}")
+
+
+@exclusions_app.command("enable")
+def enable_exclusion(rule_id: UUID) -> None:
+    """Enable an exclusion rule."""
+    _set_exclusion_enabled(rule_id, enabled=True)
+
+
+@exclusions_app.command("disable")
+def disable_exclusion(rule_id: UUID) -> None:
+    """Disable an exclusion rule without deleting it."""
+    _set_exclusion_enabled(rule_id, enabled=False)
+
+
+@exclusions_app.command("delete")
+def delete_exclusion(rule_id: UUID) -> None:
+    """Delete a user rule; built-in rules can only be disabled."""
+    engine: Engine | None = None
+    try:
+        engine, controls = _open_collection_controls()
+        controls.delete_rule(rule_id)
+    except ContxError as error:
+        _abort(error)
+    finally:
+        if engine is not None:
+            engine.dispose()
+    typer.echo(f"exclusion deleted: {rule_id}")
+
+
+@app.command()
 def wake(
     part: Annotated[int, typer.Option(min=1, help="Context page to read.")] = 1,
     snapshot: Annotated[
@@ -191,6 +364,51 @@ def _build_memory_store(memory_directory: Path) -> MemoryStore:
         executable=resolve_optmem_executable(),
         memory_directory=memory_directory,
     )
+
+
+def _open_collection_controls() -> tuple[Engine, CollectionControlService]:
+    paths = resolve_runtime_paths()
+    initialize_runtime_paths(paths)
+    load_settings(paths)
+    upgrade_database(paths.database_file)
+    engine = create_database_engine(paths.database_file)
+    controls = CollectionControlService(engine=engine, clock=SystemClock())
+    try:
+        controls.initialize()
+    except Exception:
+        engine.dispose()
+        raise
+    return engine, controls
+
+
+def _set_exclusion_enabled(rule_id: UUID, *, enabled: bool) -> None:
+    engine: Engine | None = None
+    try:
+        engine, controls = _open_collection_controls()
+        controls.set_rule_enabled(rule_id, enabled=enabled)
+    except ContxError as error:
+        _abort(error)
+    finally:
+        if engine is not None:
+            engine.dispose()
+    state = "enabled" if enabled else "disabled"
+    typer.echo(f"exclusion {state}: {rule_id}")
+
+
+def _parse_duration(value: str) -> timedelta:
+    match = re.fullmatch(r"([1-9]\d*)([mhd])", value.strip().lower())
+    if match is None:
+        raise typer.BadParameter("duration must use <number>m, <number>h, or <number>d")
+    amount = int(match.group(1))
+    unit = match.group(2)
+    duration = {
+        "m": timedelta(minutes=amount),
+        "h": timedelta(hours=amount),
+        "d": timedelta(days=amount),
+    }[unit]
+    if duration > timedelta(days=30):
+        raise typer.BadParameter("pause duration must not exceed 30 days")
+    return duration
 
 
 def _abort(error: ContxError) -> Never:

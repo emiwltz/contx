@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from importlib.resources import files
 from pathlib import Path
 
@@ -37,10 +38,14 @@ class SyntheticCollector:
         *,
         clock: Clock,
         identifiers: IdentifierSource,
+        retention: timedelta = timedelta(hours=48),
     ) -> None:
+        if not timedelta(0) < retention <= timedelta(hours=48):
+            raise ValueError("raw retention must be between zero and 48 hours")
         self._fixture_path = fixture_path
         self._clock = clock
         self._identifiers = identifiers
+        self._retention = retention
 
     @classmethod
     def default(
@@ -48,11 +53,17 @@ class SyntheticCollector:
         *,
         clock: Clock,
         identifiers: IdentifierSource,
+        retention: timedelta = timedelta(hours=48),
     ) -> SyntheticCollector:
         fixture = files("contx.collectors").joinpath(
             "fixtures/synthetic_project_activity.json"
         )
-        return cls(Path(str(fixture)), clock=clock, identifiers=identifiers)
+        return cls(
+            Path(str(fixture)),
+            clock=clock,
+            identifiers=identifiers,
+            retention=retention,
+        )
 
     def collect(self) -> tuple[Observation, ...]:
         fixture = _Fixture.model_validate_json(
@@ -82,6 +93,7 @@ class SyntheticCollector:
                     ended_at=ended_at,
                     app_name=item.app_name,
                     app_bundle_id=item.app_bundle_id,
+                    expires_at=captured_at + self._retention,
                     created_at=created_at,
                 )
             )

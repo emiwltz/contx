@@ -22,6 +22,10 @@ DEFAULT_CONFIG = """config_version = 1
 raw_retention_hours = 48
 window_titles_enabled = false
 background_collection_enabled = false
+retain_excluded_activity = false
+poll_interval_seconds = 1.0
+idle_threshold_seconds = 300
+screenshots_enabled = false
 """
 
 

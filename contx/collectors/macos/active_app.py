@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import timedelta
 from importlib import import_module
 from typing import Protocol, cast
 
@@ -30,10 +31,14 @@ class ActiveApplicationCollector:
         clock: Clock,
         identifiers: IdentifierSource,
         workspace: Workspace | None = None,
+        retention: timedelta = timedelta(hours=48),
     ) -> None:
+        if not timedelta(0) < retention <= timedelta(hours=48):
+            raise ValueError("raw retention must be between zero and 48 hours")
         self._clock = clock
         self._identifiers = identifiers
         self._workspace = workspace
+        self._retention = retention
 
     def collect(self) -> tuple[Observation, ...]:
         workspace = self._workspace or _load_workspace()
@@ -77,6 +82,7 @@ class ActiveApplicationCollector:
                 app_bundle_id=bundle_id,
                 window_title=None,
                 artifact_path=None,
+                expires_at=captured_at + self._retention,
                 created_at=captured_at,
             ),
         )

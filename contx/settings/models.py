@@ -7,7 +7,7 @@ import stat
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -25,7 +25,11 @@ class CollectionSettings(BaseModel):
 
     raw_retention_hours: int = Field(default=48, ge=1, le=48)
     window_titles_enabled: bool = False
-    background_collection_enabled: Literal[False] = False
+    background_collection_enabled: bool = False
+    retain_excluded_activity: bool = False
+    poll_interval_seconds: float = Field(default=1.0, ge=0.25, le=10.0)
+    idle_threshold_seconds: int = Field(default=300, ge=30, le=3600)
+    screenshots_enabled: bool = False
 
 
 class AppSettings(BaseModel):
@@ -33,7 +37,7 @@ class AppSettings(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    config_version: Literal[1] = 1
+    config_version: int = Field(default=1, ge=1, le=1)
     collection: CollectionSettings = Field(default_factory=CollectionSettings)
 
 

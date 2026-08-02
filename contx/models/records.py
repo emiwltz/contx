@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any, Self
 from uuid import UUID
@@ -15,12 +15,33 @@ from contx.models.common import require_aware_utc
 class SourceType(StrEnum):
     SYNTHETIC = "synthetic"
     ACTIVE_APP = "active_app"
+    SYSTEM_STATE = "system_state"
+    EXCLUDED_ACTIVITY = "excluded_activity"
+
+
+class ActivityState(StrEnum):
+    ACTIVE = "active"
+    IDLE = "idle"
+    LOCKED = "locked"
+    ASLEEP = "asleep"
 
 
 class ObservationStatus(StrEnum):
     COLLECTED = "collected"
     PROCESSED = "processed"
     REJECTED = "rejected"
+    PURGED = "purged"
+
+
+class ExclusionRuleType(StrEnum):
+    APP_BUNDLE_ID = "app_bundle_id"
+    APP_NAME_CONTAINS = "app_name_contains"
+    WINDOW_TITLE_CONTAINS = "window_title_contains"
+    SITUATION = "situation"
+
+
+class ExclusionScope(StrEnum):
+    ALL = "all"
 
 
 class EpistemicStatus(StrEnum):
@@ -66,6 +87,7 @@ class Observation(DomainRecord):
     id: UUID
     idempotency_key: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]+$")
     source_type: SourceType
+    activity_state: ActivityState = ActivityState.ACTIVE
     captured_at: datetime
     started_at: datetime | None = None
     ended_at: datetime | None = None
@@ -78,12 +100,12 @@ class Observation(DomainRecord):
     excluded: bool = False
     exclusion_reason: str | None = Field(default=None, max_length=255)
     processing_status: ObservationStatus = ObservationStatus.COLLECTED
-    expires_at: datetime | None = None
+    expires_at: datetime
     created_at: datetime
 
     _utc_timestamps = field_validator(
         "captured_at", "started_at", "ended_at", "expires_at", "created_at"
-    )(lambda value: None if value is None else require_aware_utc(value))
+    )(require_aware_utc)
 
     @model_validator(mode="after")
     def validate_observation(self) -> Self:
@@ -93,7 +115,84 @@ class Observation(DomainRecord):
             raise ValueError(
                 "excluded observations require exactly one exclusion reason"
             )
+        if self.expires_at <= self.captured_at:
+            raise ValueError("expires_at must be after captured_at")
+        if self.expires_at - self.captured_at > timedelta(hours=48):
+            raise ValueError("raw observation retention must not exceed 48 hours")
+        if self.processing_status is ObservationStatus.PURGED and any(
+            value is not None
+            for value in (
+                self.app_name,
+                self.app_bundle_id,
+                self.window_title,
+                self.artifact_path,
+                self.content_hash,
+                self.perceptual_hash,
+            )
+        ):
+            raise ValueError("purged observations must not retain raw content")
         return self
+
+
+class ExclusionRule(DomainRecord):
+    id: UUID
+    rule_type: ExclusionRuleType
+    pattern: str = Field(min_length=1, max_length=255)
+    scope: ExclusionScope = ExclusionScope.ALL
+    enabled: bool = True
+    built_in: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+    _utc_timestamps = field_validator("created_at", "updated_at")(require_aware_utc)
+
+    @field_validator("pattern")
+    @classmethod
+    def validate_pattern(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized or any(character in normalized for character in "\r\n"):
+            raise ValueError("exclusion patterns must be one non-empty line")
+        return normalized
+
+
+class CollectionControl(DomainRecord):
+    paused_at: datetime | None = None
+    pause_until: datetime | None = None
+    updated_at: datetime
+
+    _utc_timestamps = field_validator("paused_at", "pause_until", "updated_at")(
+        lambda value: None if value is None else require_aware_utc(value)
+    )
+
+    @model_validator(mode="after")
+    def validate_pause(self) -> Self:
+        if self.pause_until is not None and self.paused_at is None:
+            raise ValueError("pause_until requires paused_at")
+        if (
+            self.paused_at is not None
+            and self.pause_until is not None
+            and self.pause_until <= self.paused_at
+        ):
+            raise ValueError("pause_until must be after paused_at")
+        return self
+
+    def is_paused(self, *, at: datetime) -> bool:
+        current = require_aware_utc(at)
+        return self.paused_at is not None and (
+            self.pause_until is None or current < self.pause_until
+        )
+
+    def pause(self, *, at: datetime, until: datetime | None = None) -> Self:
+        paused_at = require_aware_utc(at)
+        return type(self)(
+            paused_at=paused_at,
+            pause_until=None if until is None else require_aware_utc(until),
+            updated_at=paused_at,
+        )
+
+    def resume(self, *, at: datetime) -> Self:
+        resumed_at = require_aware_utc(at)
+        return type(self)(updated_at=resumed_at)
 
 
 class Event(DomainRecord):

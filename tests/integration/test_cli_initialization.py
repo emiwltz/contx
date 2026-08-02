@@ -55,3 +55,44 @@ def test_run_once_synthetic_uses_the_initialized_runtime(
     assert wake.exit_code == 0
     assert "Resume CONTX" in wake.stdout
     assert wake.stdout.endswith("You are awake.\n")
+
+
+def test_pause_blocks_live_source_before_macos_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    environment = {RUNTIME_ROOT_ENV: str(tmp_path)}
+    memory = RecordingMemoryStore()
+    monkeypatch.setattr(cli_module, "_build_memory_store", lambda _path: memory)
+
+    paused = runner.invoke(app, ["pause", "--for", "15m"], env=environment)
+    status = runner.invoke(app, ["status"], env=environment)
+    run = runner.invoke(app, ["run-once", "--source", "active-app"], env=environment)
+    resumed = runner.invoke(app, ["resume"], env=environment)
+
+    assert paused.exit_code == 0
+    assert "collection: paused until" in paused.stdout
+    assert "collection: paused" in status.stdout
+    assert run.exit_code == 0
+    assert "observations: 0" in run.stdout
+    assert resumed.stdout == "collection: active\n"
+
+
+def test_user_exclusion_can_be_added_and_listed(tmp_path: Path) -> None:
+    environment = {RUNTIME_ROOT_ENV: str(tmp_path)}
+
+    added = runner.invoke(
+        app,
+        [
+            "exclusions",
+            "add",
+            "com.example.private",
+            "--type",
+            "app_bundle_id",
+        ],
+        env=environment,
+    )
+    listed = runner.invoke(app, ["exclusions", "list"], env=environment)
+
+    assert added.exit_code == 0
+    assert listed.exit_code == 0
+    assert "app_bundle_id enabled user com.example.private" in listed.stdout

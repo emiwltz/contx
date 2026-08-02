@@ -1,9 +1,14 @@
 """Typed CONTX domain records."""
 
 from contx.models.records import (
+    ActivityState,
     CandidateStatus,
+    CollectionControl,
     EpistemicStatus,
     Event,
+    ExclusionRule,
+    ExclusionRuleType,
+    ExclusionScope,
     MemoryCandidate,
     MemoryLink,
     MemoryLinkStatus,
@@ -23,10 +28,15 @@ from contx.models.sources import (
 )
 
 __all__ = [
+    "ActivityState",
     "CandidateStatus",
     "Clock",
+    "CollectionControl",
     "EpistemicStatus",
     "Event",
+    "ExclusionRule",
+    "ExclusionRuleType",
+    "ExclusionScope",
     "IdentifierSource",
     "MemoryCandidate",
     "MemoryLink",

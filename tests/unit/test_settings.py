@@ -27,6 +27,8 @@ def test_defaults_are_safe(tmp_path: Path) -> None:
     assert settings.collection.raw_retention_hours == 48
     assert settings.collection.window_titles_enabled is False
     assert settings.collection.background_collection_enabled is False
+    assert settings.collection.retain_excluded_activity is False
+    assert settings.collection.screenshots_enabled is False
 
 
 def test_environment_overrides_config(tmp_path: Path) -> None:
@@ -67,7 +69,9 @@ def test_retention_cannot_exceed_48_hours(tmp_path: Path) -> None:
         load_settings(paths, {RAW_RETENTION_ENV: "49"})
 
 
-def test_background_collection_cannot_be_enabled_yet(tmp_path: Path) -> None:
+def test_collection_controls_can_be_configured_without_enabling_screenshots(
+    tmp_path: Path,
+) -> None:
     paths = _initialized_paths(tmp_path)
     paths.config_file.write_text(
         """config_version = 1
@@ -79,8 +83,10 @@ background_collection_enabled = true
         encoding="utf-8",
     )
 
-    with pytest.raises(ConfigurationError, match="background_collection_enabled"):
-        load_settings(paths, {})
+    settings = load_settings(paths, {})
+
+    assert settings.collection.background_collection_enabled
+    assert not settings.collection.screenshots_enabled
 
 
 def test_broad_config_permissions_are_rejected(tmp_path: Path) -> None:
