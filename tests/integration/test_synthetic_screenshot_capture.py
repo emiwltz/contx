@@ -94,6 +94,33 @@ def test_authorized_synthetic_capture_is_private_bounded_and_replay_safe(
     assert source.calls == 2
 
 
+def test_later_identical_pixels_are_discarded_without_another_artifact(
+    tmp_path: Path,
+) -> None:
+    source = RecordingScreenshotSource()
+    service = _service(tmp_path, source)
+    control = CollectionControl(updated_at=NOW)
+
+    first = service.consider(
+        _sample(),
+        control=control,
+        rules=(),
+        manual_requested=True,
+    )
+    duplicate = service.consider(
+        _sample(at=NOW + timedelta(seconds=20)),
+        control=control,
+        rules=(),
+        manual_requested=True,
+    )
+
+    assert first.observation is not None
+    assert duplicate.observation is None
+    assert duplicate.discard_reason == "duplicate_content"
+    assert source.calls == 2
+    assert len(tuple((tmp_path / "raw").glob("*.png"))) == 1
+
+
 def test_synthetic_capture_purges_through_observation_tombstone(
     tmp_path: Path,
 ) -> None:
@@ -147,9 +174,13 @@ def _service(
     )
 
 
-def _sample(*, bundle: str = "com.example.editor") -> ActivitySample:
+def _sample(
+    *,
+    bundle: str = "com.example.editor",
+    at: datetime = NOW,
+) -> ActivitySample:
     return ActivitySample(
-        observed_at=NOW,
+        observed_at=at,
         activity_state=ActivityState.ACTIVE,
         app_name="Synthetic Editor",
         app_bundle_id=bundle,

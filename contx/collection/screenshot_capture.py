@@ -36,6 +36,7 @@ class ScreenshotSource(Protocol):
 class ScreenshotCaptureResult:
     decision: ScreenshotDecision
     observation: Observation | None = None
+    discard_reason: str | None = None
 
 
 class SelectiveScreenshotService:
@@ -57,6 +58,8 @@ class SelectiveScreenshotService:
         self._retention = retention
         self._previous_sample: ActivitySample | None = None
         self._last_capture_at: datetime | None = None
+        self._last_content_hash: str | None = None
+        self._last_observation: Observation | None = None
 
     def consider(
         self,
@@ -101,6 +104,23 @@ class SelectiveScreenshotService:
             decision.trigger,
             content_hash,
         )
+        if (
+            self._last_observation is not None
+            and self._last_observation.idempotency_key == idempotency_key
+        ):
+            self._previous_sample = sample
+            self._last_capture_at = sample.observed_at
+            return ScreenshotCaptureResult(
+                decision=decision,
+                observation=self._last_observation,
+            )
+        if self._last_content_hash == content_hash:
+            self._previous_sample = sample
+            self._last_capture_at = sample.observed_at
+            return ScreenshotCaptureResult(
+                decision=decision,
+                discard_reason="duplicate_content",
+            )
         observation_id = uuid5(
             NAMESPACE_URL,
             f"contx:screenshot:{idempotency_key}",
@@ -130,6 +150,8 @@ class SelectiveScreenshotService:
         )
         self._previous_sample = sample
         self._last_capture_at = sample.observed_at
+        self._last_content_hash = content_hash
+        self._last_observation = observation
         return ScreenshotCaptureResult(
             decision=decision,
             observation=observation,
