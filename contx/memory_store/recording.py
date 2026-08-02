@@ -47,10 +47,11 @@ class RecordingMemoryStore:
         lines = tuple(
             f"#{index} 2026-08-02 {entry}" for index, entry in enumerate(self._entries)
         )
-        content = "\n".join((*lines, "You are awake.")) + "\n"
+        content = "" if not lines else "\n".join(lines) + "\n"
         return MemoryWake(
             content=content,
             complete=True,
+            technical_status="You are awake.\n",
             snapshot=len(self._entries),
         )
 

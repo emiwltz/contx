@@ -25,6 +25,11 @@ from contx.application.memory_lifecycle import (
     MemoryPromotionResult,
     MemoryPromotionService,
 )
+from contx.application.memory_maintenance import (
+    MEMORY_MAINTENANCE_VERSION,
+    MemoryMaintenanceResult,
+    MemoryMaintenanceService,
+)
 from contx.application.pattern_analysis import (
     CandidateEvaluationResult,
     CandidateEvaluationService,
@@ -48,6 +53,9 @@ __all__ = [
     "LocalModelProcessingResult",
     "LocalModelProcessingService",
     "MEMORY_PROMOTION_VERSION",
+    "MEMORY_MAINTENANCE_VERSION",
+    "MemoryMaintenanceResult",
+    "MemoryMaintenanceService",
     "MemoryPromotionResult",
     "MemoryPromotionService",
     "LocalModelEventResult",

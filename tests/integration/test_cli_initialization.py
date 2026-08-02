@@ -63,7 +63,11 @@ def test_run_once_synthetic_uses_the_initialized_runtime(
 ) -> None:
     environment = {RUNTIME_ROOT_ENV: str(tmp_path)}
     memory = RecordingMemoryStore()
-    monkeypatch.setattr(cli_module, "_build_memory_store", lambda _path: memory)
+    monkeypatch.setattr(
+        cli_module,
+        "_build_memory_store",
+        lambda _path, **_kwargs: memory,
+    )
 
     result = runner.invoke(app, ["run-once", "--source", "synthetic"], env=environment)
     wake = runner.invoke(app, ["wake"], env=environment)
@@ -77,7 +81,7 @@ def test_run_once_synthetic_uses_the_initialized_runtime(
     assert "stored memories: 1" in result.stdout
     assert wake.exit_code == 0
     assert "Resume CONTX" in wake.stdout
-    assert wake.stdout.endswith("You are awake.\n")
+    assert wake.stdout.endswith("multi-day gap.\n")
 
 
 def test_pause_blocks_live_source_before_macos_access(
@@ -85,7 +89,11 @@ def test_pause_blocks_live_source_before_macos_access(
 ) -> None:
     environment = {RUNTIME_ROOT_ENV: str(tmp_path)}
     memory = RecordingMemoryStore()
-    monkeypatch.setattr(cli_module, "_build_memory_store", lambda _path: memory)
+    monkeypatch.setattr(
+        cli_module,
+        "_build_memory_store",
+        lambda _path, **_kwargs: memory,
+    )
 
     paused = runner.invoke(app, ["pause", "--for", "15m"], env=environment)
     status = runner.invoke(app, ["status"], env=environment)

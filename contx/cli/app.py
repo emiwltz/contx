@@ -16,6 +16,7 @@ from contx.application import (
     EventCorrectionService,
     LocalModelEventService,
     LocalModelProcessingService,
+    MemoryMaintenanceService,
     PipelineService,
     RawPurgeService,
     correction_content,
@@ -56,6 +57,7 @@ from contx.events import (
 from contx.events.rules import VerticalSliceEventBuilder
 from contx.memory_store import (
     MemoryStore,
+    OllamaMemoryCompressor,
     OptMemAdapter,
     resolve_optmem_executable,
 )
@@ -89,9 +91,11 @@ app = typer.Typer(
 exclusions_app = typer.Typer(help="Manage pre-capture exclusion rules.")
 model_app = typer.Typer(help="Inspect the mandatory local multimodal model.")
 timeline_app = typer.Typer(help="Build, inspect, and correct activity timelines.")
+memory_app = typer.Typer(help="Inspect and maintain final semantic memory.")
 app.add_typer(exclusions_app, name="exclusions")
 app.add_typer(model_app, name="model")
 app.add_typer(timeline_app, name="timeline")
+app.add_typer(memory_app, name="memory")
 
 
 class RunSource(StrEnum):
@@ -493,7 +497,10 @@ def run_once(
         settings = load_settings(paths)
         upgrade_database(paths.database_file)
         engine = create_database_engine(paths.database_file)
-        memory_store = _build_memory_store(paths.memory)
+        memory_store = _build_memory_store(
+            paths.memory,
+            wake_budget_bytes=settings.memory.wake_budget_bytes,
+        )
         clock = SystemClock()
         identifiers = UuidIdentifierSource()
         controls = CollectionControlService(engine=engine, clock=clock)
@@ -721,17 +728,150 @@ def wake(
     """Print semantic memory context directly from MemoryStore."""
     try:
         paths = resolve_runtime_paths()
-        memory = _build_memory_store(paths.memory)
+        settings = load_settings(paths)
+        memory = _build_memory_store(
+            paths.memory,
+            wake_budget_bytes=settings.memory.wake_budget_bytes,
+        )
         result = memory.wake(part=part, snapshot=snapshot)
     except ContxError as error:
         _abort(error)
-    typer.echo(result.content, nl=False)
+    if result.content:
+        typer.echo(result.content, nl=False)
+    if result.next_part is not None and result.snapshot is not None:
+        typer.echo(
+            "Memory context continues; run "
+            f"contx wake --part {result.next_part} --snapshot {result.snapshot}",
+            err=True,
+        )
+        raise typer.Exit(code=3)
+    if not result.complete:
+        typer.echo(
+            "Memory context is unavailable until local compression completes; "
+            "run contx memory maintain, then retry contx wake.",
+            err=True,
+        )
+        raise typer.Exit(code=3)
+    if result.maintenance_required:
+        typer.echo(
+            "Memory context is complete; additional local compression is pending. "
+            "Run contx memory maintain.",
+            err=True,
+        )
 
 
-def _build_memory_store(memory_directory: Path) -> MemoryStore:
+@app.command()
+def recall(pattern: str) -> None:
+    """Search final memory directly with an OptMem regular expression."""
+    try:
+        memory = _configured_memory_store()
+        result = memory.recall(pattern)
+    except ContxError as error:
+        _abort(error)
+    typer.echo(result, nl=False)
+
+
+@app.command()
+def zoom(block: str) -> None:
+    """Open one OptMem summary node into its two direct children."""
+    try:
+        memory = _configured_memory_store()
+        result = memory.zoom(block)
+    except ContxError as error:
+        _abort(error)
+    typer.echo(result, nl=False)
+
+
+@memory_app.command("maintain")
+def maintain_memory() -> None:
+    """Run a bounded local-LLM compression cycle without network access."""
+    engine: Engine | None = None
+    try:
+        paths = resolve_runtime_paths()
+        initialize_runtime_paths(paths)
+        settings = load_settings(paths)
+        upgrade_database(paths.database_file)
+        engine = create_database_engine(paths.database_file)
+        result = MemoryMaintenanceService(
+            engine=engine,
+            memory_store=_build_memory_store(
+                paths.memory,
+                wake_budget_bytes=settings.memory.wake_budget_bytes,
+            ),
+            compressor=OllamaMemoryCompressor(
+                model=settings.model.model_name,
+                endpoint=settings.model.endpoint,
+                timeout_seconds=settings.model.timeout_seconds,
+                keep_alive=settings.model.keep_alive,
+                context_tokens=settings.model.context_tokens,
+            ),
+            clock=SystemClock(),
+            identifiers=UuidIdentifierSource(),
+            max_compressions=settings.memory.max_compressions_per_cycle,
+        ).run()
+    except ContxError as error:
+        _abort(error)
+    finally:
+        if engine is not None:
+            engine.dispose()
+    typer.echo(f"run: {result.run.status.value}")
+    typer.echo(f"compressions completed: {result.maintenance.completed_compressions}")
+    typer.echo(
+        "maintenance: "
+        + ("complete" if result.maintenance.complete else "more work pending")
+    )
+
+
+@memory_app.command("invalidate-summary")
+def invalidate_memory_summary(block: str) -> None:
+    """Drop one incorrect summary so local maintenance can rebuild it."""
+    try:
+        memory = _configured_memory_store()
+        memory.invalidate_summary(block)
+    except ContxError as error:
+        _abort(error)
+    typer.echo(f"summary invalidated: {block}")
+    typer.echo("run contx memory maintain to rebuild affected summaries")
+
+
+@app.command("instructions")
+def agent_instructions() -> None:
+    """Print the stable shell contract shared by Codex and other agents."""
+    typer.echo(
+        """## CONTX memory
+
+At the start of every primary-agent session, run `contx wake` before using
+remembered personal context. Its stdout is the semantic memory context. If it
+exits with code 3, follow the continuation or maintenance instruction on
+stderr, then retry until the command completes.
+
+Use `contx recall '<regex>'` to search exact memory text and `contx zoom
+<lo>-<hi>` to navigate a summary node. Never call OptMem directly and never
+write to its files. Agents may only submit proposals through CONTX validation;
+they must not append final memory themselves. Subagents must not run CONTX
+memory commands or submit proposals; the primary agent must adopt and submit a
+supported conclusion itself."""
+    )
+
+
+def _build_memory_store(
+    memory_directory: Path,
+    *,
+    wake_budget_bytes: int = 20_000,
+) -> MemoryStore:
     return OptMemAdapter(
         executable=resolve_optmem_executable(),
         memory_directory=memory_directory,
+        wake_budget_bytes=wake_budget_bytes,
+    )
+
+
+def _configured_memory_store() -> MemoryStore:
+    paths = resolve_runtime_paths()
+    settings = load_settings(paths)
+    return _build_memory_store(
+        paths.memory,
+        wake_budget_bytes=settings.memory.wake_budget_bytes,
     )
 
 
