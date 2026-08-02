@@ -21,6 +21,11 @@ from contx.application.local_model_processing import (
     LocalModelProcessingResult,
     LocalModelProcessingService,
 )
+from contx.application.memory_corrections import (
+    MEMORY_CORRECTION_VERSION,
+    MemoryCorrectionResult,
+    MemoryCorrectionService,
+)
 from contx.application.memory_lifecycle import (
     MEMORY_PROMOTION_VERSION,
     MemoryPromotionResult,
@@ -55,9 +60,12 @@ __all__ = [
     "LocalModelProcessingResult",
     "LocalModelProcessingService",
     "MEMORY_PROMOTION_VERSION",
+    "MEMORY_CORRECTION_VERSION",
     "MEMORY_MAINTENANCE_VERSION",
     "MemoryMaintenanceResult",
     "MemoryMaintenanceService",
+    "MemoryCorrectionResult",
+    "MemoryCorrectionService",
     "MemoryPromotionResult",
     "MemoryPromotionService",
     "LocalModelEventResult",

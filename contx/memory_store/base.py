@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Literal, Protocol
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +49,37 @@ class MemoryCompressor(Protocol):
 
     def compress(self, request: MemoryCompressionRequest) -> str:
         """Return one evidence-backed summary line for the requested block."""
+
+
+class MemoryCorrectionComposer(Protocol):
+    """Turn an explicit replacement into one autonomous correction memory."""
+
+    @property
+    def provider(self) -> Literal["ollama"]: ...
+
+    @property
+    def endpoint(self) -> str: ...
+
+    @property
+    def model(self) -> str: ...
+
+    @property
+    def model_digest(self) -> str | None: ...
+
+    @property
+    def prompt_version(self) -> str: ...
+
+    @property
+    def output_schema_version(self) -> str: ...
+
+    def compose(
+        self,
+        *,
+        original: str,
+        replacement: str,
+        max_bytes: int,
+    ) -> str:
+        """Return the corrected current fact without owning persistence."""
 
 
 class MemoryStore(Protocol):

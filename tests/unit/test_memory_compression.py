@@ -40,6 +40,10 @@ def test_compression_uses_bounded_structured_loopback_request() -> None:
     options = payload["options"]
     assert isinstance(options, dict)
     assert options["num_predict"] == 128
+    messages = payload["messages"]
+    assert isinstance(messages, list)
+    assert "Correction:" in str(messages[0])
+    assert "never turn" in str(messages[0])
     assert "private-memory-evidence" not in repr(request)
 
 

@@ -25,9 +25,12 @@ DEFAULT_MAX_COMPRESSION_PROMPT_BYTES = 16 * 1024
 
 _SYSTEM_PROMPT = """You maintain a private local memory compression tree.
 Compress only the supplied memory evidence into one autonomous line.
-Preserve facts with lasting effect, prefer a newer explicit correction over an
-older conflicting claim, drop transient detail, and invent nothing. Return only
-the required JSON object. Do not add commentary, Markdown, or identifiers."""
+Preserve facts with lasting effect and invent nothing. A newer entry beginning
+with `Correction:` is authoritative over the older claim it contradicts. Keep
+the corrected current fact and remove every contradicted fragment; never turn
+the obsolete claim into history, a transition, or a date unless the correction
+itself preserves that fact. Return only the required JSON object. Do not add
+commentary, Markdown, or identifiers."""
 
 
 class _ModelTag(BaseModel):

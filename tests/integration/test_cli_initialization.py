@@ -7,11 +7,13 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
+from sqlalchemy import select
 from typer.testing import CliRunner
 
 import contx.cli.app as cli_module
 from contx.cli.app import app
 from contx.db import create_database_engine, session_scope
+from contx.db.models import MemoryLinkModel
 from contx.db.repositories import EventCorrectionRepository, PipelineRepository
 from contx.memory_store import RecordingMemoryStore
 from contx.model_provider import (
@@ -34,6 +36,29 @@ from contx.settings import RUNTIME_ROOT_ENV, resolve_runtime_paths
 
 runner = CliRunner()
 MODEL = DEFAULT_MODEL
+
+
+class RecordingCorrectionComposer:
+    def __init__(self, correction: str) -> None:
+        self._correction = correction
+        self.calls: list[tuple[str, str, int]] = []
+
+    provider = "ollama"
+    endpoint = "http://127.0.0.1:11434"
+    model = "synthetic-local-model"
+    model_digest = "synthetic-digest"
+    prompt_version = "memory-correction-v1"
+    output_schema_version = "memory-correction-output-v1"
+
+    def compose(
+        self,
+        *,
+        original: str,
+        replacement: str,
+        max_bytes: int,
+    ) -> str:
+        self.calls.append((original, replacement, max_bytes))
+        return self._correction
 
 
 def test_init_is_idempotent_and_status_is_truthful(tmp_path: Path) -> None:
@@ -82,6 +107,57 @@ def test_run_once_synthetic_uses_the_initialized_runtime(
     assert wake.exit_code == 0
     assert "Resume CONTX" in wake.stdout
     assert wake.stdout.endswith("multi-day gap.\n")
+
+
+def test_memory_correction_cli_appends_explicit_historical_supersession(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    environment = {RUNTIME_ROOT_ENV: str(tmp_path)}
+    memory = RecordingMemoryStore()
+    composer = RecordingCorrectionComposer(
+        "Correction: CONTX now resumes locally; the earlier target is obsolete."
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "_build_memory_store",
+        lambda _path, **_kwargs: memory,
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "_build_memory_correction_composer",
+        lambda _settings: composer,
+    )
+    seeded = runner.invoke(
+        app,
+        ["run-once", "--source", "synthetic"],
+        env=environment,
+    )
+    paths = resolve_runtime_paths(environment)
+    engine = create_database_engine(paths.database_file)
+    try:
+        with session_scope(engine) as database_session:
+            original_id = UUID(
+                database_session.scalars(select(MemoryLinkModel.id)).one()
+            )
+    finally:
+        engine.dispose()
+
+    corrected = runner.invoke(
+        app,
+        ["correct", str(original_id), "CONTX now resumes locally."],
+        env=environment,
+    )
+    wake = runner.invoke(app, ["wake"], env=environment)
+
+    assert seeded.exit_code == 0
+    assert corrected.exit_code == 0
+    assert f"supersedes: {original_id}" in corrected.stdout
+    assert "replayed: no" in corrected.stdout
+    assert "memory maintenance: not required" in corrected.stdout
+    assert wake.exit_code == 0
+    assert "Correction: CONTX now resumes locally" in wake.stdout
+    assert len(composer.calls) == 1
 
 
 def test_pause_blocks_live_source_before_macos_access(

@@ -406,6 +406,12 @@ class MemoryLinkModel(Base):
     """Link durable memory identity to its accepted candidate."""
 
     __tablename__ = "memory_links"
+    __table_args__ = (
+        UniqueConstraint(
+            "supersedes_memory_id",
+            name="uq_memory_links_supersedes_memory_id",
+        ),
+    )
 
     id: Mapped[Identifier] = mapped_column(String(36), primary_key=True)
     memory_backend_id: Mapped[str] = mapped_column(String(255), unique=True)
@@ -443,6 +449,33 @@ class MemoryLinkProcessingRunModel(Base):
         ForeignKey("processing_runs.id", ondelete="RESTRICT"),
         primary_key=True,
     )
+
+
+class MemoryCorrectionBuildModel(Base):
+    """Content-free local-model provenance for one memory correction."""
+
+    __tablename__ = "memory_correction_builds"
+
+    candidate_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("memory_candidates.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    target_memory_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("memory_links.id", ondelete="RESTRICT"),
+        unique=True,
+    )
+    provider: Mapped[str] = mapped_column(String(32))
+    endpoint: Mapped[str] = mapped_column(String(255))
+    model: Mapped[str] = mapped_column(String(255))
+    model_digest: Mapped[str] = mapped_column(String(128), index=True)
+    prompt_version: Mapped[str] = mapped_column(String(64), index=True)
+    output_schema_version: Mapped[str] = mapped_column(String(64))
+    replacement_sha256: Mapped[str] = mapped_column(String(64))
+    started_at: Mapped[UtcTimestamp] = mapped_column(String(32))
+    ended_at: Mapped[UtcTimestamp] = mapped_column(String(32))
+    wall_duration_ms: Mapped[int] = mapped_column(Integer)
 
 
 class MemoryPromotionBuildModel(Base):

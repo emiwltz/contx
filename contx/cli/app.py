@@ -17,6 +17,7 @@ from contx.application import (
     EventCorrectionService,
     LocalModelEventService,
     LocalModelProcessingService,
+    MemoryCorrectionService,
     MemoryMaintenanceService,
     PipelineService,
     RawPurgeService,
@@ -57,8 +58,10 @@ from contx.events import (
 )
 from contx.events.rules import VerticalSliceEventBuilder
 from contx.memory_store import (
+    MemoryCorrectionComposer,
     MemoryStore,
     OllamaMemoryCompressor,
+    OllamaMemoryCorrectionComposer,
     OptMemAdapter,
     resolve_optmem_executable,
 )
@@ -786,6 +789,48 @@ def zoom(block: str) -> None:
 
 
 @app.command()
+def correct(
+    memory_id: Annotated[
+        UUID,
+        typer.Argument(help="Stable CONTX memory UUID to supersede."),
+    ],
+    replacement: Annotated[
+        str,
+        typer.Argument(help="User-authorized current replacement fact."),
+    ],
+) -> None:
+    """Append an explicit local-LLM correction without deleting history."""
+    engine: Engine | None = None
+    try:
+        paths = resolve_runtime_paths()
+        initialize_runtime_paths(paths)
+        settings = load_settings(paths)
+        upgrade_database(paths.database_file)
+        engine = create_database_engine(paths.database_file)
+        result = MemoryCorrectionService(
+            engine=engine,
+            memory_store=_build_memory_store(
+                paths.memory,
+                wake_budget_bytes=settings.memory.wake_budget_bytes,
+            ),
+            composer=_build_memory_correction_composer(settings.model),
+            clock=SystemClock(),
+        ).correct(memory_id=memory_id, replacement=replacement)
+    except ContxError as error:
+        _abort(error)
+    finally:
+        if engine is not None:
+            engine.dispose()
+    typer.echo(f"memory: {result.memory_link.id}")
+    typer.echo(f"supersedes: {result.superseded_memory_id}")
+    typer.echo(f"replayed: {'yes' if result.replayed else 'no'}")
+    typer.echo(
+        "memory maintenance: "
+        + ("required" if result.maintenance_required else "not required")
+    )
+
+
+@app.command()
 def propose(
     text: Annotated[str, typer.Argument(help="One proposed memory line.")],
     agent_id: Annotated[
@@ -900,13 +945,16 @@ exits with code 3, follow the continuation or maintenance instruction on
 stderr, then retry until the command completes.
 
 Use `contx recall '<regex>'` to search exact memory text and `contx zoom
-<lo>-<hi>` to navigate a summary node. Never call OptMem directly and never
-write to its files. A primary agent may use `contx propose '<one line>'
+<lo>-<hi>` to navigate historical summaries and raw entries. `wake` is
+chronological: a newer line beginning with `Correction:` supersedes the older
+claim it declares obsolete, even while both recent lines remain visible. Never
+call OptMem directly and never write to its files. A primary agent may use
+`contx propose '<one line>'
 --reference-type <event|pattern|memory> --reference <uuid>`; this records a
 proposal for CONTX validation and does not append final memory. Agents must not
-append final memory themselves. Subagents must not run CONTX memory commands or
-submit proposals; the primary agent must adopt and submit a supported
-conclusion itself."""
+append final memory themselves or run `contx correct` without an explicit user
+instruction. Subagents must not run CONTX memory commands or submit proposals;
+the primary agent must adopt and submit a supported conclusion itself."""
     )
 
 
@@ -941,6 +989,18 @@ def _build_local_model_provider(settings: ModelSettings) -> OllamaModelProvider:
         max_output_tokens=settings.max_output_tokens,
         max_image_bytes=settings.max_image_mb * 1024 * 1024,
         max_response_bytes=settings.max_response_kb * 1024,
+    )
+
+
+def _build_memory_correction_composer(
+    settings: ModelSettings,
+) -> MemoryCorrectionComposer:
+    return OllamaMemoryCorrectionComposer(
+        model=settings.model_name,
+        endpoint=settings.endpoint,
+        timeout_seconds=settings.timeout_seconds,
+        keep_alive=settings.keep_alive,
+        context_tokens=settings.context_tokens,
     )
 
 

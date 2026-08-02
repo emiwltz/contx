@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from enum import StrEnum
-from typing import Any, Self
+from typing import Any, Literal, Self
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -131,6 +131,7 @@ class PatternStatus(StrEnum):
 
 
 class MemoryLinkStatus(StrEnum):
+    PENDING = "pending"
     ACTIVE = "active"
     SUPERSEDED = "superseded"
     FORGOTTEN = "forgotten"
@@ -757,6 +758,49 @@ class MemoryPromotionBuild(DomainRecord):
     processing_run_id: UUID
     source_evaluation_run_id: UUID
     processing_version: str = Field(min_length=1, max_length=64)
+
+
+class MemoryCorrectionBuild(DomainRecord):
+    """Content-free local-model provenance for one correction candidate."""
+
+    candidate_id: UUID
+    target_memory_id: UUID
+    provider: Literal["ollama"] = "ollama"
+    endpoint: str = Field(min_length=1, max_length=255)
+    model: str = Field(min_length=1, max_length=255)
+    model_digest: str = Field(min_length=1, max_length=128)
+    prompt_version: str = Field(min_length=1, max_length=64)
+    output_schema_version: str = Field(min_length=1, max_length=64)
+    replacement_sha256: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]+$",
+    )
+    started_at: datetime
+    ended_at: datetime
+    wall_duration_ms: int = Field(ge=0)
+
+    _utc_timestamps = field_validator("started_at", "ended_at")(require_aware_utc)
+
+    @field_validator(
+        "endpoint",
+        "model",
+        "model_digest",
+        "prompt_version",
+        "output_schema_version",
+    )
+    @classmethod
+    def validate_single_line_metadata(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized or any(character in normalized for character in "\r\n"):
+            raise ValueError("memory correction metadata must be one non-empty line")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_execution_window(self) -> Self:
+        if self.started_at > self.ended_at:
+            raise ValueError("memory correction start must not follow its end")
+        return self
 
 
 class ProcessingRun(DomainRecord):

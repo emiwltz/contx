@@ -25,6 +25,7 @@ from contx.db.models import (
     EventProcessingRunModel,
     ExclusionRuleModel,
     MemoryCandidateModel,
+    MemoryCorrectionBuildModel,
     MemoryLinkModel,
     MemoryLinkProcessingRunModel,
     MemoryPromotionBuildModel,
@@ -66,6 +67,7 @@ from contx.models import (
     ExclusionRuleType,
     ExclusionScope,
     MemoryCandidate,
+    MemoryCorrectionBuild,
     MemoryLink,
     MemoryLinkStatus,
     MemoryPromotionBuild,
@@ -138,18 +140,27 @@ class PipelineRepository:
         )
         if existing is not None:
             if existing.id == str(candidate.id):
+                persisted = _candidate_from_model(existing)
+                if _candidate_identity(persisted) != _candidate_identity(candidate):
+                    raise DatabaseError("Memory candidate identity conflicts")
                 _update_candidate_state(existing, candidate)
                 self._session.flush()
                 return candidate
             return _candidate_from_model(existing)
-        source_model: type[EventModel] | type[PatternModel]
-        source_model = (
-            PatternModel if candidate.source_type == "pattern" else EventModel
-        )
+        source_model: type[EventModel] | type[PatternModel] | type[MemoryLinkModel]
+        if candidate.source_type == "pattern":
+            source_model = PatternModel
+            source_label = "pattern"
+        elif candidate.source_type == "memory_correction":
+            source_model = MemoryLinkModel
+            source_label = "memory"
+        else:
+            source_model = EventModel
+            source_label = "event"
         self._require_ids(
             source_model,
             candidate.source_ids,
-            "pattern" if candidate.source_type == "pattern" else "event",
+            source_label,
         )
         self._session.add(_candidate_to_model(candidate))
         self._session.flush()
@@ -161,7 +172,7 @@ class PipelineRepository:
                 )
                 for pattern_id in candidate.source_ids
             )
-        else:
+        elif candidate.source_type != "memory_correction":
             self._session.add_all(
                 CandidateEventModel(
                     candidate_id=str(candidate.id),
@@ -207,6 +218,14 @@ class PipelineRepository:
         model = self._session.get(MemoryLinkModel, str(memory_link_id))
         return None if model is None else _memory_link_from_model(model)
 
+    def memory_link_superseding(self, memory_link_id: UUID) -> MemoryLink | None:
+        model = self._session.scalar(
+            select(MemoryLinkModel).where(
+                MemoryLinkModel.supersedes_memory_id == str(memory_link_id)
+            )
+        )
+        return None if model is None else _memory_link_from_model(model)
+
     def save_processing_run(self, run: ProcessingRun) -> ProcessingRun:
         model = self._session.get(ProcessingRunModel, str(run.id))
         if model is None:
@@ -246,7 +265,12 @@ class PipelineRepository:
 
     def _require_ids(
         self,
-        model: type[ObservationModel] | type[EventModel] | type[PatternModel],
+        model: (
+            type[ObservationModel]
+            | type[EventModel]
+            | type[PatternModel]
+            | type[MemoryLinkModel]
+        ),
         identifiers: tuple[UUID, ...],
         label: str,
     ) -> None:
@@ -284,7 +308,12 @@ class PipelineRepository:
                 raise DatabaseError("Memory promotion decision is missing or invalid")
 
         expected_patterns = {str(item) for item in link.provenance.pattern_ids}
-        if candidate.source_type == "pattern":
+        if candidate.source_type == "memory_correction":
+            event_ids = self._validate_correction_provenance(
+                link,
+                candidate=candidate,
+            )
+        elif candidate.source_type == "pattern":
             pattern_ids = set(
                 self._session.scalars(
                     select(CandidatePatternModel.pattern_id).where(
@@ -327,6 +356,43 @@ class PipelineRepository:
         expected_observations = {str(item) for item in link.provenance.observation_ids}
         if observation_ids != expected_observations:
             raise DatabaseError("Memory provenance does not match event observations")
+
+    def _validate_correction_provenance(
+        self,
+        link: MemoryLink,
+        *,
+        candidate: MemoryCandidateModel,
+    ) -> set[str]:
+        if link.candidate_decision_id is not None:
+            raise DatabaseError("Explicit memory corrections have no worker decision")
+        if (
+            len(candidate.source_ids) != 1
+            or link.supersedes_memory_id is None
+            or candidate.source_ids[0] != str(link.supersedes_memory_id)
+        ):
+            raise DatabaseError("Memory correction target is inconsistent")
+        target = self._session.get(
+            MemoryLinkModel,
+            str(link.supersedes_memory_id),
+        )
+        if target is None or target.status != MemoryLinkStatus.ACTIVE.value:
+            raise DatabaseError("Memory correction target is not active")
+        target_candidate = self._session.get(
+            MemoryCandidateModel,
+            target.candidate_id,
+        )
+        if (
+            target_candidate is None
+            or target_candidate.sensitivity != candidate.sensitivity
+        ):
+            raise DatabaseError("Memory correction sensitivity is inconsistent")
+        target_provenance = target.provenance
+        for field in ("pattern_ids", "event_ids", "observation_ids"):
+            if set(link.provenance.model_dump(mode="json")[field]) != set(
+                target_provenance[field]
+            ):
+                raise DatabaseError("Memory correction provenance is incomplete")
+        return {str(item) for item in target_provenance["event_ids"]}
 
 
 class ModelTransformationRepository:
@@ -1421,6 +1487,120 @@ class MemoryPromotionRepository:
         return tuple(_memory_link_from_model(model) for model in models)
 
 
+class MemoryCorrectionRepository:
+    """Stage and atomically finalize one append-only memory supersession."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def stage(
+        self,
+        *,
+        candidate: MemoryCandidate,
+        link: MemoryLink,
+        build: MemoryCorrectionBuild,
+    ) -> tuple[MemoryCandidate, MemoryLink, MemoryCorrectionBuild]:
+        if (
+            candidate.status is not CandidateStatus.ACCEPTED
+            or candidate.source_type != "memory_correction"
+            or link.status is not MemoryLinkStatus.PENDING
+            or link.supersedes_memory_id is None
+            or build.candidate_id != candidate.id
+            or build.target_memory_id != link.supersedes_memory_id
+        ):
+            raise DatabaseError("Memory correction staging state is invalid")
+        pipeline = PipelineRepository(self._session)
+        existing = pipeline.memory_link_by_candidate_id(candidate.id)
+        if existing is not None:
+            persisted_candidate = pipeline.candidate_by_id(candidate.id)
+            persisted_build = self.build_by_candidate(candidate.id)
+            if (
+                persisted_candidate is None
+                or persisted_build is None
+                or existing.id != link.id
+                or persisted_build != build
+            ):
+                raise DatabaseError("Memory correction identity conflicts")
+            return persisted_candidate, existing, persisted_build
+        successor = pipeline.memory_link_superseding(link.supersedes_memory_id)
+        if successor is not None:
+            raise DatabaseError("Memory already has a pending or applied correction")
+        persisted_candidate = pipeline.save_candidate(candidate)
+        persisted_link = pipeline.save_memory_link(link)
+        self._session.add(_memory_correction_build_to_model(build))
+        self._session.flush()
+        return persisted_candidate, persisted_link, build
+
+    def build_by_candidate(
+        self,
+        candidate_id: UUID,
+    ) -> MemoryCorrectionBuild | None:
+        model = self._session.get(MemoryCorrectionBuildModel, str(candidate_id))
+        return None if model is None else _memory_correction_build_from_model(model)
+
+    def finalize(
+        self,
+        *,
+        candidate_id: UUID,
+        memory_link_id: UUID,
+        backend_id: str,
+        processed_at: datetime,
+    ) -> tuple[MemoryCandidate, MemoryLink]:
+        normalized_backend_id = backend_id.strip()
+        if (
+            not normalized_backend_id
+            or len(normalized_backend_id) > 255
+            or any(character in normalized_backend_id for character in "\r\n")
+        ):
+            raise DatabaseError("Memory correction backend identity is invalid")
+        candidate_model = self._session.get(
+            MemoryCandidateModel,
+            str(candidate_id),
+        )
+        link_model = self._session.get(MemoryLinkModel, str(memory_link_id))
+        if (
+            candidate_model is None
+            or link_model is None
+            or link_model.candidate_id != str(candidate_id)
+            or link_model.supersedes_memory_id is None
+        ):
+            raise DatabaseError("Staged memory correction is unavailable")
+        if link_model.status == MemoryLinkStatus.ACTIVE.value:
+            return (
+                _candidate_from_model(candidate_model),
+                _memory_link_from_model(link_model),
+            )
+        target_model = self._session.get(
+            MemoryLinkModel,
+            link_model.supersedes_memory_id,
+        )
+        if (
+            link_model.status != MemoryLinkStatus.PENDING.value
+            or candidate_model.status != CandidateStatus.ACCEPTED.value
+            or target_model is None
+            or target_model.status != MemoryLinkStatus.ACTIVE.value
+        ):
+            raise DatabaseError("Memory correction cannot be finalized")
+        backend_owner = self._session.scalar(
+            select(MemoryLinkModel).where(
+                MemoryLinkModel.memory_backend_id == normalized_backend_id,
+                MemoryLinkModel.id != link_model.id,
+            )
+        )
+        if backend_owner is not None:
+            raise DatabaseError("Memory correction backend identity conflicts")
+
+        stored = _candidate_from_model(candidate_model).mark_stored(
+            processed_at=processed_at
+        )
+        _update_candidate_state(candidate_model, stored)
+        link_model.memory_backend_id = normalized_backend_id
+        link_model.status = MemoryLinkStatus.ACTIVE.value
+        target_model.status = MemoryLinkStatus.SUPERSEDED.value
+        self._session.flush()
+        return stored, _memory_link_from_model(link_model)
+
+
 class AgentProposalRepository:
     """Persist agent submissions outside the final-memory write path."""
 
@@ -2032,6 +2212,46 @@ def _candidate_evaluation_build_from_model(
     )
 
 
+def _memory_correction_build_to_model(
+    record: MemoryCorrectionBuild,
+) -> MemoryCorrectionBuildModel:
+    return MemoryCorrectionBuildModel(
+        candidate_id=str(record.candidate_id),
+        target_memory_id=str(record.target_memory_id),
+        provider=record.provider,
+        endpoint=record.endpoint,
+        model=record.model,
+        model_digest=record.model_digest,
+        prompt_version=record.prompt_version,
+        output_schema_version=record.output_schema_version,
+        replacement_sha256=record.replacement_sha256,
+        started_at=format_utc(record.started_at),
+        ended_at=format_utc(record.ended_at),
+        wall_duration_ms=record.wall_duration_ms,
+    )
+
+
+def _memory_correction_build_from_model(
+    model: MemoryCorrectionBuildModel,
+) -> MemoryCorrectionBuild:
+    if model.provider != "ollama":
+        raise DatabaseError("Memory correction provider is invalid")
+    return MemoryCorrectionBuild(
+        candidate_id=UUID(model.candidate_id),
+        target_memory_id=UUID(model.target_memory_id),
+        provider="ollama",
+        endpoint=model.endpoint,
+        model=model.model,
+        model_digest=model.model_digest,
+        prompt_version=model.prompt_version,
+        output_schema_version=model.output_schema_version,
+        replacement_sha256=model.replacement_sha256,
+        started_at=parse_utc(model.started_at),
+        ended_at=parse_utc(model.ended_at),
+        wall_duration_ms=model.wall_duration_ms,
+    )
+
+
 def _memory_promotion_build_to_model(
     record: MemoryPromotionBuild,
 ) -> MemoryPromotionBuildModel:
@@ -2095,6 +2315,12 @@ def _agent_proposal_from_model(model: AgentProposalModel) -> AgentProposal:
         processed_at=(
             None if model.processed_at is None else parse_utc(model.processed_at)
         ),
+    )
+
+
+def _candidate_identity(record: MemoryCandidate) -> dict[str, object]:
+    return record.model_dump(
+        exclude={"status", "rejection_reason", "processed_at"},
     )
 
 
