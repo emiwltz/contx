@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from uuid import UUID
 
@@ -16,10 +17,18 @@ from contx.db.models import (
     ExclusionRuleModel,
     MemoryCandidateModel,
     MemoryLinkModel,
+    ModelTransformationModel,
+    ModelTransformationObservationModel,
+    ModelTransformationRunModel,
     ObservationModel,
     ProcessingRunModel,
 )
 from contx.errors import DatabaseError
+from contx.model_provider import (
+    ModelInterpretation,
+    ModelTransformation,
+    ModelTransformationStatus,
+)
 from contx.models import (
     ActivityState,
     CandidateStatus,
@@ -206,6 +215,162 @@ class PipelineRepository:
         expected_observations = {str(item) for item in link.provenance.observation_ids}
         if observation_ids != expected_observations:
             raise DatabaseError("Memory provenance does not match event observations")
+
+
+class ModelTransformationRepository:
+    """Persist replayable local-model work with source and run provenance."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def save(
+        self,
+        transformation: ModelTransformation,
+        *,
+        processing_run_id: UUID | None = None,
+    ) -> ModelTransformation:
+        existing_model = self._session.scalar(
+            select(ModelTransformationModel).where(
+                ModelTransformationModel.idempotency_key
+                == transformation.idempotency_key
+            )
+        )
+        if existing_model is None:
+            self._validate_sources(transformation)
+            self._session.add(_model_transformation_to_model(transformation))
+            self._session.flush()
+            self._session.add_all(
+                ModelTransformationObservationModel(
+                    transformation_id=str(transformation.id),
+                    observation_id=str(observation_id),
+                )
+                for observation_id in transformation.source_observation_ids
+            )
+            persisted = transformation
+        else:
+            existing = _model_transformation_from_model(existing_model)
+            if existing.id != transformation.id:
+                _require_same_transformation_identity(existing, transformation)
+                return existing
+            _validate_transformation_transition(existing, transformation)
+            _update_model_transformation(existing_model, transformation)
+            persisted = transformation
+
+        if processing_run_id is not None:
+            self._link_processing_run(persisted.id, processing_run_id)
+        elif persisted.status is not ModelTransformationStatus.PENDING:
+            raise DatabaseError(
+                "Non-pending model transformation requires a processing run"
+            )
+        self._session.flush()
+        return persisted
+
+    def by_id(self, transformation_id: UUID) -> ModelTransformation | None:
+        model = self._session.get(ModelTransformationModel, str(transformation_id))
+        return None if model is None else _model_transformation_from_model(model)
+
+    def by_idempotency_key(self, key: str) -> ModelTransformation | None:
+        model = self._session.scalar(
+            select(ModelTransformationModel).where(
+                ModelTransformationModel.idempotency_key == key
+            )
+        )
+        return None if model is None else _model_transformation_from_model(model)
+
+    def due(self, *, at: datetime, limit: int = 10) -> tuple[ModelTransformation, ...]:
+        if limit < 1:
+            raise ValueError("model transformation limit must be positive")
+        models = self._session.scalars(
+            select(ModelTransformationModel)
+            .where(
+                ModelTransformationModel.status.in_(
+                    (
+                        ModelTransformationStatus.PENDING.value,
+                        ModelTransformationStatus.FAILED.value,
+                    )
+                ),
+                ModelTransformationModel.next_attempt_at <= format_utc(at),
+            )
+            .order_by(
+                ModelTransformationModel.next_attempt_at,
+                ModelTransformationModel.created_at,
+                ModelTransformationModel.id,
+            )
+            .limit(limit)
+        )
+        return tuple(_model_transformation_from_model(model) for model in models)
+
+    def processing_run_ids(self, transformation_id: UUID) -> tuple[UUID, ...]:
+        return tuple(
+            UUID(value)
+            for value in self._session.scalars(
+                select(ModelTransformationRunModel.processing_run_id)
+                .where(
+                    ModelTransformationRunModel.transformation_id
+                    == str(transformation_id)
+                )
+                .order_by(ModelTransformationRunModel.processing_run_id)
+            )
+        )
+
+    def count(self) -> int:
+        return int(
+            self._session.scalar(
+                select(func.count()).select_from(ModelTransformationModel)
+            )
+            or 0
+        )
+
+    def _validate_sources(self, transformation: ModelTransformation) -> None:
+        expected = {str(item) for item in transformation.source_observation_ids}
+        observations = tuple(
+            self._session.scalars(
+                select(ObservationModel).where(ObservationModel.id.in_(expected))
+            )
+        )
+        if {item.id for item in observations} != expected:
+            raise DatabaseError(
+                "Cannot persist model provenance: a source observation is missing"
+            )
+        if any(
+            item.excluded
+            or item.processing_status
+            in {
+                ObservationStatus.REJECTED.value,
+                ObservationStatus.PURGED.value,
+            }
+            for item in observations
+        ):
+            raise DatabaseError(
+                "Cannot persist model work for an excluded or unavailable source"
+            )
+        screenshots = tuple(
+            item
+            for item in observations
+            if item.source_type == SourceType.SCREENSHOT.value
+        )
+        if (
+            len(screenshots) != 1
+            or screenshots[0].artifact_path is None
+            or screenshots[0].content_hash != transformation.image_sha256
+        ):
+            raise DatabaseError(
+                "Model transformation requires one matching screenshot source"
+            )
+
+    def _link_processing_run(
+        self,
+        transformation_id: UUID,
+        processing_run_id: UUID,
+    ) -> None:
+        if self._session.get(ProcessingRunModel, str(processing_run_id)) is None:
+            raise DatabaseError("Cannot link a missing model processing run")
+        identity = {
+            "transformation_id": str(transformation_id),
+            "processing_run_id": str(processing_run_id),
+        }
+        if self._session.get(ModelTransformationRunModel, identity) is None:
+            self._session.add(ModelTransformationRunModel(**identity))
 
 
 class CollectionRepository:
@@ -607,3 +772,162 @@ def _update_processing_run_model(
     model.output_count = record.output_count
     model.error_code = record.error_code
     model.error_summary = record.error_summary
+
+
+def _model_transformation_to_model(
+    record: ModelTransformation,
+) -> ModelTransformationModel:
+    model = ModelTransformationModel(id=str(record.id))
+    _update_model_transformation(model, record)
+    return model
+
+
+def _update_model_transformation(
+    model: ModelTransformationModel,
+    record: ModelTransformation,
+) -> None:
+    model.idempotency_key = record.idempotency_key
+    model.source_observation_ids = [
+        str(value) for value in record.source_observation_ids
+    ]
+    model.provider = record.provider
+    model.endpoint = record.endpoint
+    model.configured_model = record.configured_model
+    model.runtime_version = record.runtime_version
+    model.resolved_model = record.resolved_model
+    model.model_digest = record.model_digest
+    model.prompt_version = record.prompt_version
+    model.output_schema_version = record.output_schema_version
+    model.image_sha256 = record.image_sha256
+    model.status = record.status.value
+    model.interpretation = (
+        None
+        if record.interpretation is None
+        else record.interpretation.model_dump(mode="json")
+    )
+    model.sensitivity = (
+        None
+        if record.interpretation is None
+        else record.interpretation.sensitivity.value
+    )
+    model.attempt_count = record.attempt_count
+    model.started_at = (
+        None if record.started_at is None else format_utc(record.started_at)
+    )
+    model.ended_at = None if record.ended_at is None else format_utc(record.ended_at)
+    model.wall_duration_ms = record.wall_duration_ms
+    model.runtime_duration_ms = record.runtime_duration_ms
+    model.load_duration_ms = record.load_duration_ms
+    model.prompt_eval_count = record.prompt_eval_count
+    model.eval_count = record.eval_count
+    model.next_attempt_at = (
+        None if record.next_attempt_at is None else format_utc(record.next_attempt_at)
+    )
+    model.last_error_code = record.last_error_code
+    model.created_at = format_utc(record.created_at)
+    model.updated_at = format_utc(record.updated_at)
+
+
+def _model_transformation_from_model(
+    model: ModelTransformationModel,
+) -> ModelTransformation:
+    observation_ids = tuple(UUID(value) for value in model.source_observation_ids)
+    interpretation = (
+        None
+        if model.interpretation is None
+        else ModelInterpretation.model_validate_json(
+            json.dumps(model.interpretation, ensure_ascii=False),
+            strict=True,
+        )
+    )
+    return ModelTransformation.model_validate(
+        {
+            "id": UUID(model.id),
+            "idempotency_key": model.idempotency_key,
+            "source_observation_ids": observation_ids,
+            "provider": model.provider,
+            "endpoint": model.endpoint,
+            "configured_model": model.configured_model,
+            "runtime_version": model.runtime_version,
+            "resolved_model": model.resolved_model,
+            "model_digest": model.model_digest,
+            "prompt_version": model.prompt_version,
+            "output_schema_version": model.output_schema_version,
+            "image_sha256": model.image_sha256,
+            "status": ModelTransformationStatus(model.status),
+            "interpretation": interpretation,
+            "attempt_count": model.attempt_count,
+            "started_at": (
+                None if model.started_at is None else parse_utc(model.started_at)
+            ),
+            "ended_at": (None if model.ended_at is None else parse_utc(model.ended_at)),
+            "wall_duration_ms": model.wall_duration_ms,
+            "runtime_duration_ms": model.runtime_duration_ms,
+            "load_duration_ms": model.load_duration_ms,
+            "prompt_eval_count": model.prompt_eval_count,
+            "eval_count": model.eval_count,
+            "next_attempt_at": (
+                None
+                if model.next_attempt_at is None
+                else parse_utc(model.next_attempt_at)
+            ),
+            "last_error_code": model.last_error_code,
+            "created_at": parse_utc(model.created_at),
+            "updated_at": parse_utc(model.updated_at),
+        }
+    )
+
+
+def _require_same_transformation_identity(
+    existing: ModelTransformation,
+    replayed: ModelTransformation,
+) -> None:
+    if (
+        existing.idempotency_key,
+        existing.source_observation_ids,
+        existing.provider,
+        existing.endpoint,
+        existing.configured_model,
+        existing.prompt_version,
+        existing.output_schema_version,
+        existing.image_sha256,
+    ) != (
+        replayed.idempotency_key,
+        replayed.source_observation_ids,
+        replayed.provider,
+        replayed.endpoint,
+        replayed.configured_model,
+        replayed.prompt_version,
+        replayed.output_schema_version,
+        replayed.image_sha256,
+    ):
+        raise DatabaseError("Model transformation idempotency key conflicts")
+
+
+def _validate_transformation_transition(
+    existing: ModelTransformation,
+    updated: ModelTransformation,
+) -> None:
+    _require_same_transformation_identity(existing, updated)
+    if existing == updated:
+        return
+    allowed = (
+        (
+            existing.status is ModelTransformationStatus.PENDING
+            and updated.status is ModelTransformationStatus.RUNNING
+        )
+        or (
+            existing.status is ModelTransformationStatus.RUNNING
+            and updated.status
+            in {
+                ModelTransformationStatus.SUCCEEDED,
+                ModelTransformationStatus.FAILED,
+            }
+        )
+        or (
+            existing.status is ModelTransformationStatus.FAILED
+            and updated.status is ModelTransformationStatus.RUNNING
+        )
+    )
+    if not allowed:
+        raise DatabaseError("Invalid model transformation state transition")

@@ -159,6 +159,83 @@ class ProcessingRunModel(Base):
     error_summary: Mapped[str | None] = mapped_column(String(255))
 
 
+class ModelTransformationModel(Base):
+    """Replayable local-model work and its validated structured result."""
+
+    __tablename__ = "model_transformations"
+    __table_args__ = (
+        CheckConstraint(
+            "attempt_count >= 0",
+            name="ck_model_transformations_attempt_count",
+        ),
+    )
+
+    id: Mapped[Identifier] = mapped_column(String(36), primary_key=True)
+    idempotency_key: Mapped[str] = mapped_column(String(64), unique=True)
+    source_observation_ids: Mapped[list[str]] = mapped_column(JSON)
+    provider: Mapped[str] = mapped_column(String(32))
+    endpoint: Mapped[str] = mapped_column(String(255))
+    configured_model: Mapped[str] = mapped_column(String(255))
+    runtime_version: Mapped[str | None] = mapped_column(String(64))
+    resolved_model: Mapped[str | None] = mapped_column(String(255))
+    model_digest: Mapped[str | None] = mapped_column(String(128), index=True)
+    prompt_version: Mapped[str] = mapped_column(String(64))
+    output_schema_version: Mapped[str] = mapped_column(String(64))
+    image_sha256: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    interpretation: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    sensitivity: Mapped[str | None] = mapped_column(String(32), index=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    started_at: Mapped[UtcTimestamp | None] = mapped_column(String(32))
+    ended_at: Mapped[UtcTimestamp | None] = mapped_column(String(32))
+    wall_duration_ms: Mapped[int | None] = mapped_column(Integer)
+    runtime_duration_ms: Mapped[int | None] = mapped_column(Integer)
+    load_duration_ms: Mapped[int | None] = mapped_column(Integer)
+    prompt_eval_count: Mapped[int | None] = mapped_column(Integer)
+    eval_count: Mapped[int | None] = mapped_column(Integer)
+    next_attempt_at: Mapped[UtcTimestamp | None] = mapped_column(
+        String(32),
+        index=True,
+    )
+    last_error_code: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[UtcTimestamp] = mapped_column(String(32), index=True)
+    updated_at: Mapped[UtcTimestamp] = mapped_column(String(32))
+
+
+class ModelTransformationObservationModel(Base):
+    """Foreign-key-backed observation provenance for model work."""
+
+    __tablename__ = "model_transformation_observations"
+
+    transformation_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("model_transformations.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    observation_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("observations.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+
+
+class ModelTransformationRunModel(Base):
+    """Link every model attempt to its observable processing run."""
+
+    __tablename__ = "model_transformation_runs"
+
+    transformation_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("model_transformations.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    processing_run_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("processing_runs.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+
+
 class CollectionControlModel(Base):
     """Singleton state controlling whether collection may run."""
 

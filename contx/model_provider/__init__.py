@@ -8,6 +8,8 @@ from contx.model_provider.base import (
     LocalModelRuntimeStatus,
     ModelInterpretation,
     ModelProvider,
+    ModelTransformation,
+    ModelTransformationStatus,
     SensitiveCategory,
 )
 from contx.model_provider.endpoint import LoopbackHttpEndpoint
@@ -30,6 +32,8 @@ __all__ = [
     "LoopbackJsonTransport",
     "ModelInterpretation",
     "ModelProvider",
+    "ModelTransformation",
+    "ModelTransformationStatus",
     "OllamaModelProvider",
     "SensitiveCategory",
 ]

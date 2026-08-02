@@ -50,6 +50,9 @@ def test_empty_database_upgrades_to_packaged_head(tmp_path: Path) -> None:
         "processing_runs",
         "collection_control",
         "exclusion_rules",
+        "model_transformations",
+        "model_transformation_observations",
+        "model_transformation_runs",
     } <= tables
 
 

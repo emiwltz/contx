@@ -17,6 +17,7 @@ from pydantic import (
     model_validator,
 )
 
+from contx.model_provider.endpoint import LoopbackHttpEndpoint
 from contx.models import ActivityState, Sensitivity
 from contx.models.common import require_aware_utc
 
@@ -177,6 +178,10 @@ class LocalModelRuntimeStatus(BaseModel):
     model_digest: str | None = Field(default=None, max_length=128)
     reason_code: str | None = Field(default=None, max_length=64)
 
+    _loopback_endpoint = field_validator("endpoint")(
+        lambda value: LoopbackHttpEndpoint.parse(value).url
+    )
+
     @model_validator(mode="after")
     def validate_status(self) -> Self:
         if self.model_available and not self.runtime_available:
@@ -218,6 +223,9 @@ class LocalModelExecution(BaseModel):
     prompt_eval_count: int | None = Field(default=None, ge=0)
     eval_count: int | None = Field(default=None, ge=0)
 
+    _loopback_endpoint = field_validator("endpoint")(
+        lambda value: LoopbackHttpEndpoint.parse(value).url
+    )
     _utc_timestamps = field_validator("started_at", "ended_at")(require_aware_utc)
 
     @model_validator(mode="after")
@@ -227,6 +235,252 @@ class LocalModelExecution(BaseModel):
         if len(set(self.source_observation_ids)) != len(self.source_observation_ids):
             raise ValueError("model execution source identifiers must be unique")
         return self
+
+
+class ModelTransformationStatus(StrEnum):
+    """Lifecycle of one replayable logical model transformation."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class ModelTransformation(BaseModel):
+    """Persistent local-model work item and validated enriched output."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    id: UUID
+    idempotency_key: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]+$")
+    source_observation_ids: tuple[UUID, ...] = Field(min_length=1, max_length=32)
+    provider: Literal["ollama"] = "ollama"
+    endpoint: str
+    configured_model: str = Field(min_length=1, max_length=255)
+    runtime_version: str | None = Field(default=None, max_length=64)
+    resolved_model: str | None = Field(default=None, max_length=255)
+    model_digest: str | None = Field(default=None, max_length=128)
+    prompt_version: Literal["local-screen-v1"] = "local-screen-v1"
+    output_schema_version: Literal["model-interpretation-v1"] = (
+        "model-interpretation-v1"
+    )
+    image_sha256: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]+$")
+    status: ModelTransformationStatus = ModelTransformationStatus.PENDING
+    interpretation: ModelInterpretation | None = Field(default=None, repr=False)
+    attempt_count: int = Field(default=0, ge=0)
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    wall_duration_ms: int | None = Field(default=None, ge=0)
+    runtime_duration_ms: int | None = Field(default=None, ge=0)
+    load_duration_ms: int | None = Field(default=None, ge=0)
+    prompt_eval_count: int | None = Field(default=None, ge=0)
+    eval_count: int | None = Field(default=None, ge=0)
+    next_attempt_at: datetime | None = None
+    last_error_code: str | None = Field(
+        default=None,
+        max_length=64,
+        pattern=r"^[a-z0-9_]+$",
+    )
+    created_at: datetime
+    updated_at: datetime
+
+    _loopback_endpoint = field_validator("endpoint")(
+        lambda value: LoopbackHttpEndpoint.parse(value).url
+    )
+    _utc_timestamps = field_validator(
+        "started_at",
+        "ended_at",
+        "next_attempt_at",
+        "created_at",
+        "updated_at",
+    )(lambda value: None if value is None else require_aware_utc(value))
+
+    @model_validator(mode="after")
+    def validate_transformation(self) -> Self:
+        if len(set(self.source_observation_ids)) != len(self.source_observation_ids):
+            raise ValueError("model transformation source identifiers must be unique")
+        if self.updated_at < self.created_at:
+            raise ValueError("model transformation cannot update before creation")
+        identity = (
+            self.runtime_version,
+            self.resolved_model,
+            self.model_digest,
+        )
+        metrics = (
+            self.wall_duration_ms,
+            self.runtime_duration_ms,
+            self.load_duration_ms,
+            self.prompt_eval_count,
+            self.eval_count,
+        )
+        if self.status is ModelTransformationStatus.PENDING:
+            if (
+                any(value is not None for value in identity)
+                or self.attempt_count != 0
+                or self.started_at is not None
+                or self.ended_at is not None
+                or self.interpretation is not None
+                or any(value is not None for value in metrics)
+                or self.last_error_code is not None
+                or self.next_attempt_at is None
+            ):
+                raise ValueError("pending model transformation state is inconsistent")
+        elif self.status is ModelTransformationStatus.RUNNING:
+            if (
+                any(value is None for value in identity)
+                or self.attempt_count < 1
+                or self.started_at is None
+                or self.ended_at is not None
+                or self.interpretation is not None
+                or any(value is not None for value in metrics)
+                or self.next_attempt_at is not None
+                or self.last_error_code is not None
+            ):
+                raise ValueError("running model transformation state is inconsistent")
+        elif self.status is ModelTransformationStatus.SUCCEEDED:
+            if (
+                any(value is None for value in identity)
+                or self.attempt_count < 1
+                or self.started_at is None
+                or self.ended_at is None
+                or self.interpretation is None
+                or self.wall_duration_ms is None
+                or self.next_attempt_at is not None
+                or self.last_error_code is not None
+            ):
+                raise ValueError("succeeded model transformation state is inconsistent")
+        elif (
+            any(value is None for value in identity)
+            or self.attempt_count < 1
+            or self.started_at is None
+            or self.ended_at is None
+            or self.interpretation is not None
+            or any(value is not None for value in metrics)
+            or self.next_attempt_at is None
+            or self.last_error_code is None
+        ):
+            raise ValueError("failed model transformation state is inconsistent")
+        if (
+            self.started_at is not None
+            and self.ended_at is not None
+            and self.started_at > self.ended_at
+        ):
+            raise ValueError("model transformation cannot end before it starts")
+        if self.next_attempt_at is not None and self.next_attempt_at < self.updated_at:
+            raise ValueError("next model attempt cannot precede the current update")
+        return self
+
+    def start(
+        self,
+        *,
+        runtime: LocalModelRuntimeStatus,
+        started_at: datetime,
+    ) -> Self:
+        """Begin or retry this logical transformation with a proven model."""
+        if self.status not in {
+            ModelTransformationStatus.PENDING,
+            ModelTransformationStatus.FAILED,
+        }:
+            raise ValueError("only pending or failed model work can start")
+        if (
+            not runtime.runtime_available
+            or runtime.runtime_version is None
+            or not runtime.model_available
+            or runtime.model_digest is None
+            or runtime.provider != self.provider
+            or runtime.endpoint != self.endpoint
+            or runtime.model != self.configured_model
+            or (
+                self.model_digest is not None
+                and runtime.model_digest != self.model_digest
+            )
+        ):
+            raise ValueError("model runtime does not match the transformation")
+        started = require_aware_utc(started_at)
+        if self.next_attempt_at is not None and started < self.next_attempt_at:
+            raise ValueError("model transformation retry is not due")
+        return type(self).model_validate(
+            self.model_dump()
+            | {
+                "runtime_version": runtime.runtime_version,
+                "resolved_model": runtime.model,
+                "model_digest": runtime.model_digest,
+                "status": ModelTransformationStatus.RUNNING,
+                "attempt_count": self.attempt_count + 1,
+                "started_at": started,
+                "ended_at": None,
+                "wall_duration_ms": None,
+                "runtime_duration_ms": None,
+                "load_duration_ms": None,
+                "prompt_eval_count": None,
+                "eval_count": None,
+                "next_attempt_at": None,
+                "last_error_code": None,
+                "updated_at": started,
+            }
+        )
+
+    def succeed(self, execution: LocalModelExecution) -> Self:
+        """Accept one execution only when all provenance matches this work item."""
+        if self.status is not ModelTransformationStatus.RUNNING:
+            raise ValueError("only running model work can succeed")
+        if (
+            execution.request_id != self.id
+            or execution.source_observation_ids != self.source_observation_ids
+            or execution.provider != self.provider
+            or execution.endpoint != self.endpoint
+            or execution.runtime_version != self.runtime_version
+            or execution.model != self.resolved_model
+            or execution.model_digest != self.model_digest
+            or execution.prompt_version != self.prompt_version
+            or execution.output_schema_version != self.output_schema_version
+            or execution.image_sha256 != self.image_sha256
+            or execution.started_at != self.started_at
+        ):
+            raise ValueError("model execution provenance does not match its work item")
+        return type(self).model_validate(
+            self.model_dump()
+            | {
+                "status": ModelTransformationStatus.SUCCEEDED,
+                "interpretation": execution.interpretation,
+                "started_at": execution.started_at,
+                "ended_at": execution.ended_at,
+                "wall_duration_ms": execution.wall_duration_ms,
+                "runtime_duration_ms": execution.runtime_duration_ms,
+                "load_duration_ms": execution.load_duration_ms,
+                "prompt_eval_count": execution.prompt_eval_count,
+                "eval_count": execution.eval_count,
+                "updated_at": execution.ended_at,
+            }
+        )
+
+    def fail(
+        self,
+        *,
+        ended_at: datetime,
+        error_code: str,
+        next_attempt_at: datetime,
+    ) -> Self:
+        """Record one safe failure while keeping bounded retry state."""
+        if self.status is not ModelTransformationStatus.RUNNING:
+            raise ValueError("only running model work can fail")
+        ended = require_aware_utc(ended_at)
+        next_attempt = require_aware_utc(next_attempt_at)
+        return type(self).model_validate(
+            self.model_dump()
+            | {
+                "status": ModelTransformationStatus.FAILED,
+                "ended_at": ended,
+                "wall_duration_ms": None,
+                "runtime_duration_ms": None,
+                "load_duration_ms": None,
+                "prompt_eval_count": None,
+                "eval_count": None,
+                "next_attempt_at": next_attempt,
+                "last_error_code": error_code,
+                "updated_at": ended,
+            }
+        )
 
 
 class ModelProvider(Protocol):
