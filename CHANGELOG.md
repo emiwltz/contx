@@ -16,6 +16,8 @@ guaranteed.
 - OptMem provenance and redistribution gate documentation.
 - Python 3.12 project foundation with a typed Typer CLI and reproducible `uv`
   environment.
+- Typed configuration, native macOS runtime paths, and idempotent private-path
+  initialization.
 
 ### Changed
 

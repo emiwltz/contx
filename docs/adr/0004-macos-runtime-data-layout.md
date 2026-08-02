@@ -43,8 +43,10 @@ Defaults:
 ~/Library/Logs/CONTX/
 ```
 
-One explicit development override redirects all roots to an isolated location.
-Tests always use temporary roots.
+The `CONTX_RUNTIME_ROOT` environment variable is the single development and
+test override. When set to an absolute path, it redirects the three roots to
+`application-support/`, `caches/`, and `logs/` below that path. Tests always
+use a temporary override and never resolve production paths for writes.
 
 ## Rationale
 

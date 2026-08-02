@@ -5,6 +5,12 @@ from typing import Annotated
 import typer
 
 from contx import __version__
+from contx.errors import ContxError
+from contx.settings import (
+    initialize_runtime_paths,
+    load_settings,
+    resolve_runtime_paths,
+)
 
 app = typer.Typer(
     add_completion=False,
@@ -27,6 +33,50 @@ def root(
     ] = None,
 ) -> None:
     """Manage CONTX local context memory."""
+
+
+@app.command("init")
+def initialize() -> None:
+    """Create private local runtime paths without enabling collection."""
+    try:
+        paths = resolve_runtime_paths()
+        initialize_runtime_paths(paths)
+        load_settings(paths)
+    except ContxError as error:
+        _abort(error)
+    typer.echo("CONTX runtime paths initialized; background collection is disabled.")
+
+
+@app.command()
+def status() -> None:
+    """Show local initialization and safety state."""
+    try:
+        paths = resolve_runtime_paths()
+        settings = load_settings(paths)
+    except ContxError as error:
+        _abort(error)
+
+    config_state = "present" if paths.config_file.is_file() else "missing"
+    database_state = "present" if paths.database_file.is_file() else "missing"
+    typer.echo(f"configuration: {config_state}")
+    typer.echo(f"database: {database_state}")
+    typer.echo(
+        "background collection: "
+        + (
+            "enabled"
+            if settings.collection.background_collection_enabled
+            else "disabled"
+        )
+    )
+    typer.echo(
+        "window titles: "
+        + ("enabled" if settings.collection.window_titles_enabled else "disabled")
+    )
+
+
+def _abort(error: ContxError) -> None:
+    typer.echo(f"Error: {error}", err=True)
+    raise typer.Exit(code=2)
 
 
 def main() -> None:
