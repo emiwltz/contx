@@ -19,7 +19,10 @@ from contx.collection import (
     ControlledMetadataCollector,
 )
 from contx.collectors import Collector
-from contx.collectors.macos import ActiveApplicationCollector
+from contx.collectors.macos import (
+    ActiveApplicationCollector,
+    detect_collection_capabilities,
+)
 from contx.collectors.synthetic import SyntheticCollector
 from contx.db import (
     create_database_engine,
@@ -163,6 +166,24 @@ def status() -> None:
     typer.echo(f"collection: {collection_state}")
     if control is not None and control.pause_until is not None:
         typer.echo(f"pause until: {control.pause_until.isoformat()}")
+
+
+@app.command()
+def capabilities() -> None:
+    """Show collection APIs and permissions without requesting access."""
+    try:
+        paths = resolve_runtime_paths()
+        settings = load_settings(paths)
+        detected = detect_collection_capabilities(settings.collection)
+    except ContxError as error:
+        _abort(error)
+    for capability in detected:
+        detail = (
+            "" if capability.reason_code is None else f" ({capability.reason_code})"
+        )
+        typer.echo(f"{capability.name}: {capability.status.value}{detail}")
+        if capability.settings_path is not None:
+            typer.echo(f"  settings: {capability.settings_path}")
 
 
 @app.command("run-once")

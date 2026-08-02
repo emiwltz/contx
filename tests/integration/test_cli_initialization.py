@@ -108,3 +108,14 @@ def test_empty_raw_purge_is_successful_and_audited(tmp_path: Path) -> None:
     assert "purged observations: 0" in result.stdout
     assert "reclaimed bytes: 0" in result.stdout
     assert "raw usage: 0 bytes" in status.stdout
+
+
+def test_capabilities_do_not_enable_or_request_sensitive_access(tmp_path: Path) -> None:
+    environment = {RUNTIME_ROOT_ENV: str(tmp_path)}
+
+    result = runner.invoke(app, ["capabilities"], env=environment)
+
+    assert result.exit_code == 0
+    assert "active_application:" in result.stdout
+    assert "window_titles: disabled (disabled_by_configuration)" in result.stdout
+    assert "screenshots: disabled (disabled_by_configuration)" in result.stdout
