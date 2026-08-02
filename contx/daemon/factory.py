@@ -43,6 +43,7 @@ from contx.daemon.lifecycle import (
     NativeMonitor,
     ProcessLease,
 )
+from contx.daemon.signals import GracefulStopSignalBridge, SignalApi
 from contx.db import create_database_engine, upgrade_database
 from contx.errors import CollectorUnavailableError, ConfigurationError
 from contx.models import Clock, SystemClock, UuidIdentifierSource
@@ -58,9 +59,23 @@ from contx.settings import (
 class ConfiguredMacOSCollectionDaemon:
     """Own the runner and database resources created by the composition root."""
 
-    def __init__(self, *, runner: AppKitDaemonRunner, engine: Engine) -> None:
+    def __init__(
+        self,
+        *,
+        runner: AppKitDaemonRunner,
+        engine: Engine,
+        signal_api: SignalApi | None = None,
+    ) -> None:
         self._runner = runner
         self._engine = engine
+        self._signals = (
+            GracefulStopSignalBridge(self.request_stop)
+            if signal_api is None
+            else GracefulStopSignalBridge(
+                self.request_stop,
+                signal_api=signal_api,
+            )
+        )
         self._closed = False
 
     def request_stop(self) -> None:
@@ -70,7 +85,8 @@ class ConfiguredMacOSCollectionDaemon:
         if self._closed:
             raise RuntimeError("configured collection daemon is closed")
         try:
-            return self._runner.run()
+            with self._signals:
+                return self._runner.run()
         finally:
             self.close()
 
@@ -99,6 +115,7 @@ def build_macos_collection_daemon(
     lease: ProcessLease | None = None,
     application: ApplicationLoop | None = None,
     scheduler: CallbackScheduler | None = None,
+    signal_api: SignalApi | None = None,
 ) -> ConfiguredMacOSCollectionDaemon:
     """Build but do not start one daemon after an explicit configuration gate."""
     runtime_paths = paths or resolve_runtime_paths(environ)
@@ -217,7 +234,11 @@ def build_macos_collection_daemon(
         if engine is not None:
             engine.dispose()
         raise
-    return ConfiguredMacOSCollectionDaemon(runner=runner, engine=engine)
+    return ConfiguredMacOSCollectionDaemon(
+        runner=runner,
+        engine=engine,
+        signal_api=signal_api,
+    )
 
 
 def _require_screenshot_source(

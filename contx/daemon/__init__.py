@@ -7,6 +7,7 @@ from contx.daemon.factory import (
 )
 from contx.daemon.lease import DaemonLease, DaemonLeaseStatus, probe_daemon_lease
 from contx.daemon.lifecycle import CollectionDaemonLifecycle
+from contx.daemon.signals import GracefulStopSignalBridge
 
 __all__ = [
     "CollectionDaemonLifecycle",
@@ -15,6 +16,7 @@ __all__ = [
     "AppKitTimerScheduler",
     "DaemonLease",
     "DaemonLeaseStatus",
+    "GracefulStopSignalBridge",
     "probe_daemon_lease",
     "build_macos_collection_daemon",
 ]

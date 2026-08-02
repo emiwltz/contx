@@ -107,6 +107,22 @@ class FakeApplication:
         self.stops += 1
 
 
+class FakeSignalApi:
+    SIGINT = 2
+    SIGTERM = 15
+
+    def __init__(self) -> None:
+        self.handlers: dict[int, object] = {2: "int", 15: "term"}
+
+    def getsignal(self, signal_number: int) -> object:
+        return self.handlers[signal_number]
+
+    def signal(self, signal_number: int, handler: object) -> object:
+        previous = self.handlers[signal_number]
+        self.handlers[signal_number] = handler
+        return previous
+
+
 def test_default_configuration_refuses_to_build_background_daemon(
     tmp_path: Path,
 ) -> None:
@@ -132,6 +148,7 @@ def test_enabled_factory_runs_one_isolated_synthetic_cycle(tmp_path: Path) -> No
     notifications = RecordingComponent()
     menu = RecordingComponent()
     lease = RecordingLease()
+    signal_api = FakeSignalApi()
     daemon = build_macos_collection_daemon(
         paths=paths,
         clock=clock,
@@ -141,6 +158,7 @@ def test_enabled_factory_runs_one_isolated_synthetic_cycle(tmp_path: Path) -> No
         lease=lease,
         application=application,
         scheduler=scheduler,
+        signal_api=signal_api,
     )
 
     def run_cycle() -> None:
@@ -160,6 +178,7 @@ def test_enabled_factory_runs_one_isolated_synthetic_cycle(tmp_path: Path) -> No
     assert notifications.started == notifications.stopped == 1
     assert menu.started == menu.stopped == 1
     assert lease.acquired == lease.released == 1
+    assert signal_api.handlers == {2: "int", 15: "term"}
     engine = create_database_engine(paths.database_file)
     try:
         with session_scope(engine) as session:
