@@ -86,3 +86,60 @@ def test_interrupted_temp_is_removed_but_outside_paths_are_rejected(
     with pytest.raises(RawStoreError, match="outside"):
         store.delete(outside)
     assert outside.read_bytes() == b"must-remain"
+
+
+def test_read_returns_only_hash_verified_bounded_managed_content(
+    tmp_path: Path,
+) -> None:
+    store = FilesystemRawStore(tmp_path / "raw", disk_budget_bytes=1024)
+    artifact = store.write(
+        b"synthetic-pixels",
+        artifact_id=ARTIFACT_ID,
+        suffix=".png",
+        captured_at=NOW,
+        retention=timedelta(hours=1),
+    )
+
+    assert (
+        store.read(
+            artifact.path,
+            expected_sha256=artifact.content_hash,
+            max_bytes=1024,
+        )
+        == b"synthetic-pixels"
+    )
+    with pytest.raises(RawStoreError, match="read limit"):
+        store.read(
+            artifact.path,
+            expected_sha256=artifact.content_hash,
+            max_bytes=2,
+        )
+    with pytest.raises(RawStoreError, match="hash does not match"):
+        store.read(
+            artifact.path,
+            expected_sha256="0" * 64,
+            max_bytes=1024,
+        )
+
+
+def test_read_rejects_outside_symlink_and_missing_artifacts(tmp_path: Path) -> None:
+    store = FilesystemRawStore(tmp_path / "raw", disk_budget_bytes=1024)
+    store.initialize()
+    outside = tmp_path / "outside.png"
+    outside.write_bytes(b"outside-private-content")
+    managed_link = store.root / f"{ARTIFACT_ID}.png"
+    managed_link.symlink_to(outside)
+
+    with pytest.raises(RawStoreError, match="Cannot read"):
+        store.read(
+            managed_link,
+            expected_sha256="0" * 64,
+            max_bytes=1024,
+        )
+    managed_link.unlink()
+    with pytest.raises(RawStoreError, match="unavailable"):
+        store.read(
+            managed_link,
+            expected_sha256="0" * 64,
+            max_bytes=1024,
+        )

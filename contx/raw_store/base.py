@@ -46,6 +46,14 @@ class RawStore(Protocol):
         retention: timedelta,
     ) -> RawArtifact: ...
 
+    def read(
+        self,
+        path: Path,
+        *,
+        expected_sha256: str,
+        max_bytes: int,
+    ) -> bytes: ...
+
     def delete(self, path: Path) -> bool: ...
 
     def size(self, path: Path) -> int: ...

@@ -155,6 +155,46 @@ class FilesystemRawStore:
         except OSError as error:
             raise RawStoreError("Cannot delete expired raw artifact") from error
 
+    def read(
+        self,
+        path: Path,
+        *,
+        expected_sha256: str,
+        max_bytes: int,
+    ) -> bytes:
+        """Read one immutable managed artifact after size and digest verification."""
+        self.initialize()
+        candidate = self._validate_managed_path(path)
+        if re.fullmatch(r"[0-9a-f]{64}", expected_sha256) is None:
+            raise RawStoreError("Expected raw artifact hash is invalid")
+        if not 0 < max_bytes <= MAX_ARTIFACT_BYTES:
+            raise RawStoreError("Raw artifact read limit is invalid")
+        try:
+            with self._locked():
+                descriptor = os.open(candidate, os.O_RDONLY | os.O_NOFOLLOW)
+                with os.fdopen(descriptor, "rb", closefd=True) as artifact_file:
+                    file_status = os.fstat(artifact_file.fileno())
+                    if not stat.S_ISREG(file_status.st_mode):
+                        raise RawStoreError(
+                            "Raw artifact path is not a safe regular file"
+                        )
+                    if file_status.st_size > max_bytes:
+                        raise RawStoreError("Raw artifact exceeds the read limit")
+                    payload = artifact_file.read(max_bytes + 1)
+                if len(payload) > max_bytes:
+                    raise RawStoreError("Raw artifact exceeds the read limit")
+                if len(payload) != file_status.st_size:
+                    raise RawStoreError("Raw artifact changed while being read")
+                if hashlib.sha256(payload).hexdigest() != expected_sha256:
+                    raise RawStoreError("Raw artifact hash does not match provenance")
+                return payload
+        except RawStoreError:
+            raise
+        except FileNotFoundError as error:
+            raise RawStoreError("Raw artifact is unavailable") from error
+        except OSError as error:
+            raise RawStoreError("Cannot read raw artifact") from error
+
     def size(self, path: Path) -> int:
         self.initialize()
         candidate = self._validate_managed_path(path)
