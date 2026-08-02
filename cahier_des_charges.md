@@ -3,9 +3,9 @@
 
 ## Cahier des charges fondateur
 
-**Version :** 0.1
-**Date :** 1er août 2026
-**Statut :** base de référence initiale
+**Version :** 0.2
+**Date :** 2 août 2026
+**Statut :** base de référence active
 **Propriétaire produit :** Emi
 **Nature du document :** source de vérité fonctionnelle et technique du projet
 
@@ -29,7 +29,8 @@ Ce document n’est pas immuable. Il doit évoluer lorsque de nouvelles observat
 Les éléments du document sont classés selon quatre statuts :
 
 * **[INVARIANT]** : principe considéré comme stable. Toute remise en cause nécessite une décision explicite.
-* **[DÉCISION V1]** : choix retenu pour la première version. Il peut évoluer sans modifier la philosophie du produit.
+* **[DÉCISION v0]** : choix retenu pour la version fonctionnelle initiale. Il peut évoluer sans modifier la philosophie du produit.
+* **[DÉCISION v1]** : choix retenu pour le durcissement et la préparation à une diffusion plus large.
 * **[HYPOTHÈSE]** : proposition à tester par un prototype ou une expérimentation.
 * **[OUVERT]** : point volontairement non figé.
 
@@ -88,7 +89,7 @@ Contexte mémoire directement fourni à l’agent
 
 OptMem, ou une version améliorée d’OptMem, constitue la couche finale du système. Il ne s’agit pas d’une base secondaire consultée par un Context Builder. La sortie mémoire elle-même est le contexte transmis à l’agent.
 
-La V1 est conçue pour :
+La v0 est conçue pour :
 
 * un utilisateur ;
 * un Mac ;
@@ -142,7 +143,7 @@ CONTX doit permettre à l’agent de comprendre :
 
 Il n’est pas, dans sa première forme, une mémoire générale de toute la vie de l’utilisateur.
 
-L’intégration future du téléphone, d’une montre connectée, des photos, de la localisation ou de la domotique constituerait une extension majeure ou un produit distinct inspiré de CONTX. Cette possibilité ne doit pas élargir prématurément le périmètre de la V1.
+L’intégration future du téléphone, d’une montre connectée, des photos, de la localisation ou de la domotique constituerait une extension majeure ou un produit distinct inspiré de CONTX. Cette possibilité ne doit pas élargir prématurément le périmètre de la v0.
 
 ---
 
@@ -150,7 +151,7 @@ L’intégration future du téléphone, d’une montre connectée, des photos, d
 
 ## 3.1 Utilisateur cible initial
 
-**[DÉCISION V1]** CONTX est d’abord conçu pour Emi, dans un usage réel et quotidien.
+**[DÉCISION v0]** CONTX est d’abord conçu pour Emi, dans un usage réel et quotidien.
 
 Le projet est cependant structuré pour pouvoir devenir open source et être installé par d’autres utilisateurs techniques ou semi-techniques.
 
@@ -162,7 +163,7 @@ La priorité est donc :
 
 ## 3.2 Relation avec l’agent
 
-**[DÉCISION V1]** Une instance de CONTX alimente un agent principal.
+**[DÉCISION v0]** Une instance de CONTX alimente un agent principal.
 
 ```text
 Utilisateur
@@ -188,7 +189,15 @@ Instance CONTX
 └── profil autre agent
 ```
 
-**[HORS PÉRIMÈTRE V1]** Cette architecture multi-agent ne doit pas être implémentée avant que la mémoire mono-agent soit validée.
+**[HORS PÉRIMÈTRE v0]** Cette architecture multi-agent ne doit pas être implémentée avant que la mémoire mono-agent soit validée.
+
+## 3.4 Modèle de versions
+
+**[DÉCISION v0]** La v0 couvre les jalons 0 à 7. Elle se termine par un pilote réel de 7 à 14 jours et doit satisfaire les critères fonctionnels de la section 33.
+
+**[DÉCISION v1]** La v1 correspond au jalon 8. Elle traite les résultats du pilote et ajoute le durcissement nécessaire à une version prête à diffuser : installation, mise à jour, désinstallation, sauvegarde, restauration, récupération, distribution macOS, documentation de sécurité et chaîne de licences vérifiée.
+
+Les versions intermédiaires de la v0 ne constituent pas un contrat de compatibilité publique. Les données persistantes restent néanmoins protégées par des migrations explicites dès le premier schéma.
 
 ---
 
@@ -209,7 +218,7 @@ Les éléments suivants constituent la base stable de CONTX.
 11. **[INVARIANT]** Les souvenirs proposés par un agent passent par CONTX avant d’entrer dans la mémoire.
 12. **[INVARIANT]** L’agent ne possède pas directement la mémoire.
 13. **[INVARIANT]** OptMem ou une évolution d’OptMem constitue la couche finale de contexte mémoire.
-14. **[INVARIANT]** Il n’existe pas de Context Builder séparé dans la V1.
+14. **[INVARIANT]** Il n’existe pas de Context Builder séparé dans la v0.
 15. **[INVARIANT]** Le système doit fonctionner entièrement hors ligne.
 16. **[INVARIANT]** L’utilisateur peut suspendre la collecte à tout moment.
 17. **[INVARIANT]** L’utilisateur peut exclure des applications, fenêtres ou situations.
@@ -224,9 +233,9 @@ Les éléments suivants constituent la base stable de CONTX.
 
 ---
 
-# 5. Hors périmètre de la V1
+# 5. Hors périmètre de la v0
 
-La V1 ne doit pas inclure :
+La v0 ne doit pas inclure :
 
 * collecte depuis un téléphone ;
 * collecte depuis une montre connectée ;
@@ -406,7 +415,7 @@ Le score de confiance ne doit pas être présenté à l’utilisateur comme une 
 
 ## 8.2 Comportements à démontrer
 
-La V1 doit démontrer trois capacités principales.
+La v0 doit démontrer trois capacités principales.
 
 ### Reprise de projet
 
@@ -485,7 +494,7 @@ L’agent doit pouvoir remarquer un changement significatif, par exemple :
 
 ## 9.1 Architecture générale
 
-**[DÉCISION V1]** CONTX doit être construit comme un monolithe modulaire.
+**[DÉCISION v0]** CONTX doit être construit comme un monolithe modulaire.
 
 Les responsabilités doivent être séparées dans le code, mais elles peuvent fonctionner dans un même processus ou dans un petit nombre de processus locaux.
 
@@ -505,13 +514,15 @@ Les modules principaux sont :
 * `web`
 * `audit`
 
+**[DÉCISION v0]** `agent_gateway` est une passerelle de transport. Il peut appeler la mémoire, paginer sa sortie et signaler séparément un état technique. Il NE DOIT PAS ajouter des observations, des événements récents ou un résumé lié à la tâche dans le contexte sémantique retourné par `MemoryStore`.
+
 ---
 
 # 10. Collecte macOS
 
 ## 10.1 Sources initiales
 
-La V1 collecte :
+La v0 collecte :
 
 1. l’application active ;
 2. l’identifiant de l’application ;
@@ -599,7 +610,7 @@ La logique exacte doit rester configurable et testable.
 
 ## 11.1 Politique par défaut
 
-**[DÉCISION V1]** La collecte est autorisée par défaut avec une liste d’exclusion.
+**[DÉCISION v0]** La collecte est autorisée par défaut avec une liste d’exclusion.
 
 ## 11.2 Exclusions initiales
 
@@ -762,7 +773,7 @@ Les appels distants sont désactivés par défaut.
 Lorsqu’ils sont activés :
 
 * seul du texte nettoyé doit être envoyé par défaut ;
-* aucune capture brute ne doit être envoyée dans la V1 ;
+* aucune capture brute ne doit être envoyée dans la v0 ;
 * la charge utile doit être consultable ;
 * le fournisseur et le modèle doivent être enregistrés ;
 * l’heure de l’appel doit être enregistrée ;
@@ -825,7 +836,7 @@ Un événement doit :
 
 Le moteur de patterns analyse plusieurs événements afin de détecter des régularités ou des évolutions.
 
-## 15.2 Patterns visés en V1
+## 15.2 Patterns visés en v0
 
 * projet récurrent ;
 * projet repris après une période d’inactivité ;
@@ -1110,7 +1121,7 @@ La mémoire fournie à l’agent ne doit pas présenter un ancien souvenir et sa
 
 L’agent accède à CONTX par une interface stable.
 
-La V1 privilégie une CLI compatible avec les agents capables d’exécuter des commandes.
+La v0 privilégie une CLI compatible avec les agents capables d’exécuter des commandes.
 
 ## 19.2 Commandes cibles
 
@@ -1137,6 +1148,8 @@ Les commandes exactes peuvent évoluer, mais leurs responsabilités doivent rest
 * compresser les périodes anciennes ;
 * signaler les opérations obligatoires ;
 * fonctionner sans accès réseau.
+
+**[DÉCISION v0]** Le corps sémantique retourné par `contx wake` provient directement de `MemoryStore`. Les statuts techniques éventuels sont séparés de cette sortie et ne constituent pas une seconde source de contexte.
 
 ## 19.4 Proposition d’un souvenir
 
@@ -1172,7 +1185,7 @@ L’intégration doit pouvoir être expliquée par un petit bloc d’instruction
 * Codex ;
 * autres agents capables d’exécuter des commandes.
 
-MCP peut être ajouté plus tard, mais n’est pas requis pour valider la V1.
+MCP peut être ajouté plus tard, mais n’est pas requis pour valider la v0.
 
 ---
 
@@ -1180,7 +1193,7 @@ MCP peut être ajouté plus tard, mais n’est pas requis pour valider la V1.
 
 ## 20.1 Forme
 
-**[DÉCISION V1]** CONTX possède :
+**[DÉCISION v0]** CONTX possède :
 
 * un service local en arrière-plan ;
 * une CLI ;
@@ -1424,17 +1437,17 @@ created_at
 
 # 22. Stack technique de référence
 
-Les choix suivants constituent une base d’implémentation V1. Ils ne sont pas des invariants produit.
+Les choix suivants constituent une base d’implémentation v0. Ils ne sont pas des invariants produit.
 
 ## 22.1 Backend
 
-**[DÉCISION V1]**
+**[DÉCISION v0]**
 
-* Python 3.12 ou version stable compatible ;
-* FastAPI pour l’API locale ;
+* Python 3.12, verrouillé par `uv` ;
+* FastAPI pour l’API locale lorsqu’elle possède un consommateur réel ;
 * Pydantic pour les schémas ;
 * SQLite en mode WAL ;
-* SQLAlchemy ou SQLModel ;
+* SQLAlchemy 2, avec des modèles de persistance distincts des schémas Pydantic ;
 * Alembic pour les migrations ;
 * Typer pour la CLI ;
 * pytest pour les tests.
@@ -1476,7 +1489,7 @@ Le choix du modèle doit être fondé sur des benchmarks réalisés sur un Mac M
 
 ## 22.5 Frontend
 
-**[DÉCISION V1]** Une SPA locale simple en TypeScript peut être construite avec React et Vite.
+**[DÉCISION v0]** Une SPA locale simple en TypeScript peut être construite avec React et Vite.
 
 Le contrat API doit permettre de remplacer le frontend sans modifier le cœur.
 
@@ -1485,6 +1498,10 @@ Le contrat API doit permettre de remplacer le frontend sans modifier le cœur.
 * SQLite pour les données structurées ;
 * système de fichiers local pour les captures temporaires ;
 * répertoires privés avec permissions restrictives ;
+* données durables dans `~/Library/Application Support/CONTX/` ;
+* données brutes temporaires dans `~/Library/Caches/CONTX/` ;
+* journaux techniques dans `~/Library/Logs/CONTX/` ;
+* racines isolées et remplaçables pour les tests et le développement ;
 * format JSONL pour certains exports ;
 * Markdown pour les exports humains ;
 * format natif du backend mémoire pour la mémoire.
@@ -1496,6 +1513,10 @@ Le contrat API doit permettre de remplacer le frontend sans modifier le cœur.
 ```text
 contx/
 ├── README.md
+├── LICENSE
+├── CHANGELOG.md
+├── cahier_des_charges.md
+├── AGENTS.md
 ├── pyproject.toml
 ├── apps/
 │   ├── api/
@@ -1530,10 +1551,11 @@ contx/
 ├── fixtures/
 ├── scripts/
 └── docs/
-    ├── specification.md
+    ├── implementation-plan.md
     ├── architecture/
     ├── adr/
     ├── evaluation/
+    ├── third-party/
     └── threat-model/
 ```
 
@@ -1679,7 +1701,7 @@ Les répertoires de données doivent être accessibles uniquement à l’utilisa
 
 ## 26.3 Chiffrement
 
-La V1 peut s’appuyer sur FileVault et les protections du compte macOS.
+La v0 peut s’appuyer sur FileVault et les protections du compte macOS.
 
 L’application doit détecter ou recommander l’activation de FileVault.
 
@@ -2046,7 +2068,7 @@ Critère de sortie :
 * les limites sont documentées ;
 * la stratégie mémoire est choisie.
 
-## Jalon 8 : durcissement
+## Jalon 8 : v1 — durcissement et préparation à la diffusion
 
 Livrables :
 
@@ -2061,7 +2083,11 @@ Livrables :
 
 Critère de sortie :
 
-* version 0.1 utilisable quotidiennement.
+* installation, mise à jour et désinstallation documentées et vérifiées ;
+* sauvegarde, restauration, export et récupération vérifiés ;
+* distribution macOS et politique de compatibilité définies ;
+* licences du projet et des composants tiers vérifiées ;
+* version v1 utilisable quotidiennement et prête à diffuser.
 
 ---
 
@@ -2243,16 +2269,16 @@ Les points suivants ne bloquent pas le début du développement.
 * installateur ;
 * signature macOS ;
 * système de mise à jour ;
-* licence finale ;
+* licences et notices des composants tiers ;
 * compatibilité minimale macOS.
 
 Chaque décision structurante doit faire l’objet d’un ADR.
 
 ---
 
-# 33. Critères d’acceptation de la V1
+# 33. Critères d’acceptation de la v0
 
-La V1 est considérée comme fonctionnelle lorsque :
+La v0 est considérée comme fonctionnelle lorsque :
 
 1. CONTX s’installe et fonctionne sur un Mac M4 avec 16 Go de RAM.
 2. Il détecte l’application et la fenêtre actives.
@@ -2276,6 +2302,20 @@ La V1 est considérée comme fonctionnelle lorsque :
 20. L’interface locale permet de contrôler les fonctions principales.
 21. Le pilote démontre une amélioration sur les trois comportements cibles.
 22. Le système reste suffisamment léger pour un usage quotidien.
+
+## 33.1 Critères d’acceptation de la v1
+
+La v1 est considérée comme prête à diffuser lorsque :
+
+1. tous les critères de la v0 restent satisfaits après le durcissement ;
+2. un nouvel utilisateur peut installer, comprendre les permissions, mettre en pause, inspecter, exporter et désinstaller CONTX avec les parcours documentés ;
+3. les mises à jour et les retours arrière protègent la mémoire, la provenance et la configuration ;
+4. la sauvegarde, la restauration, l’export et la suppression complète sont vérifiés ;
+5. les incidents critiques de sécurité et de confidentialité identifiés pendant le pilote sont résolus ;
+6. chaque composant tiers distribué possède une licence et les notices requises ;
+7. les objectifs de performance sont mesurés sur le Mac cible ;
+8. aucun chemin temporaire de production ou mécanisme manuel de récupération indispensable ne subsiste ;
+9. les artefacts de distribution sont reproductibles et passent la suite de validation complète.
 
 ---
 
@@ -2348,11 +2388,11 @@ Les éléments suivants doivent être remplaçables :
 
 ---
 
-# 37. Prochaine action recommandée
+# 37. Séquence d’exécution actuelle
 
-La prochaine étape n’est pas de développer l’intégralité du produit.
+La première étape consiste à achever la base décisionnelle : ADR, modèle de versions, schéma d’architecture cohérent, licence du projet et provenance d’OptMem.
 
-Elle consiste à lancer le **Jalon 0**, puis à produire un prototype vertical minimal :
+Le développement lance ensuite le **Jalon 0**, puis produit le fil vertical v0.0.1 :
 
 ```text
 application active
@@ -2368,4 +2408,4 @@ OptMem
 contx wake
 ```
 
-Ce premier fil vertical doit être fonctionnel avant d’ajouter l’OCR avancé, les patterns complexes ou une interface riche.
+Ce premier fil vertical doit être fonctionnel et vérifié avant d’ajouter l’OCR avancé, les patterns complexes, un daemon de collecte ou une interface riche. Les détails, critères de sortie et points d’approbation sont définis dans `docs/implementation-plan.md`.

@@ -39,21 +39,21 @@ The schema above is rendered from the Excalidraw source: [`docs/architecture/CON
 
 | # | Stage | Role |
 |---|-------|------|
-| 1 | **Sources** | Screenshots, LLM conversations, mails & messages, calendar & location, photos/notes/files, project activity. |
+| 1 | **Sources** | v0 observes active application/window metadata, durations, idle state, selective screenshots, and agent proposals. Mail, messages, calendar, location, and personal photos are post-v0 scope. |
 | 2 | **Collecteurs locaux** | Detect novelties, avoid duplicates, add date/source/hash, respect per-source policy, stay light and modular. |
-| 3 | **Base brute locale** | Keep the original or its reference, store technical metadata, allow audit/correction/re-analysis, enforce configurable retention, never leaves the machine. |
+| 3 | **Base brute locale** | Keep the original or its reference, store technical metadata, allow audit/correction/re-analysis, enforce a configurable retention capped at 48 hours, never leaves the machine. |
 | 4 | **Traitement local sûr** | OCR & extraction, summary & classification, project/entity detection, secret & sensitive-data redaction, produces an inspectable filtering report. |
 | 5 | **Base enrichie** | Structured clean events, summary/themes/projects/entities, link back to raw data, redaction history, search/grouping/batch. |
-| 6 | **Agent de mémoire** | Single internal worker for V1: reads enriched events, discards noise, condenses what matters, avoids duplicates, writes short memories, triggers OptMem consolidation. |
+| 6 | **Agent de mémoire** | Single internal worker for v0: reads enriched events, discards noise, condenses what matters, avoids duplicates, writes short memories, triggers OptMem consolidation. |
 | 7 | **OptMem** | Append-only memory log, rebuildable summary tree, detailed recent / compressed old memories, `wake`/`recall`/`zoom`, the canonical active memory. |
-| 8 | **Interface de contexte** | Queries OptMem, adds current situation & recent activity, searches task-relevant context, respects a token budget, produces a view adapted to each agent. |
-| 9 | **Agents consommateurs** | Hermes, OpenClaw, Codex, Claude Code… read a targeted context pack, don’t necessarily access raw data, can propose a memory or correction, stay independent of CONTX. |
+| 8 | **Passerelle agent** | Invokes OptMem, transports and paginates its output, and reports technical status separately. It never adds a second semantic context source. |
+| 9 | **Agents consommateurs** | Hermes, OpenClaw, Codex, Claude Code… read the memory output directly, don’t necessarily access raw data, can propose a memory or correction, stay independent of CONTX. |
 
 ### Transversal guardrails
 
 - **Confidentialité** — raw data stays local; filtering required before any API; third-party protection; local mode always possible.
 - **Transparence** — see raw → enriched → memory; see masked items; see data sent to an API; readable audit log.
-- **Contrôle utilisateur** — enable/disable a source; configure retention; correct, forget or suspend; export and migrate your data.
+- **Contrôle utilisateur** — enable/disable a source; shorten retention below the 48-hour maximum; correct, forget or suspend; export and migrate your data.
 - **Sobriété** — change detection, batch & cache, incremental processing, daily consolidation to start.
 
 ### Four objects not to confuse
@@ -63,7 +63,7 @@ The schema above is rendered from the Excalidraw source: [`docs/architecture/CON
 | **Base brute** | What was actually captured. |
 | **Base enrichie** | What CONTX understood and secured. |
 | **OptMem** | What CONTX decides to retain durably. |
-| **Paquet de contexte** | What is relevant now for a given agent, task and budget. |
+| **Sortie mémoire** | The budgeted OptMem view transported directly to the agent without semantic enrichment. |
 
 ### Optional branches
 
@@ -81,7 +81,7 @@ The full list is in [§4 of the spec](./cahier_des_charges.md). The load-bearing
 - **Remote model calls are optional, disabled by default, and inspectable.** Raw data is never sent remotely.
 - **An observation never becomes a memory directly.** Observation → event → pattern/inference → candidate → stored memory are distinct stages.
 - **Agent proposals go through CONTX validation** before the `MemoryStore`; the agent never owns the memory; subagents never write to it.
-- **OptMem is the final context layer.** No separate Context Builder in V1.
+- **OptMem is the final context layer.** No separate Context Builder in v0.
 - **The user can pause collection instantly** and exclude apps/windows; the collector never screenshots blindly at a fixed cadence.
 - **Modular monolith.** Every replaceable component sits behind a stable interface.
 - **Quality over quantity.** CONTX never becomes an agent orchestrator and never executes the user's personal actions.
@@ -126,31 +126,31 @@ contx pause / resume       # instant pause / resume
 
 ## Roadmap
 
-| Milestone | Goal |
-|-----------|------|
-| **J0** Foundations | Repo, modular architecture, data schemas, migrations, minimal CLI, config, ADRs, base tests. |
-| **J1** macOS collection | Active app/window, durations, idle detection, selective captures, exclusions, raw store, purge. |
-| **J2** Local privacy | Local OCR, secret detection, redaction, sensitivity levels, transformation audit. |
-| **J3** Events | Sessionisation, structured events, entities, projects, provenance, confidence. |
-| **J4** Patterns & candidates | Repetition detection, temporal comparison, candidates, scoring, dedup, worker decisions. |
-| **J5** Memory & agent | `MemoryStore` interface, OptMem adapter, `wake`/`recall`/`zoom`, agent proposals, corrections, integration block. |
-| **J6** Web UI | Dashboard, activity, patterns, memory, privacy, settings, wake preview. |
-| **J7** Real pilot | 7–14 day pilot, ground truth, with/without CONTX comparison, error analysis, OptMem decision. |
-| **J8** Hardening | Fixes, optimization, docs, install/uninstall, export, backup, versioning policy. |
+| Version | Milestone | Goal |
+|---------|-----------|------|
+| **v0.0.1** | **J0 + vertical slice** | Repo, ADRs, schemas, migrations, minimal CLI, and one end-to-end `active app → wake` path. |
+| **v0.1** | **J1 macOS collection** | Active app/window, durations, idle detection, selective captures, exclusions, raw store, purge. |
+| **v0.2** | **J2 local privacy** | Local OCR, secret detection, redaction, sensitivity levels, transformation audit. |
+| **v0.3** | **J3 events** | Sessionisation, structured events, entities, projects, provenance, confidence. |
+| **v0.4** | **J4 patterns & candidates** | Repetition detection, temporal comparison, candidates, scoring, dedup, worker decisions. |
+| **v0.5** | **J5 memory & agent** | `MemoryStore`, complete OptMem lifecycle, `wake`/`recall`/`zoom`, proposals, corrections, Codex integration. |
+| **v0.6** | **J6 web UI** | Dashboard, activity, patterns, memory, privacy, settings, wake preview. |
+| **v0.9** | **J7 real pilot** | 7–14 day pilot, ground truth, with/without CONTX comparison, error analysis, OptMem decision. |
+| **v1.0** | **J8 hardening** | Fixes, optimization, install/upgrade/uninstall, recovery, distribution, licensing, and documentation. |
 
-**Active goal:** Milestone 0 + a minimal vertical slice — `active app → local observation → simple event → memory candidate → OptMem → contx wake` — working end-to-end before OCR, complex patterns, or any UI (§37).
+**Active goal:** complete the Phase 0 decision baseline, then deliver v0.0.1 — `active app → local observation → simple event → memory candidate → OptMem → contx wake` — before OCR, complex patterns, a daemon, or any web UI (§37 and the [implementation plan](./docs/implementation-plan.md)).
 
 ---
 
 ## Current state
 
-Greenfield. The repository currently contains only the specification, the working agreement, and a vendored read-only reference clone of OptMem (`optmem/`). No code has been written yet.
+Greenfield. The repository contains the specification, working agreement, implementation plan, initial ADRs, architecture assets, and an ignored local reference clone of OptMem (`optmem/`). No CONTX product code has been written yet.
 
 ---
 
 ## Tech stack (reference, §22)
 
-- **Python 3.12+** via [uv](https://docs.astral.sh/uv/), Pydantic schemas, SQLite (WAL), SQLAlchemy/SQLModel, Alembic, Typer CLI, FastAPI (local API), pytest.
+- **Python 3.12** via [uv](https://docs.astral.sh/uv/), Pydantic schemas, SQLite (WAL), SQLAlchemy 2, Alembic, Typer CLI, FastAPI when the local API has a consumer, pytest.
 - **macOS:** PyObjC (NSWorkspace, Accessibility API, ScreenCaptureKit/CoreGraphics), background launch via `launchd`.
 - **OCR** behind a replaceable interface; Apple Vision is the first candidate `[HYPOTHÈSE]`.
 - **Models** behind a `ModelProvider` interface; deterministic rules with no model are a valid backend.
@@ -172,7 +172,7 @@ uv run contx --help
 contx/
 ├── cahier_des_charges.md          # source of truth (French, normative)
 ├── AGENTS.md                      # working agreement for agents
-├── optmem/                        # vendored reference clone — READ-ONLY, untracked
+├── optmem/                        # local reference clone — ignored and untracked
 ├── docs/architecture/             # architecture diagrams (Excalidraw source)
 ├── pyproject.toml
 ├── apps/{api,cli,web}/
@@ -185,7 +185,7 @@ contx/
 └── docs/{architecture,adr,evaluation,threat-model}/
 ```
 
-Runtime data lives **outside the repo**, in `~/.contx/` (permissions `0700`): `contx.db`, `raw/`, `logs/`, `config.toml`.
+Runtime data lives **outside the repo**. Durable state uses `~/Library/Application Support/CONTX/`, temporary raw data uses `~/Library/Caches/CONTX/`, and logs use `~/Library/Logs/CONTX/`. Private directories and files use restrictive local-user permissions.
 
 ---
 
@@ -193,6 +193,9 @@ Runtime data lives **outside the repo**, in `~/.contx/` (permissions `0700`): `c
 
 - [`cahier_des_charges.md`](./cahier_des_charges.md) — normative specification (French): data model §21, local API §24, performance §27, quality thresholds §28.7, acceptance §33.
 - [`AGENTS.md`](./AGENTS.md) — working agreement, invariants, roadmap, repo rules.
+- [`docs/implementation-plan.md`](./docs/implementation-plan.md) — executable delivery plan, gates, tests, and release mapping.
+- [`docs/adr/`](./docs/adr/) — accepted architecture and product decisions.
+- [`docs/third-party/optmem.md`](./docs/third-party/optmem.md) — OptMem provenance and redistribution gate.
 - [`optmem/README.md`](./optmem/README.md) — OptMem contract: `wake`, `note`, `nap`, `recall <regex>`, `zoom <lo>-<hi>`, `forget`.
 - [`docs/architecture/CONTX_architecture_OptMem_final.excalidraw`](./docs/architecture/CONTX_architecture_OptMem_final.excalidraw) — original architecture schema (open in [excalidraw.com](https://excalidraw.com)).
 
