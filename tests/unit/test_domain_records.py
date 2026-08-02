@@ -10,6 +10,9 @@ from contx.models import (
     CandidateStatus,
     EpistemicStatus,
     Event,
+    EventCorrection,
+    EventCorrectionContent,
+    EventType,
     MemoryCandidate,
     Observation,
     ProcessingRun,
@@ -32,6 +35,34 @@ def test_naive_timestamps_are_rejected() -> None:
 def test_event_requires_unique_provenance() -> None:
     with pytest.raises(ValidationError, match="must be unique"):
         _event(source_observation_ids=(ID_1, ID_1))
+
+
+def test_event_validity_period_cannot_run_backwards() -> None:
+    with pytest.raises(ValidationError, match="valid_from"):
+        _event(valid_from=NOW + timedelta(hours=1), valid_until=NOW)
+
+
+def test_event_correction_is_a_complete_append_only_semantic_snapshot() -> None:
+    correction = EventCorrection(
+        id=ID_1,
+        idempotency_key="d" * 64,
+        event_lineage_key="e" * 64,
+        target_event_id=ID_2,
+        replacement=EventCorrectionContent(
+            type=EventType.PROJECT_WORK,
+            summary="Corrected CONTX project work.",
+            epistemic_status=EpistemicStatus.OBSERVED,
+            confidence=1.0,
+            projects=("CONTX",),
+            valid_from=NOW,
+            valid_until=NOW + timedelta(minutes=10),
+        ),
+        reason="  User corrected the event summary.  ",
+        created_at=NOW,
+    )
+
+    assert correction.reason == "User corrected the event summary."
+    assert correction.replacement.type is EventType.PROJECT_WORK
 
 
 def test_observation_retention_cannot_exceed_48_hours() -> None:
@@ -105,11 +136,14 @@ def _event(**changes: object) -> Event:
     values: dict[str, object] = {
         "id": ID_2,
         "idempotency_key": "b" * 64,
-        "type": "project_work",
+        "lineage_key": "d" * 64,
+        "type": EventType.PROJECT_WORK,
         "summary": "Worked on a synthetic project.",
         "facts": {"active_seconds": 600},
         "started_at": NOW,
         "ended_at": NOW + timedelta(minutes=10),
+        "valid_from": NOW,
+        "valid_until": NOW + timedelta(minutes=10),
         "epistemic_status": EpistemicStatus.INFERRED,
         "confidence": 0.9,
         "sensitivity": Sensitivity.PERSONAL,

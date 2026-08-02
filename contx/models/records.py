@@ -51,6 +51,23 @@ class EpistemicStatus(StrEnum):
     HYPOTHETICAL = "hypothetical"
 
 
+class EventType(StrEnum):
+    """Bounded event vocabulary used by replay, timelines, and patterns."""
+
+    PROJECT_WORK = "project_work"
+    CODING = "coding"
+    TESTING = "testing"
+    DOCUMENT_EDITING = "document_editing"
+    RESEARCH = "research"
+    COMMUNICATION = "communication"
+    PLANNING = "planning"
+    SYSTEM_ADMINISTRATION = "system_administration"
+    MIXED_ACTIVITY = "mixed_activity"
+    PROJECT_RESUMPTION = "project_resumption"
+    BRIEF_ACTIVITY = "brief_activity"
+    OTHER = "other"
+
+
 class Sensitivity(StrEnum):
     PUBLIC = "public"
     PERSONAL = "personal"
@@ -209,11 +226,14 @@ class CollectionControl(DomainRecord):
 class Event(DomainRecord):
     id: UUID
     idempotency_key: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]+$")
-    type: str = Field(min_length=1, max_length=64)
+    lineage_key: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]+$")
+    type: EventType
     summary: str = Field(min_length=1, max_length=2000, repr=False)
     facts: dict[str, Any] = Field(repr=False)
     started_at: datetime
     ended_at: datetime
+    valid_from: datetime
+    valid_until: datetime | None = None
     epistemic_status: EpistemicStatus
     confidence: float = Field(ge=0.0, le=1.0)
     sensitivity: Sensitivity
@@ -225,15 +245,169 @@ class Event(DomainRecord):
     updated_at: datetime
 
     _utc_timestamps = field_validator(
-        "started_at", "ended_at", "created_at", "updated_at"
-    )(require_aware_utc)
+        "started_at",
+        "ended_at",
+        "valid_from",
+        "valid_until",
+        "created_at",
+        "updated_at",
+    )(lambda value: None if value is None else require_aware_utc(value))
 
     @model_validator(mode="after")
     def validate_event(self) -> Self:
         if self.started_at > self.ended_at:
             raise ValueError("started_at must not be after ended_at")
+        if self.valid_until is not None and self.valid_from > self.valid_until:
+            raise ValueError("valid_from must not be after valid_until")
         if len(set(self.source_observation_ids)) != len(self.source_observation_ids):
             raise ValueError("source observation identifiers must be unique")
+        if len(set(self.projects)) != len(self.projects):
+            raise ValueError("event projects must be unique")
+        if len(set(self.entities)) != len(self.entities):
+            raise ValueError("event entities must be unique")
+        return self
+
+
+class EventCorrectionContent(DomainRecord):
+    """Complete corrected semantic view without replacing source evidence."""
+
+    type: EventType
+    summary: str = Field(min_length=1, max_length=2000, repr=False)
+    epistemic_status: EpistemicStatus
+    confidence: float = Field(ge=0.0, le=1.0)
+    projects: tuple[str, ...] = Field(default=(), repr=False)
+    entities: tuple[str, ...] = Field(default=(), repr=False)
+    valid_from: datetime
+    valid_until: datetime | None = None
+
+    _utc_timestamps = field_validator("valid_from", "valid_until")(
+        lambda value: None if value is None else require_aware_utc(value)
+    )
+
+    @model_validator(mode="after")
+    def validate_content(self) -> Self:
+        if self.valid_until is not None and self.valid_from > self.valid_until:
+            raise ValueError("valid_from must not be after valid_until")
+        if len(set(self.projects)) != len(self.projects):
+            raise ValueError("corrected projects must be unique")
+        if len(set(self.entities)) != len(self.entities):
+            raise ValueError("corrected entities must be unique")
+        return self
+
+
+class EventCorrection(DomainRecord):
+    """Append-only user correction attached to one stable event lineage."""
+
+    id: UUID
+    idempotency_key: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]+$")
+    event_lineage_key: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]+$",
+    )
+    target_event_id: UUID
+    replacement: EventCorrectionContent = Field(repr=False)
+    reason: str = Field(min_length=1, max_length=500, repr=False)
+    supersedes_correction_id: UUID | None = None
+    created_at: datetime
+
+    _utc_timestamp = field_validator("created_at")(require_aware_utc)
+
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("correction reason must not be empty")
+        return normalized
+
+
+class TimelineBuild(DomainRecord):
+    """Content-free parameters for one reproducible activity-timeline replay."""
+
+    processing_run_id: UUID
+    processing_version: str = Field(min_length=1, max_length=64)
+    window_start: datetime
+    window_end: datetime
+    session_gap_seconds: int = Field(ge=30, le=3600)
+    max_session_duration_seconds: int = Field(ge=300, le=14400)
+
+    _utc_timestamps = field_validator("window_start", "window_end")(require_aware_utc)
+
+    @model_validator(mode="after")
+    def validate_build(self) -> Self:
+        if self.window_start >= self.window_end:
+            raise ValueError("timeline window must have a positive duration")
+        if self.max_session_duration_seconds <= self.session_gap_seconds:
+            raise ValueError("timeline session maximum must exceed its gap")
+        return self
+
+
+class TimelineEntry(DomainRecord):
+    """Effective event semantics for one selected replay and correction chain."""
+
+    event_id: UUID
+    correction_id: UUID | None = None
+    lineage_key: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]+$")
+    type: EventType
+    summary: str = Field(min_length=1, max_length=2000, repr=False)
+    started_at: datetime
+    ended_at: datetime
+    valid_from: datetime
+    valid_until: datetime | None = None
+    epistemic_status: EpistemicStatus
+    confidence: float = Field(ge=0.0, le=1.0)
+    sensitivity: Sensitivity
+    projects: tuple[str, ...] = Field(default=(), repr=False)
+    entities: tuple[str, ...] = Field(default=(), repr=False)
+    source_observation_ids: tuple[UUID, ...] = Field(min_length=1)
+    processing_version: str = Field(min_length=1, max_length=64)
+
+    _utc_timestamps = field_validator(
+        "started_at",
+        "ended_at",
+        "valid_from",
+        "valid_until",
+    )(lambda value: None if value is None else require_aware_utc(value))
+
+    @model_validator(mode="after")
+    def validate_entry(self) -> Self:
+        if self.started_at > self.ended_at:
+            raise ValueError("timeline entry cannot end before it starts")
+        if self.valid_until is not None and self.valid_from > self.valid_until:
+            raise ValueError("timeline entry validity cannot run backwards")
+        if len(set(self.source_observation_ids)) != len(self.source_observation_ids):
+            raise ValueError("timeline observation identifiers must be unique")
+        return self
+
+
+class ActivityTimeline(DomainRecord):
+    """One immutable effective view of a successful timeline processing run."""
+
+    build: TimelineBuild
+    entries: tuple[TimelineEntry, ...]
+
+    @model_validator(mode="after")
+    def validate_timeline(self) -> Self:
+        if (
+            tuple(
+                sorted(
+                    self.entries,
+                    key=lambda item: (
+                        item.started_at,
+                        item.ended_at,
+                        str(item.event_id),
+                    ),
+                )
+            )
+            != self.entries
+        ):
+            raise ValueError("timeline entries must be ordered")
+        if any(
+            entry.processing_version != self.build.processing_version
+            for entry in self.entries
+        ):
+            raise ValueError("timeline entries must match the replay version")
         return self
 
 

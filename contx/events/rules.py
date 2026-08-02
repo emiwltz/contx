@@ -9,6 +9,7 @@ from contx.models import (
     Clock,
     EpistemicStatus,
     Event,
+    EventType,
     IdentifierSource,
     Observation,
     Sensitivity,
@@ -68,6 +69,10 @@ class VerticalSliceEventBuilder:
             return None
 
         source_ids = tuple(item.id for item in observations)
+        lineage_key = build_idempotency_key(
+            "event-lineage-v1",
+            tuple(item.idempotency_key for item in observations),
+        )
         started_at = current[0].started_at or current[0].captured_at
         ended_at = current[-1].ended_at or current[-1].captured_at
         now = self._clock.now()
@@ -78,7 +83,8 @@ class VerticalSliceEventBuilder:
                 EVENT_PROCESSING_VERSION,
                 tuple(item.idempotency_key for item in observations),
             ),
-            type="project_resumption",
+            lineage_key=lineage_key,
+            type=EventType.PROJECT_RESUMPTION,
             summary="Resumed sustained work on CONTX after a multi-day gap.",
             facts={
                 "app_bundle_id": CONTX_SYNTHETIC_BUNDLE,
@@ -87,6 +93,8 @@ class VerticalSliceEventBuilder:
             },
             started_at=started_at,
             ended_at=ended_at,
+            valid_from=started_at,
+            valid_until=ended_at,
             epistemic_status=EpistemicStatus.INFERRED,
             confidence=0.92,
             sensitivity=Sensitivity.PERSONAL,
@@ -100,6 +108,10 @@ class VerticalSliceEventBuilder:
 
     def _build_brief_activity(self, observations: list[Observation]) -> Event:
         source_ids = tuple(item.id for item in observations)
+        lineage_key = build_idempotency_key(
+            "event-lineage-v1",
+            tuple(item.idempotency_key for item in observations),
+        )
         first = observations[0]
         last = observations[-1]
         started_at = first.started_at or first.captured_at
@@ -113,7 +125,8 @@ class VerticalSliceEventBuilder:
                 EVENT_PROCESSING_VERSION,
                 tuple(item.idempotency_key for item in observations),
             ),
-            type="brief_activity",
+            lineage_key=lineage_key,
+            type=EventType.BRIEF_ACTIVITY,
             summary="Observed one brief active-application metadata sample.",
             facts={
                 "app_bundle_id": first.app_bundle_id,
@@ -121,6 +134,8 @@ class VerticalSliceEventBuilder:
             },
             started_at=started_at,
             ended_at=ended_at,
+            valid_from=started_at,
+            valid_until=ended_at,
             epistemic_status=EpistemicStatus.OBSERVED,
             confidence=1.0,
             sensitivity=Sensitivity.PERSONAL,

@@ -55,11 +55,14 @@ class EventModel(Base):
 
     id: Mapped[Identifier] = mapped_column(String(36), primary_key=True)
     idempotency_key: Mapped[str] = mapped_column(String(64), unique=True)
+    lineage_key: Mapped[str] = mapped_column(String(64), index=True)
     type: Mapped[str] = mapped_column(String(64), index=True)
     summary: Mapped[str] = mapped_column(Text)
     facts: Mapped[dict[str, Any]] = mapped_column(JSON)
     started_at: Mapped[UtcTimestamp] = mapped_column(String(32), index=True)
     ended_at: Mapped[UtcTimestamp] = mapped_column(String(32))
+    valid_from: Mapped[UtcTimestamp] = mapped_column(String(32), index=True)
+    valid_until: Mapped[UtcTimestamp | None] = mapped_column(String(32))
     epistemic_status: Mapped[str] = mapped_column(String(32))
     confidence: Mapped[float] = mapped_column(Float)
     sensitivity: Mapped[str] = mapped_column(String(32))
@@ -116,6 +119,45 @@ class EventProcessingRunModel(Base):
         ForeignKey("processing_runs.id", ondelete="RESTRICT"),
         primary_key=True,
     )
+
+
+class EventCorrectionModel(Base):
+    """Append-only corrected semantics for a stable event lineage."""
+
+    __tablename__ = "event_corrections"
+
+    id: Mapped[Identifier] = mapped_column(String(36), primary_key=True)
+    idempotency_key: Mapped[str] = mapped_column(String(64), unique=True)
+    event_lineage_key: Mapped[str] = mapped_column(String(64), index=True)
+    target_event_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("events.id", ondelete="RESTRICT"),
+    )
+    replacement: Mapped[dict[str, Any]] = mapped_column(JSON)
+    reason: Mapped[str] = mapped_column(Text)
+    supersedes_correction_id: Mapped[Identifier | None] = mapped_column(
+        String(36),
+        ForeignKey("event_corrections.id", ondelete="RESTRICT"),
+        unique=True,
+    )
+    created_at: Mapped[UtcTimestamp] = mapped_column(String(32), index=True)
+
+
+class TimelineBuildModel(Base):
+    """Content-free parameters for one reproducible timeline run."""
+
+    __tablename__ = "timeline_builds"
+
+    processing_run_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("processing_runs.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    processing_version: Mapped[str] = mapped_column(String(64), index=True)
+    window_start: Mapped[UtcTimestamp] = mapped_column(String(32), index=True)
+    window_end: Mapped[UtcTimestamp] = mapped_column(String(32), index=True)
+    session_gap_seconds: Mapped[int] = mapped_column(Integer)
+    max_session_duration_seconds: Mapped[int] = mapped_column(Integer)
 
 
 class MemoryCandidateModel(Base):

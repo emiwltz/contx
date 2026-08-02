@@ -46,6 +46,8 @@ def test_empty_database_upgrades_to_packaged_head(tmp_path: Path) -> None:
         "event_observations",
         "event_model_transformations",
         "event_processing_runs",
+        "event_corrections",
+        "timeline_builds",
         "memory_candidates",
         "candidate_events",
         "memory_links",
@@ -124,6 +126,86 @@ def test_migration_matches_persistence_metadata(tmp_path: Path) -> None:
         engine.dispose()
 
     assert differences == []
+
+
+def test_existing_events_gain_stable_lineage_and_validity_on_upgrade(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "contx.db"
+    upgrade_database(database_path, revision="20260802_0004")
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            """INSERT INTO observations (
+                id, idempotency_key, source_type, activity_state, captured_at,
+                started_at, ended_at, app_name, app_bundle_id, window_title,
+                artifact_path, content_hash, perceptual_hash, excluded,
+                exclusion_reason, processing_status, expires_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "00000000-0000-0000-0000-000000000021",
+                "a" * 64,
+                "synthetic",
+                "active",
+                "2026-08-02T10:00:00.000000Z",
+                "2026-08-02T10:00:00.000000Z",
+                "2026-08-02T10:20:00.000000Z",
+                "Synthetic Editor",
+                "dev.contx.synthetic",
+                None,
+                None,
+                None,
+                None,
+                0,
+                None,
+                "processed",
+                "2026-08-04T10:00:00.000000Z",
+                "2026-08-02T10:00:00.000000Z",
+            ),
+        )
+        connection.execute(
+            """INSERT INTO events (
+                id, idempotency_key, type, summary, facts, started_at, ended_at,
+                epistemic_status, confidence, sensitivity, projects, entities,
+                source_observation_ids, processing_version, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "00000000-0000-0000-0000-000000000022",
+                "b" * 64,
+                "project_work",
+                "Existing synthetic event.",
+                "{}",
+                "2026-08-02T10:00:00.000000Z",
+                "2026-08-02T10:20:00.000000Z",
+                "inferred",
+                0.8,
+                "personal",
+                '["CONTX"]',
+                "[]",
+                '["00000000-0000-0000-0000-000000000021"]',
+                "event-v1",
+                "2026-08-02T10:21:00.000000Z",
+                "2026-08-02T10:21:00.000000Z",
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    upgrade_database(database_path)
+
+    connection = sqlite3.connect(database_path)
+    try:
+        row = connection.execute(
+            "SELECT lineage_key, valid_from, valid_until FROM events"
+        ).fetchone()
+    finally:
+        connection.close()
+    assert row == (
+        "b" * 64,
+        "2026-08-02T10:00:00.000000Z",
+        "2026-08-02T10:20:00.000000Z",
+    )
 
 
 def test_empty_file_recovers_like_interrupted_initialization(tmp_path: Path) -> None:

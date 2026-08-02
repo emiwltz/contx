@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from contx.db.models import (
     CandidateEventModel,
     CollectionControlModel,
+    EventCorrectionModel,
     EventModel,
     EventModelTransformationModel,
     EventObservationModel,
@@ -24,6 +25,7 @@ from contx.db.models import (
     ModelTransformationRunModel,
     ObservationModel,
     ProcessingRunModel,
+    TimelineBuildModel,
 )
 from contx.errors import DatabaseError
 from contx.model_provider import (
@@ -37,6 +39,9 @@ from contx.models import (
     CollectionControl,
     EpistemicStatus,
     Event,
+    EventCorrection,
+    EventCorrectionContent,
+    EventType,
     ExclusionRule,
     ExclusionRuleType,
     ExclusionScope,
@@ -50,6 +55,7 @@ from contx.models import (
     ProcessingRunStatus,
     Sensitivity,
     SourceType,
+    TimelineBuild,
 )
 from contx.models.common import format_utc, parse_utc
 
@@ -167,6 +173,10 @@ class PipelineRepository:
     def processing_run_by_id(self, run_id: UUID) -> ProcessingRun | None:
         model = self._session.get(ProcessingRunModel, str(run_id))
         return None if model is None else _processing_run_from_model(model)
+
+    def event_by_id(self, event_id: UUID) -> Event | None:
+        model = self._session.get(EventModel, str(event_id))
+        return None if model is None else _event_from_model(model)
 
     def count(
         self,
@@ -473,6 +483,23 @@ class ModelTransformationRepository:
                 "A model transformation source observation is unavailable"
             ) from error
 
+    def succeeded(self, *, limit: int = 10000) -> tuple[ModelTransformation, ...]:
+        if limit < 1:
+            raise ValueError("successful model transformation limit must be positive")
+        models = self._session.scalars(
+            select(ModelTransformationModel)
+            .where(
+                ModelTransformationModel.status
+                == ModelTransformationStatus.SUCCEEDED.value
+            )
+            .order_by(
+                ModelTransformationModel.ended_at,
+                ModelTransformationModel.id,
+            )
+            .limit(limit)
+        )
+        return tuple(_model_transformation_from_model(model) for model in models)
+
     def stale_running(
         self,
         *,
@@ -774,6 +801,120 @@ class ModelEventRepository:
             )
         )
 
+    def events_for_processing_run(self, processing_run_id: UUID) -> tuple[Event, ...]:
+        models = self._session.scalars(
+            select(EventModel)
+            .join(
+                EventProcessingRunModel,
+                EventProcessingRunModel.event_id == EventModel.id,
+            )
+            .where(EventProcessingRunModel.processing_run_id == str(processing_run_id))
+            .order_by(EventModel.started_at, EventModel.id)
+        )
+        return tuple(_event_from_model(model) for model in models)
+
+
+class EventCorrectionRepository:
+    """Persist one append-only correction chain per stable event lineage."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def save(self, correction: EventCorrection) -> EventCorrection:
+        existing = self._session.scalar(
+            select(EventCorrectionModel).where(
+                EventCorrectionModel.idempotency_key == correction.idempotency_key
+            )
+        )
+        if existing is not None:
+            persisted = _event_correction_from_model(existing)
+            if persisted != correction:
+                raise DatabaseError("Event correction idempotency identity conflicts")
+            return persisted
+
+        target = self._session.get(EventModel, str(correction.target_event_id))
+        if target is None:
+            raise DatabaseError("Cannot correct a missing event")
+        if target.lineage_key != correction.event_lineage_key:
+            raise DatabaseError("Event correction lineage does not match its target")
+
+        latest = self.latest_for_lineages((correction.event_lineage_key,)).get(
+            correction.event_lineage_key
+        )
+        expected_superseded = None if latest is None else latest.id
+        if correction.supersedes_correction_id != expected_superseded:
+            raise DatabaseError("Event correction must extend the latest lineage state")
+
+        self._session.add(_event_correction_to_model(correction))
+        self._session.flush()
+        return correction
+
+    def by_id(self, correction_id: UUID) -> EventCorrection | None:
+        model = self._session.get(EventCorrectionModel, str(correction_id))
+        return None if model is None else _event_correction_from_model(model)
+
+    def latest_for_lineages(
+        self,
+        lineage_keys: tuple[str, ...],
+    ) -> dict[str, EventCorrection]:
+        if not lineage_keys:
+            return {}
+        models = tuple(
+            self._session.scalars(
+                select(EventCorrectionModel)
+                .where(EventCorrectionModel.event_lineage_key.in_(lineage_keys))
+                .order_by(
+                    EventCorrectionModel.created_at,
+                    EventCorrectionModel.id,
+                )
+            )
+        )
+        superseded_ids = {
+            model.supersedes_correction_id
+            for model in models
+            if model.supersedes_correction_id is not None
+        }
+        latest: dict[str, EventCorrection] = {}
+        for model in models:
+            if model.id not in superseded_ids:
+                if model.event_lineage_key in latest:
+                    raise DatabaseError("Event correction lineage is forked")
+                latest[model.event_lineage_key] = _event_correction_from_model(model)
+        return latest
+
+
+class TimelineBuildRepository:
+    """Persist content-free replay parameters linked to one processing run."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def save(self, build: TimelineBuild) -> TimelineBuild:
+        existing = self._session.get(
+            TimelineBuildModel,
+            str(build.processing_run_id),
+        )
+        if existing is not None:
+            persisted = _timeline_build_from_model(existing)
+            if persisted != build:
+                raise DatabaseError("Timeline build identity conflicts")
+            return persisted
+        run = self._session.get(ProcessingRunModel, str(build.processing_run_id))
+        if run is None:
+            raise DatabaseError("Timeline build processing run is missing")
+        if (
+            run.pipeline != "activity_timeline"
+            or run.version != build.processing_version
+        ):
+            raise DatabaseError("Timeline build processing identity is invalid")
+        self._session.add(_timeline_build_to_model(build))
+        self._session.flush()
+        return build
+
+    def by_processing_run(self, processing_run_id: UUID) -> TimelineBuild | None:
+        model = self._session.get(TimelineBuildModel, str(processing_run_id))
+        return None if model is None else _timeline_build_from_model(model)
+
 
 class CollectionRepository:
     """Persist collection control and pre-capture exclusion policy."""
@@ -1009,11 +1150,16 @@ def _event_to_model(record: Event) -> EventModel:
     return EventModel(
         id=str(record.id),
         idempotency_key=record.idempotency_key,
+        lineage_key=record.lineage_key,
         type=record.type,
         summary=record.summary,
         facts=record.facts,
         started_at=format_utc(record.started_at),
         ended_at=format_utc(record.ended_at),
+        valid_from=format_utc(record.valid_from),
+        valid_until=(
+            None if record.valid_until is None else format_utc(record.valid_until)
+        ),
         epistemic_status=record.epistemic_status.value,
         confidence=record.confidence,
         sensitivity=record.sensitivity.value,
@@ -1030,11 +1176,14 @@ def _event_from_model(model: EventModel) -> Event:
     return Event(
         id=UUID(model.id),
         idempotency_key=model.idempotency_key,
-        type=model.type,
+        lineage_key=model.lineage_key,
+        type=_persisted_event_type(model.type),
         summary=model.summary,
         facts=model.facts,
         started_at=parse_utc(model.started_at),
         ended_at=parse_utc(model.ended_at),
+        valid_from=parse_utc(model.valid_from),
+        valid_until=None if model.valid_until is None else parse_utc(model.valid_until),
         epistemic_status=EpistemicStatus(model.epistemic_status),
         confidence=model.confidence,
         sensitivity=Sensitivity(model.sensitivity),
@@ -1047,6 +1196,72 @@ def _event_from_model(model: EventModel) -> Event:
         created_at=parse_utc(model.created_at),
         updated_at=parse_utc(model.updated_at),
     )
+
+
+def _event_correction_to_model(record: EventCorrection) -> EventCorrectionModel:
+    return EventCorrectionModel(
+        id=str(record.id),
+        idempotency_key=record.idempotency_key,
+        event_lineage_key=record.event_lineage_key,
+        target_event_id=str(record.target_event_id),
+        replacement=record.replacement.model_dump(mode="json"),
+        reason=record.reason,
+        supersedes_correction_id=(
+            None
+            if record.supersedes_correction_id is None
+            else str(record.supersedes_correction_id)
+        ),
+        created_at=format_utc(record.created_at),
+    )
+
+
+def _event_correction_from_model(model: EventCorrectionModel) -> EventCorrection:
+    replacement = EventCorrectionContent.model_validate_json(
+        json.dumps(model.replacement, ensure_ascii=False)
+    )
+    return EventCorrection(
+        id=UUID(model.id),
+        idempotency_key=model.idempotency_key,
+        event_lineage_key=model.event_lineage_key,
+        target_event_id=UUID(model.target_event_id),
+        replacement=replacement,
+        reason=model.reason,
+        supersedes_correction_id=(
+            None
+            if model.supersedes_correction_id is None
+            else UUID(model.supersedes_correction_id)
+        ),
+        created_at=parse_utc(model.created_at),
+    )
+
+
+def _timeline_build_to_model(record: TimelineBuild) -> TimelineBuildModel:
+    return TimelineBuildModel(
+        processing_run_id=str(record.processing_run_id),
+        processing_version=record.processing_version,
+        window_start=format_utc(record.window_start),
+        window_end=format_utc(record.window_end),
+        session_gap_seconds=record.session_gap_seconds,
+        max_session_duration_seconds=record.max_session_duration_seconds,
+    )
+
+
+def _timeline_build_from_model(model: TimelineBuildModel) -> TimelineBuild:
+    return TimelineBuild(
+        processing_run_id=UUID(model.processing_run_id),
+        processing_version=model.processing_version,
+        window_start=parse_utc(model.window_start),
+        window_end=parse_utc(model.window_end),
+        session_gap_seconds=model.session_gap_seconds,
+        max_session_duration_seconds=model.max_session_duration_seconds,
+    )
+
+
+def _persisted_event_type(value: str) -> EventType:
+    try:
+        return EventType(value)
+    except ValueError:
+        return EventType.OTHER
 
 
 def _candidate_to_model(record: MemoryCandidate) -> MemoryCandidateModel:

@@ -2,10 +2,14 @@
 
 from contx.models.records import (
     ActivityState,
+    ActivityTimeline,
     CandidateStatus,
     CollectionControl,
     EpistemicStatus,
     Event,
+    EventCorrection,
+    EventCorrectionContent,
+    EventType,
     ExclusionRule,
     ExclusionRuleType,
     ExclusionScope,
@@ -19,6 +23,8 @@ from contx.models.records import (
     ProcessingRunStatus,
     Sensitivity,
     SourceType,
+    TimelineBuild,
+    TimelineEntry,
 )
 from contx.models.sources import (
     Clock,
@@ -29,11 +35,15 @@ from contx.models.sources import (
 
 __all__ = [
     "ActivityState",
+    "ActivityTimeline",
     "CandidateStatus",
     "Clock",
     "CollectionControl",
     "EpistemicStatus",
     "Event",
+    "EventCorrection",
+    "EventCorrectionContent",
+    "EventType",
     "ExclusionRule",
     "ExclusionRuleType",
     "ExclusionScope",
@@ -48,6 +58,8 @@ __all__ = [
     "ProcessingRunStatus",
     "Sensitivity",
     "SourceType",
+    "TimelineBuild",
+    "TimelineEntry",
     "SystemClock",
     "UuidIdentifierSource",
 ]

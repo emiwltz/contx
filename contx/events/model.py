@@ -5,7 +5,13 @@ from __future__ import annotations
 from uuid import NAMESPACE_URL, uuid5
 
 from contx.model_provider import ModelTransformation, ModelTransformationStatus
-from contx.models import EpistemicStatus, Event, Observation, ObservationStatus
+from contx.models import (
+    EpistemicStatus,
+    Event,
+    EventType,
+    Observation,
+    ObservationStatus,
+)
 from contx.models.common import build_idempotency_key
 from contx.models.sources import Clock
 
@@ -54,11 +60,16 @@ class ModelTransformationEventBuilder:
             MODEL_EVENT_PROCESSING_VERSION,
             transformation.idempotency_key,
         )
+        lineage_key = build_idempotency_key(
+            "event-lineage-v1",
+            tuple(observation.idempotency_key for observation in ordered),
+        )
         timestamp = self._clock.now()
         return Event(
             id=uuid5(NAMESPACE_URL, f"contx:model-event:{key}"),
             idempotency_key=key,
-            type=interpretation.activity_type,
+            lineage_key=lineage_key,
+            type=_event_type(interpretation.activity_type),
             summary=interpretation.summary,
             facts={
                 "observed_facts": list(interpretation.observed_facts),
@@ -81,6 +92,8 @@ class ModelTransformationEventBuilder:
             },
             started_at=started_at,
             ended_at=ended_at,
+            valid_from=started_at,
+            valid_until=ended_at,
             epistemic_status=(
                 EpistemicStatus.INFERRED
                 if interpretation.inferred_context
@@ -95,3 +108,10 @@ class ModelTransformationEventBuilder:
             created_at=timestamp,
             updated_at=timestamp,
         )
+
+
+def _event_type(activity_type: str) -> EventType:
+    try:
+        return EventType(activity_type)
+    except ValueError:
+        return EventType.OTHER
