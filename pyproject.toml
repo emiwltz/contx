@@ -16,6 +16,7 @@ classifiers = [
 dependencies = [
     "alembic>=1.16,<2",
     "pydantic>=2.11,<3",
+    "pyobjc-framework-ApplicationServices>=12.2,<13; sys_platform == 'darwin'",
     "pyobjc-framework-Cocoa>=12.2,<13; sys_platform == 'darwin'",
     "pyobjc-framework-Quartz>=12.2,<13; sys_platform == 'darwin'",
     "sqlalchemy>=2.0,<3",
