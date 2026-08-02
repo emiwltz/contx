@@ -16,12 +16,14 @@ from contx.collectors.macos.capabilities import (
 )
 from contx.collectors.macos.notifications import WorkspaceNotificationMonitor
 from contx.collectors.macos.screenshots import QuartzScreenshotSource
+from contx.collectors.macos.window_titles import FocusedWindowTitleProbe
 
 __all__ = [
     "ActiveApplicationCollector",
     "ApplicationMetadata",
     "CapabilityStatus",
     "CollectionCapability",
+    "FocusedWindowTitleProbe",
     "MacOSActivitySampler",
     "QuartzIdleSecondsProbe",
     "QuartzScreenshotSource",

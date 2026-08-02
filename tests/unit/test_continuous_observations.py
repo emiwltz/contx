@@ -53,6 +53,16 @@ class RecordingScreenshotSource:
         return SYNTHETIC_PNG
 
 
+class RecordingWindowTitleProbe:
+    def __init__(self, title: str) -> None:
+        self.title = title
+        self.calls = 0
+
+    def read(self) -> str:
+        self.calls += 1
+        return self.title
+
+
 class MutableControls:
     def __init__(self, *, rules: tuple[ExclusionRule, ...] = ()) -> None:
         self.paused = False
@@ -136,12 +146,14 @@ def test_exclusion_is_shared_before_pixel_capture_and_duration_storage(
     clock = MutableClock(START)
     sampler = RecordingSampler(_sample(bundle="com.example.private"))
     source = RecordingScreenshotSource()
+    titles = RecordingWindowTitleProbe("Must never be read")
     collector = _collector(
         tmp_path,
         clock=clock,
         sampler=sampler,
         controls=MutableControls(rules=(rule,)),
         screenshot_source=source,
+        window_titles=titles,
     )
 
     assert collector.collect() == ()
@@ -149,6 +161,39 @@ def test_exclusion_is_shared_before_pixel_capture_and_duration_storage(
     closed = collector.close()
 
     assert sampler.calls == 1
+    assert source.calls == 0
+    assert titles.calls == 0
+    assert len(closed) == 1
+    assert closed[0].source_type is SourceType.SYSTEM_STATE
+
+
+def test_window_title_exclusion_blocks_capture_and_metadata_storage(
+    tmp_path: Path,
+) -> None:
+    rule = ExclusionRule(
+        id=UUID(int=81),
+        rule_type=ExclusionRuleType.WINDOW_TITLE_CONTAINS,
+        pattern="private checkout",
+        created_at=START,
+        updated_at=START,
+    )
+    clock = MutableClock(START)
+    source = RecordingScreenshotSource()
+    titles = RecordingWindowTitleProbe("  Private Checkout  ")
+    collector = _collector(
+        tmp_path,
+        clock=clock,
+        sampler=RecordingSampler(_sample()),
+        controls=MutableControls(rules=(rule,)),
+        screenshot_source=source,
+        window_titles=titles,
+    )
+
+    assert collector.collect() == ()
+    clock.value = START + timedelta(seconds=10)
+    closed = collector.close()
+
+    assert titles.calls == 1
     assert source.calls == 0
     assert len(closed) == 1
     assert closed[0].source_type is SourceType.SYSTEM_STATE
@@ -161,18 +206,20 @@ def _collector(
     sampler: RecordingSampler,
     controls: MutableControls,
     screenshot_source: RecordingScreenshotSource,
+    window_titles: RecordingWindowTitleProbe | None = None,
 ) -> ContinuousObservationCollector:
+    policy = CollectionPolicy()
     activity = ContinuousActivityCollector(
         sampler,
         controls=controls,
-        policy=CollectionPolicy(),
+        policy=policy,
         clock=clock,
         identifiers=SequenceIdentifiers(UUID(int=value) for value in range(1, 20)),
         retention=timedelta(hours=48),
     )
     screenshots = SelectiveScreenshotService(
         planner=SelectiveScreenshotPlanner(
-            policy=CollectionPolicy(),
+            policy=policy,
             enabled=True,
             minimum_interval=timedelta(seconds=15),
             maximum_interval=timedelta(seconds=120),
@@ -186,6 +233,8 @@ def _collector(
         controls=controls,
         activity=activity,
         screenshots=screenshots,
+        window_titles=window_titles,
+        policy=policy,
         clock=clock,
     )
 

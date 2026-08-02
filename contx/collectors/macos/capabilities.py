@@ -59,6 +59,7 @@ def detect_collection_capabilities(
 
     cocoa = _optional_module("AppKit", module_loader)
     quartz = _optional_module("Quartz", module_loader)
+    accessibility = _optional_module("ApplicationServices", module_loader)
     cocoa_available = cocoa is not None and all(
         hasattr(cocoa, attribute)
         for attribute in (
@@ -90,11 +91,21 @@ def detect_collection_capabilities(
         _permission_capability(
             name="window_titles",
             enabled=settings.window_titles_enabled,
-            module=quartz,
+            module=accessibility,
             preflight_name="AXIsProcessTrusted",
-            missing_api_reason="accessibility_preflight_unavailable",
+            missing_api_reason="accessibility_api_unavailable",
             permission_reason="accessibility_permission_missing",
             settings_path="System Settings > Privacy & Security > Accessibility",
+            required_api_names=(
+                "AXUIElementCreateSystemWide",
+                "AXUIElementCopyAttributeValue",
+                "kAXFocusedApplicationAttribute",
+                "kAXFocusedWindowAttribute",
+                "kAXTitleAttribute",
+                "kAXErrorSuccess",
+                "kAXErrorNoValue",
+                "kAXErrorAttributeUnsupported",
+            ),
         ),
         _permission_capability(
             name="screenshots",

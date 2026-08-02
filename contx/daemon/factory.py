@@ -23,6 +23,7 @@ from contx.collection import (
     SelectiveScreenshotService,
 )
 from contx.collectors.macos import (
+    FocusedWindowTitleProbe,
     MacOSActivitySampler,
     QuartzIdleSecondsProbe,
     ResolvedSystemStateProbe,
@@ -126,11 +127,6 @@ def build_macos_collection_daemon(
         raise ConfigurationError(
             "Background collection is disabled in CONTX configuration"
         )
-    if collection.window_titles_enabled and sampler is None:
-        raise CollectorUnavailableError(
-            "Window-title collection is enabled but not implemented by the "
-            "current macOS sampler"
-        )
     if collection.screenshots_enabled and screenshot_source is None:
         raise CollectorUnavailableError(
             "Screenshot collection is enabled but no authorized source is configured"
@@ -196,6 +192,10 @@ def build_macos_collection_daemon(
             controls=controls,
             activity=activity,
             screenshots=screenshots,
+            window_titles=(
+                FocusedWindowTitleProbe() if collection.window_titles_enabled else None
+            ),
+            policy=policy,
             clock=daemon_clock,
         )
         session = ContinuousCollectionSession(

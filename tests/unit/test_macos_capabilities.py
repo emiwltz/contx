@@ -28,8 +28,10 @@ def test_disabled_sensitive_features_do_not_run_permission_preflights() -> None:
         module = _module(name)
         if name == "AppKit":
             _add_cocoa_api(module)
-        else:
+        elif name == "Quartz":
             _add_quartz_api(module, preflight_calls)
+        else:
+            _add_accessibility_api(module, preflight_calls)
         return module
 
     capabilities = _by_name(
@@ -53,8 +55,10 @@ def test_enabled_features_report_missing_permissions_without_requesting_them() -
         module = _module(name)
         if name == "AppKit":
             _add_cocoa_api(module)
-        else:
+        elif name == "Quartz":
             _add_quartz_api(module, preflight_calls)
+        else:
+            _add_accessibility_api(module, preflight_calls)
         return module
 
     capabilities = _by_name(
@@ -77,7 +81,10 @@ def test_missing_quartz_keeps_safe_cocoa_features_available() -> None:
         if name == "Quartz":
             raise ImportError
         module = _module(name)
-        _add_cocoa_api(module)
+        if name == "AppKit":
+            _add_cocoa_api(module)
+        else:
+            _add_accessibility_api(module, [])
         return module
 
     capabilities = _by_name(
@@ -90,7 +97,7 @@ def test_missing_quartz_keeps_safe_cocoa_features_available() -> None:
 
     assert capabilities["active_application"].status is CapabilityStatus.AVAILABLE
     assert capabilities["idle_detection"].reason_code == "quartz_bridge_missing"
-    assert capabilities["window_titles"].status is CapabilityStatus.UNAVAILABLE
+    assert capabilities["window_titles"].status is CapabilityStatus.PERMISSION_REQUIRED
     assert capabilities["screenshots"].status is CapabilityStatus.UNAVAILABLE
 
 
@@ -112,15 +119,10 @@ def _add_quartz_api(module: ModuleType, calls: list[str]) -> None:
     module.kCGEventSourceStateCombinedSessionState = 0  # type: ignore[attr-defined]
     module.kCGAnyInputEventType = 0  # type: ignore[attr-defined]
 
-    def accessibility() -> bool:
-        calls.append("accessibility")
-        return False
-
     def screen_capture() -> bool:
         calls.append("screen_capture")
         return False
 
-    module.AXIsProcessTrusted = accessibility  # type: ignore[attr-defined]
     module.CGPreflightScreenCaptureAccess = screen_capture  # type: ignore[attr-defined]
     module.CGRectInfinite = object()  # type: ignore[attr-defined]
     module.kCGWindowListOptionOnScreenOnly = 1  # type: ignore[attr-defined]
@@ -131,6 +133,22 @@ def _add_quartz_api(module: ModuleType, calls: list[str]) -> None:
     module.CGImageDestinationCreateWithData = lambda *_: object()  # type: ignore[attr-defined]
     module.CGImageDestinationAddImage = lambda *_: None  # type: ignore[attr-defined]
     module.CGImageDestinationFinalize = lambda *_: True  # type: ignore[attr-defined]
+
+
+def _add_accessibility_api(module: ModuleType, calls: list[str]) -> None:
+    def accessibility() -> bool:
+        calls.append("accessibility")
+        return False
+
+    module.AXIsProcessTrusted = accessibility  # type: ignore[attr-defined]
+    module.AXUIElementCreateSystemWide = lambda: object()  # type: ignore[attr-defined]
+    module.AXUIElementCopyAttributeValue = lambda *_: (0, None)  # type: ignore[attr-defined]
+    module.kAXFocusedApplicationAttribute = "app"  # type: ignore[attr-defined]
+    module.kAXFocusedWindowAttribute = "window"  # type: ignore[attr-defined]
+    module.kAXTitleAttribute = "title"  # type: ignore[attr-defined]
+    module.kAXErrorSuccess = 0  # type: ignore[attr-defined]
+    module.kAXErrorNoValue = -1  # type: ignore[attr-defined]
+    module.kAXErrorAttributeUnsupported = -2  # type: ignore[attr-defined]
 
 
 def _by_name(
