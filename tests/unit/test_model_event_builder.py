@@ -7,6 +7,7 @@ import pytest
 
 from contx.events import ModelTransformationEventBuilder
 from contx.model_provider import (
+    PROMPT_VERSION,
     LocalModelExecution,
     LocalModelRuntimeStatus,
     ModelInterpretation,
@@ -50,7 +51,7 @@ def test_successful_transformation_maps_to_deterministic_traceable_event() -> No
         "runtime_version": "0.32.5",
         "model": "qwen3-vl:4b-instruct-q4_K_M",
         "model_digest": DIGEST,
-        "prompt_version": "local-screen-v2",
+        "prompt_version": PROMPT_VERSION,
         "output_schema_version": "model-interpretation-v1",
         "image_sha256": "c" * 64,
     }

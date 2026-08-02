@@ -7,7 +7,7 @@ from contx.candidates.rules import VerticalSliceCandidateProducer
 from contx.collectors.synthetic import SyntheticCollector
 from contx.events.rules import VerticalSliceEventBuilder
 from contx.memory_worker import ThresholdMemoryWorker
-from contx.models import CandidateStatus, Observation
+from contx.models import CandidateStatus, MemoryCandidate, Observation, Sensitivity
 from tests.helpers import FixedClock, SequenceIdentifiers
 
 NOW = datetime(2026, 8, 2, 10, 15, tzinfo=UTC)
@@ -43,6 +43,36 @@ def test_rules_reject_trivial_activity_without_lowering_threshold() -> None:
     assert accepted[0].score >= 0.75
     assert len(rejected) == 1
     assert rejected[0].score < 0.75
+
+
+def test_worker_rejects_sensitive_high_scoring_project_candidate() -> None:
+    identifiers = SequenceIdentifiers(IDS)
+    clock = FixedClock(NOW)
+    observations = SyntheticCollector.default(
+        clock=clock, identifiers=identifiers
+    ).collect()
+    events = VerticalSliceEventBuilder(clock=clock, identifiers=identifiers).build(
+        observations
+    )
+    candidates = VerticalSliceCandidateProducer(
+        clock=clock, identifiers=identifiers
+    ).produce(events)
+    project = next(
+        candidate
+        for candidate in candidates
+        if candidate.source_type == "project_resumption"
+    )
+
+    for sensitivity in (Sensitivity.SENSITIVE, Sensitivity.FORBIDDEN):
+        protected = MemoryCandidate.model_validate(
+            project.model_dump() | {"sensitivity": sensitivity}
+        )
+        decision = ThresholdMemoryWorker().decide((protected,), processed_at=NOW)[0]
+
+        assert decision.status is CandidateStatus.REJECTED
+        assert (
+            decision.rejection_reason == "sensitivity_not_eligible_for_durable_memory"
+        )
 
 
 def _records() -> tuple[Observation, ...]:

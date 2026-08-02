@@ -18,11 +18,18 @@ from contx.db.models import (
     ProcessingRunModel,
 )
 from contx.db.repositories import PipelineRepository
-from contx.errors import MemoryStoreError, PipelineError
+from contx.errors import DatabaseError, MemoryStoreError, PipelineError
 from contx.events.rules import VerticalSliceEventBuilder
 from contx.memory_store import MemoryAppendResult, RecordingMemoryStore
 from contx.memory_worker import ThresholdMemoryWorker
-from contx.models import Observation, ProcessingRunStatus
+from contx.models import (
+    CandidateStatus,
+    Event,
+    MemoryCandidate,
+    Observation,
+    ProcessingRunStatus,
+    Sensitivity,
+)
 from contx.models.sources import UuidIdentifierSource
 from tests.helpers import FixedClock
 
@@ -140,6 +147,62 @@ def test_pipeline_recovers_if_database_link_lags_memory_append(
                 ProcessingRunStatus.FAILED.value,
                 ProcessingRunStatus.SUCCEEDED.value,
             ]
+    finally:
+        engine.dispose()
+
+
+def test_memory_boundary_blocks_sensitive_candidate_from_unsafe_worker(
+    tmp_path: Path,
+) -> None:
+    engine = _engine(tmp_path)
+    memory = RecordingMemoryStore()
+    clock = FixedClock(NOW)
+    identifiers = UuidIdentifierSource()
+
+    class SensitiveCandidateProducer(VerticalSliceCandidateProducer):
+        def produce(self, events: tuple[Event, ...]) -> tuple[MemoryCandidate, ...]:
+            candidates = super().produce(events)
+            return tuple(
+                MemoryCandidate.model_validate(
+                    candidate.model_dump() | {"sensitivity": Sensitivity.SENSITIVE}
+                )
+                for candidate in candidates
+            )
+
+    class UnsafeAcceptingWorker:
+        def decide(
+            self,
+            candidates: tuple[MemoryCandidate, ...],
+            *,
+            processed_at: datetime,
+        ) -> tuple[MemoryCandidate, ...]:
+            return tuple(
+                candidate.decide(CandidateStatus.ACCEPTED, processed_at=processed_at)
+                for candidate in candidates
+            )
+
+    service = PipelineService(
+        engine=engine,
+        event_builder=VerticalSliceEventBuilder(clock=clock, identifiers=identifiers),
+        candidate_producer=SensitiveCandidateProducer(
+            clock=clock, identifiers=identifiers
+        ),
+        memory_worker=UnsafeAcceptingWorker(),
+        memory_store=memory,
+        clock=clock,
+        identifiers=identifiers,
+    )
+    try:
+        with pytest.raises(DatabaseError, match="cannot enter durable memory"):
+            service.run_once(
+                SyntheticCollector.default(clock=clock, identifiers=identifiers)
+            )
+
+        assert memory.entries == ()
+        with session_scope(engine) as session:
+            run = tuple(session.scalars(select(ProcessingRunModel)))[-1]
+            assert run.status == ProcessingRunStatus.FAILED.value
+            assert run.error_code == "database_error"
     finally:
         engine.dispose()
 

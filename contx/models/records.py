@@ -57,6 +57,11 @@ class Sensitivity(StrEnum):
     SENSITIVE = "sensitive"
     FORBIDDEN = "forbidden"
 
+    @property
+    def permits_durable_memory(self) -> bool:
+        """Return whether this classification may cross the memory boundary."""
+        return self in {Sensitivity.PUBLIC, Sensitivity.PERSONAL}
+
 
 class CandidateStatus(StrEnum):
     PENDING = "pending"

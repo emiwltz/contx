@@ -37,12 +37,15 @@ def test_model_request_rejects_hash_mismatch() -> None:
         _request(image_sha256="0" * 64)
 
 
-def test_interpretation_requires_category_for_forbidden_content() -> None:
+@pytest.mark.parametrize(
+    "sensitivity",
+    (Sensitivity.SENSITIVE, Sensitivity.FORBIDDEN),
+)
+def test_interpretation_requires_category_for_sensitive_content(
+    sensitivity: Sensitivity,
+) -> None:
     with pytest.raises(ValidationError, match="requires a sensitive category"):
-        _interpretation(
-            sensitivity=Sensitivity.FORBIDDEN,
-            sensitive_categories=(),
-        )
+        _interpretation(sensitivity=sensitivity, sensitive_categories=())
 
 
 def test_interpretation_rejects_duplicate_provenance_labels() -> None:

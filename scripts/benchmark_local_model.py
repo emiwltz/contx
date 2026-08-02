@@ -8,20 +8,6 @@ import json
 from collections.abc import Sequence
 from uuid import NAMESPACE_URL, uuid5
 
-from AppKit import (
-    NSBitmapImageFileTypePNG,
-    NSBitmapImageRep,
-    NSColor,
-    NSFont,
-    NSFontAttributeName,
-    NSForegroundColorAttributeName,
-    NSImage,
-    NSMakeRect,
-    NSMakeSize,
-    NSRectFill,
-    NSString,
-)
-
 from contx.model_provider import (
     DEFAULT_ENDPOINT,
     DEFAULT_MODEL,
@@ -29,9 +15,7 @@ from contx.model_provider import (
     OllamaModelProvider,
 )
 from contx.models import ActivityState, SystemClock
-
-WIDTH = 1280
-HEIGHT = 720
+from scripts.synthetic_screen import render_synthetic_screen
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -120,38 +104,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def build_synthetic_activity_png() -> bytes:
     """Render a deterministic screen-like fixture without reading the display."""
-    image = NSImage.alloc().initWithSize_(NSMakeSize(WIDTH, HEIGHT))
-    image.lockFocus()
-    try:
-        NSColor.colorWithCalibratedRed_green_blue_alpha_(
-            0.055,
-            0.071,
-            0.102,
-            1.0,
-        ).set()
-        NSRectFill(NSMakeRect(0, 0, WIDTH, HEIGHT))
-
-        NSColor.colorWithCalibratedRed_green_blue_alpha_(
-            0.10,
-            0.14,
-            0.20,
-            1.0,
-        ).set()
-        NSRectFill(NSMakeRect(32, 32, WIDTH - 64, HEIGHT - 64))
-
-        _draw_text(
-            "CONTX — Synthetic local-model benchmark",
-            x=72,
-            y=620,
-            size=30,
-            color=NSColor.colorWithCalibratedRed_green_blue_alpha_(
-                0.40,
-                0.78,
-                1.0,
-                1.0,
-            ),
-        )
-        _draw_text(
+    return render_synthetic_screen(
+        title="CONTX — Synthetic local-model benchmark",
+        body=(
             "Project: CONTX\n"
             "File: contx/model_provider/ollama.py\n"
             "Task: Implement strict local-only multimodal interpretation\n\n"
@@ -159,40 +114,9 @@ def build_synthetic_activity_png() -> bytes:
             "✓ JSON Schema result validation\n"
             "✓ Model and source provenance\n"
             "✓ No remote user-content API\n\n"
-            "This screen contains synthetic test data only.",
-            x=92,
-            y=250,
-            size=22,
-            color=NSColor.colorWithCalibratedWhite_alpha_(0.92, 1.0),
-        )
-    finally:
-        image.unlockFocus()
-
-    representation = NSBitmapImageRep.imageRepWithData_(image.TIFFRepresentation())
-    if representation is None:
-        raise RuntimeError("could not render synthetic model fixture")
-    data = representation.representationUsingType_properties_(
-        NSBitmapImageFileTypePNG,
-        {},
+            "This screen contains synthetic test data only."
+        ),
     )
-    if data is None:
-        raise RuntimeError("could not encode synthetic model fixture")
-    return bytes(data)
-
-
-def _draw_text(
-    text: str,
-    *,
-    x: float,
-    y: float,
-    size: float,
-    color: NSColor,
-) -> None:
-    attributes = {
-        NSFontAttributeName: NSFont.monospacedSystemFontOfSize_weight_(size, 0.0),
-        NSForegroundColorAttributeName: color,
-    }
-    NSString.stringWithString_(text).drawAtPoint_withAttributes_((x, y), attributes)
 
 
 if __name__ == "__main__":

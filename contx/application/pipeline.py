@@ -183,6 +183,8 @@ class PipelineService:
             }:
                 resolved_candidates.append(candidate)
                 continue
+            if not candidate.sensitivity.permits_durable_memory:
+                raise DatabaseError("A sensitive candidate cannot enter durable memory")
 
             with session_scope(self._engine) as session:
                 existing = PipelineRepository(session).memory_link_by_candidate_id(

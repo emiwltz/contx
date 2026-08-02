@@ -23,6 +23,14 @@ class ThresholdMemoryWorker:
         for candidate in candidates:
             if candidate.status is not CandidateStatus.PENDING:
                 decisions.append(candidate)
+            elif not candidate.sensitivity.permits_durable_memory:
+                decisions.append(
+                    candidate.decide(
+                        CandidateStatus.REJECTED,
+                        processed_at=processed_at,
+                        reason="sensitivity_not_eligible_for_durable_memory",
+                    )
+                )
             elif (
                 candidate.source_type == "project_resumption"
                 and candidate.score >= self._acceptance_threshold

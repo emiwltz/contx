@@ -192,12 +192,15 @@ schema, model/prompt/schema/source and latency provenance, a content-free
 preflight command, a restart-safe version-scoped processing queue, persisted
 transformation/run provenance, bounded retry and interruption recovery,
 content-free backlog status, and synthetic visual and full-pipeline validators.
-The selected development model is `qwen3-vl:4b-instruct-q4_K_M`; model files
-live in Ollama's external local store and are never committed. `contx process`
-processes one bounded backlog batch without collecting new data, then builds
-deterministic events with foreign-key-backed transformation and processing-run
-provenance. Comprehensive sensitive-fixture evaluation, quality thresholds,
-and resource gates remain before J2 is complete.
+The initial development model is `qwen3-vl:4b-instruct-q4_K_M`; model files live
+in Ollama's external local store and are never committed. The 4B baseline failed
+the first comprehensive privacy and quality evaluation and is not accepted as
+the v0 model. `contx process` processes one bounded backlog batch without
+collecting new data, then builds deterministic events with foreign-key-backed
+transformation and processing-run provenance. The synthetic sensitive-fixture
+matrix and a hard durable-memory sensitivity gate are implemented; comparison
+with a stronger local model, accepted quality thresholds, and resource gates
+remain before J2 is complete.
 
 Patterns, corrections, the local web UI, and the real pilot belong to the
 following v0 increments. OptMem is used from an ignored development snapshot;

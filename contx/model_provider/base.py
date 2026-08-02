@@ -21,8 +21,13 @@ from contx.model_provider.endpoint import LoopbackHttpEndpoint
 from contx.models import ActivityState, Sensitivity
 from contx.models.common import require_aware_utc
 
-type PromptVersion = Literal["local-screen-v1", "local-screen-v2"]
-PROMPT_VERSION: PromptVersion = "local-screen-v2"
+type PromptVersion = Literal[
+    "local-screen-v1",
+    "local-screen-v2",
+    "local-screen-v3",
+    "local-screen-v4",
+]
+PROMPT_VERSION: PromptVersion = "local-screen-v4"
 OUTPUT_SCHEMA_VERSION = "model-interpretation-v1"
 
 PrivateSummary = Annotated[
@@ -160,8 +165,15 @@ class ModelInterpretation(BaseModel):
         ):
             if len(set(values)) != len(values):
                 raise ValueError(f"{label} must be unique")
-        if self.sensitivity is Sensitivity.FORBIDDEN and not self.sensitive_categories:
-            raise ValueError("forbidden content requires a sensitive category")
+        if (
+            self.sensitivity
+            in {
+                Sensitivity.SENSITIVE,
+                Sensitivity.FORBIDDEN,
+            }
+            and not self.sensitive_categories
+        ):
+            raise ValueError("sensitive content requires a sensitive category")
         if self.sensitive_categories and self.sensitivity not in {
             Sensitivity.SENSITIVE,
             Sensitivity.FORBIDDEN,
