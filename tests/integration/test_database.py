@@ -3,6 +3,7 @@
 import sqlite3
 import stat
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from alembic.autogenerate import compare_metadata
@@ -19,6 +20,8 @@ from contx.db import (
 )
 from contx.db import models as persistence_models  # noqa: F401
 from contx.db.base import Base
+from contx.db.repositories import PipelineRepository
+from contx.models import EventType
 
 
 def test_empty_database_upgrades_to_packaged_head(tmp_path: Path) -> None:
@@ -172,7 +175,7 @@ def test_existing_events_gain_stable_lineage_and_validity_on_upgrade(
             (
                 "00000000-0000-0000-0000-000000000022",
                 "b" * 64,
-                "project_work",
+                "unrecognized_legacy_activity",
                 "Existing synthetic event.",
                 "{}",
                 "2026-08-02T10:00:00.000000Z",
@@ -206,6 +209,16 @@ def test_existing_events_gain_stable_lineage_and_validity_on_upgrade(
         "2026-08-02T10:00:00.000000Z",
         "2026-08-02T10:20:00.000000Z",
     )
+    engine = create_database_engine(database_path)
+    try:
+        with session_scope(engine) as session:
+            event = PipelineRepository(session).event_by_id(
+                UUID("00000000-0000-0000-0000-000000000022")
+            )
+            assert event is not None
+            assert event.type is EventType.OTHER
+    finally:
+        engine.dispose()
 
 
 def test_empty_file_recovers_like_interrupted_initialization(tmp_path: Path) -> None:
