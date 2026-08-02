@@ -16,8 +16,21 @@ artifact hashes are authoritative in `uv.lock`.
 | Typer | 0.27.0 | MIT | Actively maintained; adds Rich and Shellingham for CLI behavior. Pure Python on the target platform. | Keep command services independent of Typer so another CLI layer can call the same application contracts. |
 
 These libraries solve standardized or failure-prone boundaries. CONTX does not
-add FastAPI, OCR, model, or web dependencies until the milestone that has an
-immediate consumer for them.
+add FastAPI, OCR, or web dependencies until the milestone that has an immediate
+consumer for them.
+
+## External local model runtime
+
+| Component | Evaluated identity | License | Cost and platform notes | Removal strategy |
+|---|---|---|---|---|
+| Ollama | 0.32.5 | MIT | External loopback-only model runtime. It is installed and updated outside the Python environment and is not bundled by CONTX. | Replace behind `ModelProvider` only after reproducing the local-only boundary, strict validation, model identity, and evaluation gates. |
+| Gemma 4 E4B QAT | `gemma4:e4b-it-qat`, digest `ee665637121887cf3befff38abbb1be4ee117c7db867d97a67e29049ecd7e15f` | Apache-2.0 | Selected v0 default for the M4/16 GB target. Approximately 6.1 GB on disk in Ollama's external store; sampled cold peak RSS was approximately 6.07 GiB. The repository neither downloads nor redistributes the weights. | Change the configured model only after the fixed synthetic matrix, persistent-pipeline proof, resource comparison, and an accepted replacement decision. |
+
+The [Gemma 4 model card](https://ai.google.dev/gemma/docs/core/model_card_4)
+and the installed artifact's license output provide current license evidence.
+If CONTX later downloads or redistributes runtime binaries or model weights,
+the distribution and notice obligations must be reviewed again rather than
+inferred from this external-development setup.
 
 ## Development and build tools
 

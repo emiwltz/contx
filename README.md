@@ -129,12 +129,17 @@ The implemented v0.0.1 CLI surface is:
 ```text
 contx init                              # initialize paths and database, collection off
 contx status                            # inspect initialization and safe defaults
+contx capabilities                      # inspect collection permissions without prompting
+contx pause --for 15m                   # stop collection through persisted control state
+contx resume                            # resume collection explicitly
 contx run-once --source synthetic       # deterministic end-to-end proof
 contx run-once --source active-app      # one explicit macOS metadata sample
+contx model status                      # content-free local runtime/model preflight
+contx process                           # process one bounded local-model backlog batch
 contx wake                              # direct final-memory context
 ```
 
-`recall`, `zoom`, agent proposals, corrections, pause/resume, and continuous
+`recall`, `zoom`, agent proposals, corrections, and installed continuous
 collection are planned milestone capabilities and are not advertised as
 implemented commands yet.
 
@@ -154,8 +159,9 @@ implemented commands yet.
 | **v0.9** | **J7 real pilot** | 7–14 day pilot, ground truth, with/without CONTX comparison, error analysis, OptMem decision. |
 | **v1.0** | **J8 hardening** | Fixes, optimization, install/upgrade/uninstall, recovery, distribution, licensing, and documentation. |
 
-**Active goal:** build v0.1 controlled macOS collection on the verified v0.0.1
-vertical slice, then continue through the complete v0 pilot (§37 and the
+**Active goal:** build v0.3 replayable events, corrections, and an intelligible
+activity timeline while keeping the real v0.1 collector activation separately
+gated, then continue through the complete v0 pilot (§37 and the
 [implementation plan](./docs/implementation-plan.md)).
 
 ---
@@ -186,29 +192,31 @@ single-process daemon, graceful shutdown, and a deterministic LaunchAgent
 manifest. The daemon remains disabled by default; no LaunchAgent, live title
 access, live screenshot capture, or real-data pilot has been activated.
 
-The in-progress v0.2 foundation now adds mandatory local-model settings, a
+The completed v0.2 foundation adds mandatory local-model settings, a
 literal-loopback-only Ollama transport, a strict multimodal interpretation
 schema, model/prompt/schema/source and latency provenance, a content-free
 preflight command, a restart-safe version-scoped processing queue, persisted
 transformation/run provenance, bounded retry and interruption recovery,
 content-free backlog status, and synthetic visual and full-pipeline validators.
-The initial development model is `qwen3-vl:4b-instruct-q4_K_M`; model files live
-in Ollama's external local store and are never committed. The 4B baseline failed
-the first comprehensive privacy and quality evaluation and is not accepted as
-the v0 model. `contx process` processes one bounded backlog batch without
-collecting new data, then builds deterministic events with foreign-key-backed
-transformation and processing-run provenance. The synthetic sensitive-fixture
-matrix and a hard durable-memory sensitivity gate are implemented; comparison
-with a stronger local model, accepted quality thresholds, and resource gates
-remain before J2 is complete.
+The v0 default is `gemma4:e4b-it-qat`; model files live in Ollama's external
+local store and are never committed. With thinking disabled, a 512-token output
+bound, prompt `local-screen-v9`, and the full synthetic image profile, the
+selected model passed all 16 fixed privacy and quality fixtures and the
+persistent model-to-event proof. `contx process` processes one bounded backlog
+batch without collecting new data, then builds deterministic events with
+foreign-key-backed transformation and processing-run provenance. The hard
+durable-memory gate rejects `sensitive` and `forbidden` content. Protected-value
+reproduction is measured locally but is not a masking gate; v0 has no
+deterministic extraction or redaction path and no remote user-content path.
 
-Patterns, corrections, the local web UI, and the real pilot belong to the
-following v0 increments. OptMem is used from an ignored development snapshot;
-it is not bundled while redistributable rights remain undocumented. See
+Robust sessionization, corrections, patterns, the local web UI, and the real
+pilot belong to the following v0 increments. OptMem is used from an ignored
+development snapshot; it is not bundled while redistributable rights remain
+undocumented. See
 [`docs/evaluation/v0.1-preflight.md`](docs/evaluation/v0.1-preflight.md) for the
 current J1 evidence and remaining gates, and
 [`docs/evaluation/v0.2-local-model-preflight.md`](docs/evaluation/v0.2-local-model-preflight.md)
-for the first real local-model evidence.
+for the complete J2 model evidence and residual risks.
 
 ---
 

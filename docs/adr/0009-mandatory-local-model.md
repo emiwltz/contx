@@ -15,10 +15,10 @@ Emi clarified that CONTX is intended to depend on a local LLM: the product does
 not need a parallel deterministic extraction pipeline or secret-masking stage
 for v0. Raw observations and model processing remain on the user's Mac.
 
-The target machine is a MacBook Air M4 with 16 GB of unified memory. Ollama and
-`llama.cpp` are installed, but the inspected Ollama inventory currently
-contains only cloud aliases and no local vision model. A small cached text-only
-model is not sufficient for screenshot interpretation.
+The target machine is a MacBook Air M4 with 16 GB of unified memory. At the time
+of this decision, the inspected Ollama inventory contained only cloud aliases
+and no suitable local vision model. ADR 0010 records the later evidence-based
+selection of the concrete v0 default.
 
 ## Problem
 

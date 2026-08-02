@@ -33,6 +33,12 @@ guaranteed.
 - A mandatory local-model boundary with loopback-only Ollama transport,
   schema-validated multimodal results, content-free execution provenance,
   safe runtime preflight, and a synthetic benchmark.
+- A restart-safe, version-scoped local-model backlog with bounded retries,
+  interruption recovery, content-free status, persisted transformations, and
+  deterministic provenance-backed event construction.
+- A fixed 16-screen synthetic privacy and quality matrix, configurable image
+  profiles, conservative category-to-sensitivity normalization, and a hard
+  final gate preventing sensitive or forbidden durable-memory writes.
 
 ### Changed
 
@@ -43,3 +49,6 @@ guaranteed.
 - Clarified that semantic agent context comes directly from `MemoryStore`.
 - Selected native macOS runtime data locations.
 - Selected an on-demand collection path before any background daemon.
+- Selected `gemma4:e4b-it-qat` as the v0 default local model after a 16/16
+  synthetic matrix result and target-Mac resource comparison; Ollama thinking
+  is disabled and model output is bounded to 512 tokens.
