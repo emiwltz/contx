@@ -14,6 +14,8 @@ guaranteed.
 - Architecture Decision Record structure and the initial accepted decisions.
 - Apache-2.0 project licensing baseline.
 - OptMem provenance and redistribution gate documentation.
+- Python 3.12 project foundation with a typed Typer CLI and reproducible `uv`
+  environment.
 
 ### Changed
 

@@ -195,6 +195,7 @@ Runtime data lives **outside the repo**. Durable state uses `~/Library/Applicati
 - [`AGENTS.md`](./AGENTS.md) — working agreement, invariants, roadmap, repo rules.
 - [`docs/implementation-plan.md`](./docs/implementation-plan.md) — executable delivery plan, gates, tests, and release mapping.
 - [`docs/adr/`](./docs/adr/) — accepted architecture and product decisions.
+- [`docs/dependencies.md`](./docs/dependencies.md) — dependency rationale, licensing, transitive cost, and exit strategy.
 - [`docs/third-party/optmem.md`](./docs/third-party/optmem.md) — OptMem provenance and redistribution gate.
 - [`optmem/README.md`](./optmem/README.md) — OptMem contract: `wake`, `note`, `nap`, `recall <regex>`, `zoom <lo>-<hi>`, `forget`.
 - [`docs/architecture/CONTX_architecture_OptMem_final.excalidraw`](./docs/architecture/CONTX_architecture_OptMem_final.excalidraw) — original architecture schema (open in [excalidraw.com](https://excalidraw.com)).
