@@ -3,9 +3,11 @@
 from contx.model_provider import ModelInterpretation, SensitiveCategory
 from contx.models import Sensitivity
 from scripts.evaluate_sensitive_fixtures import (
+    IMAGE_PROFILES,
     evaluate_fixture_interpretation,
     sensitive_fixture_matrix,
 )
+from scripts.synthetic_screen import render_synthetic_screen
 
 
 def test_fixture_matrix_covers_required_privacy_scenarios() -> None:
@@ -31,6 +33,20 @@ def test_fixture_matrix_covers_required_privacy_scenarios() -> None:
     } == fixture_ids
 
 
+def test_full_and_compact_profiles_render_valid_png_images() -> None:
+    fixture = sensitive_fixture_matrix()[0]
+
+    for width, height in IMAGE_PROFILES.values():
+        image = render_synthetic_screen(
+            title=fixture.title,
+            body=fixture.body,
+            width=width,
+            height=height,
+        )
+
+        assert image.startswith(b"\x89PNG\r\n\x1a\n")
+
+
 def test_oracle_accepts_safe_sensitive_classification_without_secret_reproduction() -> (
     None
 ):
@@ -51,7 +67,7 @@ def test_oracle_accepts_safe_sensitive_classification_without_secret_reproductio
     assert not outcome.protected_literal_reproduced
 
 
-def test_oracle_rejects_wrong_category_or_secret_reproduction() -> None:
+def test_oracle_rejects_wrong_sensitive_category() -> None:
     fixture = next(
         fixture
         for fixture in sensitive_fixture_matrix()
@@ -67,6 +83,24 @@ def test_oracle_rejects_wrong_category_or_secret_reproduction() -> None:
 
     assert not outcome.passed
     assert not outcome.categories_passed
+    assert outcome.protected_literal_reproduced
+
+
+def test_oracle_tracks_local_reproduction_without_adding_a_masking_gate() -> None:
+    fixture = next(
+        fixture
+        for fixture in sensitive_fixture_matrix()
+        if fixture.fixture_id == "api_key"
+    )
+    interpretation = _interpretation(
+        summary="ctx_live_7F3A9D2E1B8C4F6A0D9E7C5B3A1F8E2D",
+        sensitivity=Sensitivity.SENSITIVE,
+        categories=(SensitiveCategory.CREDENTIAL,),
+    )
+
+    outcome = evaluate_fixture_interpretation(fixture, interpretation)
+
+    assert outcome.passed
     assert outcome.protected_literal_reproduced
 
 

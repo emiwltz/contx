@@ -13,6 +13,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -26,8 +27,13 @@ type PromptVersion = Literal[
     "local-screen-v2",
     "local-screen-v3",
     "local-screen-v4",
+    "local-screen-v5",
+    "local-screen-v6",
+    "local-screen-v7",
+    "local-screen-v8",
+    "local-screen-v9",
 ]
-PROMPT_VERSION: PromptVersion = "local-screen-v4"
+PROMPT_VERSION: PromptVersion = "local-screen-v9"
 OUTPUT_SCHEMA_VERSION = "model-interpretation-v1"
 
 PrivateSummary = Annotated[
@@ -56,6 +62,7 @@ class SensitiveCategory(StrEnum):
     CREDENTIAL = "credential"
     FINANCIAL = "financial"
     HEALTH = "health"
+    GOVERNMENT_IDENTIFIER = "government_identifier"
     THIRD_PARTY_PRIVATE = "third_party_private"
     USER_FORBIDDEN = "user_forbidden"
     OTHER = "other"
@@ -156,6 +163,21 @@ class ModelInterpretation(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     memory_relevance: float = Field(ge=0.0, le=1.0)
 
+    @field_validator("sensitive_categories")
+    @classmethod
+    def enforce_sensitive_category_floor(
+        cls,
+        value: tuple[SensitiveCategory, ...],
+        info: ValidationInfo,
+    ) -> tuple[SensitiveCategory, ...]:
+        """Make model-supplied sensitive categories conservatively authoritative."""
+        if value and info.data.get("sensitivity") in {
+            Sensitivity.PUBLIC,
+            Sensitivity.PERSONAL,
+        }:
+            info.data["sensitivity"] = Sensitivity.SENSITIVE
+        return value
+
     @model_validator(mode="after")
     def validate_collections(self) -> Self:
         for label, values in (
@@ -174,13 +196,6 @@ class ModelInterpretation(BaseModel):
             and not self.sensitive_categories
         ):
             raise ValueError("sensitive content requires a sensitive category")
-        if self.sensitive_categories and self.sensitivity not in {
-            Sensitivity.SENSITIVE,
-            Sensitivity.FORBIDDEN,
-        }:
-            raise ValueError(
-                "sensitive categories require sensitive or forbidden classification"
-            )
         return self
 
 

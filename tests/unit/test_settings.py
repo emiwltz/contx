@@ -36,9 +36,10 @@ def test_defaults_are_safe(tmp_path: Path) -> None:
     assert settings.collection.raw_disk_budget_mb == 5120
     assert settings.model.provider == "ollama"
     assert settings.model.endpoint == "http://127.0.0.1:11434"
-    assert settings.model.model_name == "qwen3-vl:4b-instruct-q4_K_M"
+    assert settings.model.model_name == "gemma4:e4b-it-qat"
     assert settings.model.timeout_seconds == 120.0
     assert settings.model.context_tokens == 8192
+    assert settings.model.max_output_tokens == 512
 
 
 def test_environment_overrides_config(tmp_path: Path) -> None:

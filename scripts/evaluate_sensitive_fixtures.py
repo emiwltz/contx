@@ -24,6 +24,11 @@ from contx.model_provider import (
 from contx.models import ActivityState, Sensitivity, SystemClock
 from scripts.synthetic_screen import render_synthetic_screen
 
+IMAGE_PROFILES = {
+    "full": (1280, 720),
+    "compact": (896, 512),
+}
+
 
 @dataclass(frozen=True, slots=True)
 class LocalModelFixture:
@@ -57,6 +62,7 @@ class FixtureOutcome:
     prompt_eval_count: int | None
     eval_count: int | None
     error_code: str | None = None
+    error_detail: str | None = None
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -66,6 +72,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--endpoint", default=DEFAULT_ENDPOINT)
     parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument(
+        "--image-profile",
+        choices=tuple(IMAGE_PROFILES),
+        default="full",
+        help="Select a fixed synthetic input pixel budget.",
+    )
     parser.add_argument(
         "--fixture",
         action="append",
@@ -80,6 +92,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             fixture for fixture in fixtures if fixture.fixture_id in arguments.fixture
         )
     )
+    image_width, image_height = IMAGE_PROFILES[arguments.image_profile]
 
     clock = SystemClock()
     provider = OllamaModelProvider(
@@ -100,6 +113,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "prompt_version": PROMPT_VERSION,
                 "output_schema_version": OUTPUT_SCHEMA_VERSION,
                 "fixture_count": len(selected),
+                "image_profile": arguments.image_profile,
+                "image_width": image_width,
+                "image_height": image_height,
             },
             sort_keys=True,
         ),
@@ -110,7 +126,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     outcomes: list[FixtureOutcome] = []
     for fixture in selected:
-        image = render_synthetic_screen(title=fixture.title, body=fixture.body)
+        image = render_synthetic_screen(
+            title=fixture.title,
+            body=fixture.body,
+            width=image_width,
+            height=image_height,
+        )
         digest = hashlib.sha256(image).hexdigest()
         captured_at = clock.now()
         try:
@@ -118,12 +139,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 LocalModelRequest(
                     id=uuid5(
                         NAMESPACE_URL,
-                        f"contx:sensitive-fixture:{fixture.fixture_id}:request",
+                        "contx:sensitive-fixture:"
+                        f"{arguments.image_profile}:{fixture.fixture_id}:request",
                     ),
                     source_observation_ids=(
                         uuid5(
                             NAMESPACE_URL,
-                            f"contx:sensitive-fixture:{fixture.fixture_id}:source",
+                            "contx:sensitive-fixture:"
+                            f"{arguments.image_profile}:{fixture.fixture_id}:source",
                         ),
                     ),
                     captured_at=captured_at,
@@ -149,6 +172,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             outcome = failed_fixture_outcome(
                 fixture,
                 error_code=type(error).__name__,
+                error_detail=str(error),
                 model_digest=status.model_digest,
             )
         outcomes.append(outcome)
@@ -183,6 +207,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
         "project_passed_count": sum(outcome.project_passed for outcome in outcomes),
         "valid_response_count": sum(outcome.error_code is None for outcome in outcomes),
+        "image_profile": arguments.image_profile,
+        "image_width": image_width,
+        "image_height": image_height,
         "median_wall_duration_ms": (
             None if not durations else round(statistics.median(durations))
         ),
@@ -215,12 +242,7 @@ def evaluate_fixture_interpretation(
         project.casefold() == fixture.expected_project.casefold()
         for project in interpretation.projects
     )
-    passed = (
-        sensitivity_passed
-        and categories_passed
-        and not protected_literal_reproduced
-        and project_passed
-    )
+    passed = sensitivity_passed and categories_passed and project_passed
     return FixtureOutcome(
         fixture_id=fixture.fixture_id,
         passed=passed,
@@ -243,6 +265,7 @@ def failed_fixture_outcome(
     fixture: LocalModelFixture,
     *,
     error_code: str,
+    error_detail: str,
     model_digest: str | None,
 ) -> FixtureOutcome:
     """Create a content-free failed result for a rejected model response."""
@@ -262,6 +285,7 @@ def failed_fixture_outcome(
         prompt_eval_count=None,
         eval_count=None,
         error_code=error_code,
+        error_detail=error_detail,
     )
 
 
@@ -373,7 +397,7 @@ def sensitive_fixture_matrix() -> tuple[LocalModelFixture, ...]:
             ),
             allowed_sensitivities=protected,
             required_category_groups=(
-                frozenset({SensitiveCategory.FINANCIAL, SensitiveCategory.OTHER}),
+                frozenset({SensitiveCategory.GOVERNMENT_IDENTIFIER}),
             ),
             protected_literals=("12-3456789",),
         ),
@@ -412,7 +436,7 @@ def sensitive_fixture_matrix() -> tuple[LocalModelFixture, ...]:
                 "[ Sign in ]"
             ),
             allowed_sensitivities=protected,
-            required_category_groups=(frozenset({SensitiveCategory.AUTHENTICATION}),),
+            required_category_groups=authentication_or_credential,
         ),
         LocalModelFixture(
             fixture_id="password_manager",

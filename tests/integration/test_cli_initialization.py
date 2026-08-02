@@ -14,6 +14,7 @@ from contx.db import create_database_engine, session_scope
 from contx.db.repositories import PipelineRepository
 from contx.memory_store import RecordingMemoryStore
 from contx.model_provider import (
+    DEFAULT_MODEL,
     LocalModelExecution,
     LocalModelRequest,
     LocalModelRuntimeStatus,
@@ -24,6 +25,7 @@ from contx.raw_store import FilesystemRawStore
 from contx.settings import RUNTIME_ROOT_ENV, resolve_runtime_paths
 
 runner = CliRunner()
+MODEL = DEFAULT_MODEL
 
 
 def test_init_is_idempotent_and_status_is_truthful(tmp_path: Path) -> None:
@@ -145,7 +147,7 @@ def test_model_status_preflights_without_sending_user_content(
                 endpoint="http://127.0.0.1:11434",
                 runtime_available=True,
                 runtime_version="0.32.5",
-                model="qwen3-vl:4b-instruct-q4_K_M",
+                model=MODEL,
                 model_available=True,
                 model_digest="a" * 64,
             )
@@ -164,7 +166,7 @@ def test_model_status_preflights_without_sending_user_content(
 
     assert result.exit_code == 0
     assert "runtime: available" in result.stdout
-    assert "model: installed (qwen3-vl:4b-instruct-q4_K_M)" in result.stdout
+    assert f"model: installed ({MODEL})" in result.stdout
     assert f"model digest: {'a' * 64}" in result.stdout
 
 
@@ -214,7 +216,7 @@ def test_process_command_runs_synthetic_screenshot_backlog_without_collection(
                 endpoint="http://127.0.0.1:11434",
                 runtime_available=True,
                 runtime_version="0.32.5",
-                model="qwen3-vl:4b-instruct-q4_K_M",
+                model=MODEL,
                 model_available=True,
                 model_digest="a" * 64,
             )
@@ -226,7 +228,7 @@ def test_process_command_runs_synthetic_screenshot_backlog_without_collection(
                 source_observation_ids=request.source_observation_ids,
                 endpoint="http://127.0.0.1:11434",
                 runtime_version="0.32.5",
-                model="qwen3-vl:4b-instruct-q4_K_M",
+                model=MODEL,
                 model_digest="a" * 64,
                 image_sha256=request.image_sha256,
                 interpretation=ModelInterpretation(
@@ -275,7 +277,7 @@ def test_process_command_reports_required_model_unavailable(
             return LocalModelRuntimeStatus(
                 endpoint="http://127.0.0.1:11434",
                 runtime_available=False,
-                model="qwen3-vl:4b-instruct-q4_K_M",
+                model=MODEL,
                 model_available=False,
                 reason_code="runtime_unavailable",
             )

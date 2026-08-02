@@ -599,6 +599,7 @@ def _build_local_model_provider(settings: ModelSettings) -> OllamaModelProvider:
         timeout_seconds=settings.timeout_seconds,
         keep_alive=settings.keep_alive,
         context_tokens=settings.context_tokens,
+        max_output_tokens=settings.max_output_tokens,
         max_image_bytes=settings.max_image_mb * 1024 * 1024,
         max_response_bytes=settings.max_response_kb * 1024,
     )

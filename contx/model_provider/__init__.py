@@ -15,6 +15,7 @@ from contx.model_provider.base import (
 from contx.model_provider.endpoint import LoopbackHttpEndpoint
 from contx.model_provider.ollama import (
     DEFAULT_ENDPOINT,
+    DEFAULT_MAX_OUTPUT_TOKENS,
     DEFAULT_MODEL,
     LoopbackJsonTransport,
     OllamaModelProvider,
@@ -22,6 +23,7 @@ from contx.model_provider.ollama import (
 
 __all__ = [
     "DEFAULT_ENDPOINT",
+    "DEFAULT_MAX_OUTPUT_TOKENS",
     "DEFAULT_MODEL",
     "OUTPUT_SCHEMA_VERSION",
     "PROMPT_VERSION",

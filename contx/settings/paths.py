@@ -35,10 +35,11 @@ raw_disk_budget_mb = 5120
 [model]
 provider = "ollama"
 endpoint = "http://127.0.0.1:11434"
-model_name = "qwen3-vl:4b-instruct-q4_K_M"
+model_name = "gemma4:e4b-it-qat"
 timeout_seconds = 120.0
 keep_alive = "5m"
 context_tokens = 8192
+max_output_tokens = 512
 max_image_mb = 20
 max_response_kb = 1024
 """

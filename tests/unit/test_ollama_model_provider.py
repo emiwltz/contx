@@ -56,6 +56,7 @@ def test_interpretation_uses_image_and_strict_json_schema_locally() -> None:
     assert payload is not None
     assert payload["model"] == DEFAULT_MODEL
     assert payload["stream"] is False
+    assert payload["think"] is False
     assert isinstance(payload["format"], dict)
     assert payload["format"]["additionalProperties"] is False  # type: ignore[index]
     assert "$defs" not in payload["format"]
@@ -63,6 +64,9 @@ def test_interpretation_uses_image_and_strict_json_schema_locally() -> None:
     messages = payload["messages"]
     assert isinstance(messages, list)
     assert messages[1]["images"]  # type: ignore[index]
+    options = payload["options"]
+    assert isinstance(options, dict)
+    assert options["num_predict"] == 512
     assert execution.model_digest == DIGEST
     assert execution.interpretation.projects == ("CONTX",)
     assert execution.runtime_duration_ms == 12
@@ -123,6 +127,16 @@ def test_response_from_another_model_identity_is_rejected() -> None:
 
     with pytest.raises(LocalModelResponseError, match="identity or completion"):
         provider.interpret(_request())
+
+
+@pytest.mark.parametrize("max_output_tokens", (127, 2049))
+def test_output_token_limit_is_bounded(max_output_tokens: int) -> None:
+    with pytest.raises(ValueError, match="output limit"):
+        OllamaModelProvider(
+            transport=RecordingTransport(),
+            clock=FixedClock(NOW),
+            max_output_tokens=max_output_tokens,
+        )
 
 
 class RecordingTransport:

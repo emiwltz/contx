@@ -14,13 +14,21 @@ from AppKit import (
     NSString,
 )
 
-WIDTH = 1280
-HEIGHT = 720
+DEFAULT_WIDTH = 1280
+DEFAULT_HEIGHT = 720
 
 
-def render_synthetic_screen(*, title: str, body: str) -> bytes:
+def render_synthetic_screen(
+    *,
+    title: str,
+    body: str,
+    width: int = DEFAULT_WIDTH,
+    height: int = DEFAULT_HEIGHT,
+) -> bytes:
     """Render supplied synthetic text into an in-memory PNG."""
-    image = NSImage.alloc().initWithSize_(NSMakeSize(WIDTH, HEIGHT))
+    if width < 640 or height < 360:
+        raise ValueError("synthetic screen dimensions are too small")
+    image = NSImage.alloc().initWithSize_(NSMakeSize(width, height))
     image.lockFocus()
     try:
         NSColor.colorWithCalibratedRed_green_blue_alpha_(
@@ -29,7 +37,7 @@ def render_synthetic_screen(*, title: str, body: str) -> bytes:
             0.102,
             1.0,
         ).set()
-        NSRectFill(NSMakeRect(0, 0, WIDTH, HEIGHT))
+        NSRectFill(NSMakeRect(0, 0, width, height))
 
         NSColor.colorWithCalibratedRed_green_blue_alpha_(
             0.10,
@@ -37,13 +45,21 @@ def render_synthetic_screen(*, title: str, body: str) -> bytes:
             0.20,
             1.0,
         ).set()
-        NSRectFill(NSMakeRect(32, 32, WIDTH - 64, HEIGHT - 64))
+        panel_margin = max(16, round(width * 0.025))
+        NSRectFill(
+            NSMakeRect(
+                panel_margin,
+                panel_margin,
+                width - 2 * panel_margin,
+                height - 2 * panel_margin,
+            )
+        )
 
         _draw_text(
             title,
-            x=72,
-            y=620,
-            size=28,
+            x=width * 0.05625,
+            y=height * 0.861,
+            size=max(18, width * 0.021875),
             color=NSColor.colorWithCalibratedRed_green_blue_alpha_(
                 0.40,
                 0.78,
@@ -53,9 +69,9 @@ def render_synthetic_screen(*, title: str, body: str) -> bytes:
         )
         _draw_text(
             body,
-            x=92,
-            y=230,
-            size=20,
+            x=width * 0.071875,
+            y=height * 0.319,
+            size=max(13, width * 0.015625),
             color=NSColor.colorWithCalibratedWhite_alpha_(0.92, 1.0),
         )
     finally:

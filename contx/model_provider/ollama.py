@@ -28,9 +28,10 @@ from contx.model_provider.prompt import SYSTEM_PROMPT
 from contx.models import Clock, SystemClock
 
 DEFAULT_ENDPOINT = "http://127.0.0.1:11434"
-DEFAULT_MODEL = "qwen3-vl:4b-instruct-q4_K_M"
+DEFAULT_MODEL = "gemma4:e4b-it-qat"
 DEFAULT_MAX_IMAGE_BYTES = 20 * 1024 * 1024
 DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024
+DEFAULT_MAX_OUTPUT_TOKENS = 512
 
 JsonObject = dict[str, object]
 _GRAMMAR_SCHEMA_KEYS = frozenset(
@@ -190,6 +191,7 @@ class OllamaModelProvider:
         timeout_seconds: float = 120.0,
         keep_alive: str = "5m",
         context_tokens: int = 8192,
+        max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
         max_image_bytes: int = DEFAULT_MAX_IMAGE_BYTES,
         max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
         clock: Clock | None = None,
@@ -203,11 +205,16 @@ class OllamaModelProvider:
             raise ValueError(
                 "local model context must be between 2048 and 32768 tokens"
             )
+        if not 128 <= max_output_tokens <= 2048:
+            raise ValueError(
+                "local model output limit must be between 128 and 2048 tokens"
+            )
         if not 1024 <= max_image_bytes <= 50 * 1024 * 1024:
             raise ValueError("local model image limit is outside safe bounds")
         self._model = model
         self._keep_alive = keep_alive
         self._context_tokens = context_tokens
+        self._max_output_tokens = max_output_tokens
         self._max_image_bytes = max_image_bytes
         self._clock = clock or SystemClock()
         self._transport = transport or LoopbackJsonTransport(
@@ -340,11 +347,13 @@ class OllamaModelProvider:
                 },
             ],
             "stream": False,
+            "think": False,
             "format": _ollama_grammar_schema(),
             "options": {
                 "temperature": 0,
                 "seed": 0,
                 "num_ctx": self._context_tokens,
+                "num_predict": self._max_output_tokens,
             },
             "keep_alive": self._keep_alive,
         }

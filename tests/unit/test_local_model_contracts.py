@@ -53,12 +53,27 @@ def test_interpretation_rejects_duplicate_provenance_labels() -> None:
         _interpretation(projects=("CONTX", "CONTX"))
 
 
-def test_public_interpretation_rejects_claimed_sensitive_categories() -> None:
-    with pytest.raises(ValidationError, match="sensitive or forbidden"):
-        _interpretation(
-            sensitivity=Sensitivity.PUBLIC,
-            sensitive_categories=(SensitiveCategory.CREDENTIAL,),
-        )
+@pytest.mark.parametrize("sensitivity", (Sensitivity.PUBLIC, Sensitivity.PERSONAL))
+def test_sensitive_category_conservatively_raises_sensitivity_floor(
+    sensitivity: Sensitivity,
+) -> None:
+    interpretation = _interpretation(
+        sensitivity=sensitivity,
+        sensitive_categories=(SensitiveCategory.CREDENTIAL,),
+    )
+
+    assert interpretation.sensitivity is Sensitivity.SENSITIVE
+
+
+def test_government_identifier_is_a_supported_sensitive_category() -> None:
+    interpretation = _interpretation(
+        sensitivity=Sensitivity.SENSITIVE,
+        sensitive_categories=(SensitiveCategory.GOVERNMENT_IDENTIFIER,),
+    )
+
+    assert interpretation.sensitive_categories == (
+        SensitiveCategory.GOVERNMENT_IDENTIFIER,
+    )
 
 
 def test_interpretation_repr_hides_derived_private_text() -> None:

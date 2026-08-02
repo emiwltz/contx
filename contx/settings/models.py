@@ -64,6 +64,7 @@ class ModelSettings(BaseModel):
     timeout_seconds: float = Field(default=120.0, ge=0.1, le=600.0)
     keep_alive: str = Field(default="5m", min_length=1, max_length=32)
     context_tokens: int = Field(default=8192, ge=2048, le=32768)
+    max_output_tokens: int = Field(default=512, ge=128, le=2048)
     max_image_mb: int = Field(default=20, ge=1, le=50)
     max_response_kb: int = Field(default=1024, ge=1, le=10240)
 
