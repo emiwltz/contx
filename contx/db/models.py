@@ -160,6 +160,88 @@ class TimelineBuildModel(Base):
     max_session_duration_seconds: Mapped[int] = mapped_column(Integer)
 
 
+class PatternModel(Base):
+    """One multi-event temporal inference."""
+
+    __tablename__ = "patterns"
+
+    id: Mapped[Identifier] = mapped_column(String(36), primary_key=True)
+    idempotency_key: Mapped[str] = mapped_column(String(64), unique=True)
+    type: Mapped[str] = mapped_column(String(64), index=True)
+    summary: Mapped[str] = mapped_column(Text)
+    window_start: Mapped[UtcTimestamp] = mapped_column(String(32), index=True)
+    window_end: Mapped[UtcTimestamp] = mapped_column(String(32), index=True)
+    epistemic_status: Mapped[str] = mapped_column(String(32))
+    confidence: Mapped[float] = mapped_column(Float)
+    sensitivity: Mapped[str] = mapped_column(String(32), index=True)
+    evidence_count: Mapped[int] = mapped_column(Integer)
+    source_event_ids: Mapped[list[str]] = mapped_column(JSON)
+    projects: Mapped[list[str]] = mapped_column(JSON)
+    entities: Mapped[list[str]] = mapped_column(JSON)
+    metrics: Mapped[dict[str, Any]] = mapped_column(JSON)
+    valid_from: Mapped[UtcTimestamp] = mapped_column(String(32), index=True)
+    valid_until: Mapped[UtcTimestamp | None] = mapped_column(String(32), index=True)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    processing_version: Mapped[str] = mapped_column(String(64), index=True)
+    created_at: Mapped[UtcTimestamp] = mapped_column(String(32))
+
+
+class PatternEventModel(Base):
+    """Foreign-key-backed event evidence for one pattern."""
+
+    __tablename__ = "pattern_events"
+
+    pattern_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("patterns.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    event_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("events.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+
+
+class PatternProcessingRunModel(Base):
+    """Link one pattern to the processing run that selected it."""
+
+    __tablename__ = "pattern_processing_runs"
+
+    pattern_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("patterns.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    processing_run_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("processing_runs.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+
+
+class PatternBuildModel(Base):
+    """Content-free policy inputs for one pattern replay."""
+
+    __tablename__ = "pattern_builds"
+
+    processing_run_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("processing_runs.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    source_timeline_run_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("processing_runs.id", ondelete="RESTRICT"),
+        index=True,
+    )
+    processing_version: Mapped[str] = mapped_column(String(64), index=True)
+    comparison_boundary: Mapped[UtcTimestamp] = mapped_column(String(32))
+    min_project_events: Mapped[int] = mapped_column(Integer)
+    resumption_gap_seconds: Mapped[int] = mapped_column(Integer)
+    change_ratio: Mapped[float] = mapped_column(Float)
+
+
 class MemoryCandidateModel(Base):
     """A memory proposal with an explicit worker state."""
 
@@ -170,12 +252,17 @@ class MemoryCandidateModel(Base):
     text: Mapped[str] = mapped_column(Text)
     source_type: Mapped[str] = mapped_column(String(64))
     source_ids: Mapped[list[str]] = mapped_column(JSON)
+    utility: Mapped[float] = mapped_column(Float)
     importance: Mapped[float] = mapped_column(Float)
     durability: Mapped[float] = mapped_column(Float)
     novelty: Mapped[float] = mapped_column(Float)
+    recurrence: Mapped[float] = mapped_column(Float)
     confidence: Mapped[float] = mapped_column(Float)
+    ambiguity: Mapped[float] = mapped_column(Float)
+    redundancy: Mapped[float] = mapped_column(Float)
     sensitivity: Mapped[str] = mapped_column(String(32))
     score: Mapped[float] = mapped_column(Float, index=True)
+    scoring_version: Mapped[str] = mapped_column(String(64), index=True)
     status: Mapped[str] = mapped_column(String(32), index=True)
     rejection_reason: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[UtcTimestamp] = mapped_column(String(32))
@@ -195,6 +282,105 @@ class CandidateEventModel(Base):
     event_id: Mapped[Identifier] = mapped_column(
         String(36), ForeignKey("events.id", ondelete="RESTRICT"), primary_key=True
     )
+
+
+class CandidatePatternModel(Base):
+    """Foreign-key-backed pattern provenance for one candidate."""
+
+    __tablename__ = "candidate_patterns"
+
+    candidate_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("memory_candidates.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    pattern_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("patterns.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+
+
+class CandidateProcessingRunModel(Base):
+    """Link one candidate to the run that produced or selected it."""
+
+    __tablename__ = "candidate_processing_runs"
+
+    candidate_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("memory_candidates.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    processing_run_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("processing_runs.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+
+
+class CandidateBuildModel(Base):
+    """Content-free inputs for one reproducible candidate build."""
+
+    __tablename__ = "candidate_builds"
+
+    processing_run_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("processing_runs.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    source_pattern_run_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("processing_runs.id", ondelete="RESTRICT"),
+        index=True,
+    )
+    processing_version: Mapped[str] = mapped_column(String(64), index=True)
+    scoring_weights: Mapped[dict[str, float]] = mapped_column(JSON)
+
+
+class CandidateDecisionModel(Base):
+    """Append-only worker evaluation under one explicit policy."""
+
+    __tablename__ = "candidate_decisions"
+
+    id: Mapped[Identifier] = mapped_column(String(36), primary_key=True)
+    idempotency_key: Mapped[str] = mapped_column(String(64), unique=True)
+    candidate_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("memory_candidates.id", ondelete="RESTRICT"),
+        index=True,
+    )
+    processing_run_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("processing_runs.id", ondelete="RESTRICT"),
+        index=True,
+    )
+    policy_version: Mapped[str] = mapped_column(String(64), index=True)
+    acceptance_threshold: Mapped[float] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    reason: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[UtcTimestamp] = mapped_column(String(32), index=True)
+
+
+class CandidateEvaluationBuildModel(Base):
+    """Content-free policy inputs for one candidate evaluation replay."""
+
+    __tablename__ = "candidate_evaluation_builds"
+
+    processing_run_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("processing_runs.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    source_candidate_run_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("processing_runs.id", ondelete="RESTRICT"),
+        index=True,
+    )
+    policy_version: Mapped[str] = mapped_column(String(64), index=True)
+    acceptance_threshold: Mapped[float] = mapped_column(Float)
+    minimum_confidence: Mapped[float] = mapped_column(Float)
+    maximum_ambiguity: Mapped[float] = mapped_column(Float)
+    maximum_redundancy: Mapped[float] = mapped_column(Float)
 
 
 class MemoryLinkModel(Base):

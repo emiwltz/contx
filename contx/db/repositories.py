@@ -10,7 +10,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from contx.db.models import (
+    CandidateBuildModel,
+    CandidateDecisionModel,
+    CandidateEvaluationBuildModel,
     CandidateEventModel,
+    CandidatePatternModel,
+    CandidateProcessingRunModel,
     CollectionControlModel,
     EventCorrectionModel,
     EventModel,
@@ -24,6 +29,10 @@ from contx.db.models import (
     ModelTransformationObservationModel,
     ModelTransformationRunModel,
     ObservationModel,
+    PatternBuildModel,
+    PatternEventModel,
+    PatternModel,
+    PatternProcessingRunModel,
     ProcessingRunModel,
     TimelineBuildModel,
 )
@@ -35,6 +44,10 @@ from contx.model_provider import (
 )
 from contx.models import (
     ActivityState,
+    CandidateBuild,
+    CandidateDecision,
+    CandidateDecisionStatus,
+    CandidateEvaluationBuild,
     CandidateStatus,
     CollectionControl,
     EpistemicStatus,
@@ -51,6 +64,10 @@ from contx.models import (
     MemoryProvenance,
     Observation,
     ObservationStatus,
+    Pattern,
+    PatternBuild,
+    PatternStatus,
+    PatternType,
     ProcessingRun,
     ProcessingRunStatus,
     Sensitivity,
@@ -116,13 +133,33 @@ class PipelineRepository:
                 self._session.flush()
                 return candidate
             return _candidate_from_model(existing)
-        self._require_ids(EventModel, candidate.source_ids, "event")
+        source_model: type[EventModel] | type[PatternModel]
+        source_model = (
+            PatternModel if candidate.source_type == "pattern" else EventModel
+        )
+        self._require_ids(
+            source_model,
+            candidate.source_ids,
+            "pattern" if candidate.source_type == "pattern" else "event",
+        )
         self._session.add(_candidate_to_model(candidate))
         self._session.flush()
-        self._session.add_all(
-            CandidateEventModel(candidate_id=str(candidate.id), event_id=str(event_id))
-            for event_id in candidate.source_ids
-        )
+        if candidate.source_type == "pattern":
+            self._session.add_all(
+                CandidatePatternModel(
+                    candidate_id=str(candidate.id),
+                    pattern_id=str(pattern_id),
+                )
+                for pattern_id in candidate.source_ids
+            )
+        else:
+            self._session.add_all(
+                CandidateEventModel(
+                    candidate_id=str(candidate.id),
+                    event_id=str(event_id),
+                )
+                for event_id in candidate.source_ids
+            )
         self._session.flush()
         return candidate
 
@@ -178,11 +215,17 @@ class PipelineRepository:
         model = self._session.get(EventModel, str(event_id))
         return None if model is None else _event_from_model(model)
 
+    def candidate_by_id(self, candidate_id: UUID) -> MemoryCandidate | None:
+        model = self._session.get(MemoryCandidateModel, str(candidate_id))
+        return None if model is None else _candidate_from_model(model)
+
     def count(
         self,
         model: type[ObservationModel]
         | type[EventModel]
+        | type[PatternModel]
         | type[MemoryCandidateModel]
+        | type[CandidateDecisionModel]
         | type[MemoryLinkModel]
         | type[ProcessingRunModel],
     ) -> int:
@@ -190,7 +233,7 @@ class PipelineRepository:
 
     def _require_ids(
         self,
-        model: type[ObservationModel] | type[EventModel],
+        model: type[ObservationModel] | type[EventModel] | type[PatternModel],
         identifiers: tuple[UUID, ...],
         label: str,
     ) -> None:
@@ -916,6 +959,337 @@ class TimelineBuildRepository:
         return None if model is None else _timeline_build_from_model(model)
 
 
+class PatternRepository:
+    """Persist replayable patterns with event and processing-run provenance."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def save(self, pattern: Pattern, *, processing_run_id: UUID) -> Pattern:
+        existing = self._session.scalar(
+            select(PatternModel).where(
+                PatternModel.idempotency_key == pattern.idempotency_key
+            )
+        )
+        if existing is None:
+            PipelineRepository(self._session)._require_ids(
+                EventModel,
+                pattern.source_event_ids,
+                "event",
+            )
+            self._session.add(_pattern_to_model(pattern))
+            self._session.flush()
+            self._session.add_all(
+                PatternEventModel(pattern_id=str(pattern.id), event_id=str(event_id))
+                for event_id in pattern.source_event_ids
+            )
+            persisted = pattern
+        else:
+            persisted = _pattern_from_model(existing)
+            if persisted.id != pattern.id:
+                raise DatabaseError("Pattern idempotency identity conflicts")
+
+        run = self._session.get(ProcessingRunModel, str(processing_run_id))
+        if (
+            run is None
+            or run.pipeline != "patterns"
+            or run.version != pattern.processing_version
+        ):
+            raise DatabaseError("Pattern processing run is missing or invalid")
+        identity = {
+            "pattern_id": str(persisted.id),
+            "processing_run_id": str(processing_run_id),
+        }
+        if self._session.get(PatternProcessingRunModel, identity) is None:
+            self._session.add(PatternProcessingRunModel(**identity))
+        self._session.flush()
+        return persisted
+
+    def by_id(self, pattern_id: UUID) -> Pattern | None:
+        model = self._session.get(PatternModel, str(pattern_id))
+        return None if model is None else _pattern_from_model(model)
+
+    def patterns_for_processing_run(
+        self,
+        processing_run_id: UUID,
+    ) -> tuple[Pattern, ...]:
+        models = self._session.scalars(
+            select(PatternModel)
+            .join(
+                PatternProcessingRunModel,
+                PatternProcessingRunModel.pattern_id == PatternModel.id,
+            )
+            .where(
+                PatternProcessingRunModel.processing_run_id == str(processing_run_id)
+            )
+            .order_by(PatternModel.window_start, PatternModel.type, PatternModel.id)
+        )
+        return tuple(_pattern_from_model(model) for model in models)
+
+    def event_ids(self, pattern_id: UUID) -> tuple[UUID, ...]:
+        return tuple(
+            UUID(value)
+            for value in self._session.scalars(
+                select(PatternEventModel.event_id)
+                .where(PatternEventModel.pattern_id == str(pattern_id))
+                .order_by(PatternEventModel.event_id)
+            )
+        )
+
+
+class PatternBuildRepository:
+    """Persist content-free pattern replay inputs."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def save(self, build: PatternBuild) -> PatternBuild:
+        existing = self._session.get(PatternBuildModel, str(build.processing_run_id))
+        if existing is not None:
+            persisted = _pattern_build_from_model(existing)
+            if persisted != build:
+                raise DatabaseError("Pattern build identity conflicts")
+            return persisted
+        run = self._session.get(ProcessingRunModel, str(build.processing_run_id))
+        source = self._session.get(
+            ProcessingRunModel,
+            str(build.source_timeline_run_id),
+        )
+        if (
+            run is None
+            or run.pipeline != "patterns"
+            or run.version != build.processing_version
+            or source is None
+            or source.pipeline != "activity_timeline"
+            or source.status != ProcessingRunStatus.SUCCEEDED.value
+        ):
+            raise DatabaseError("Pattern build processing identity is invalid")
+        self._session.add(_pattern_build_to_model(build))
+        self._session.flush()
+        return build
+
+    def by_processing_run(self, processing_run_id: UUID) -> PatternBuild | None:
+        model = self._session.get(PatternBuildModel, str(processing_run_id))
+        return None if model is None else _pattern_build_from_model(model)
+
+
+class CandidateBuildRepository:
+    """Persist and read pattern-to-candidate replay provenance."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def save(self, build: CandidateBuild) -> CandidateBuild:
+        existing = self._session.get(CandidateBuildModel, str(build.processing_run_id))
+        if existing is not None:
+            persisted = _candidate_build_from_model(existing)
+            if persisted != build:
+                raise DatabaseError("Candidate build identity conflicts")
+            return persisted
+        run = self._session.get(ProcessingRunModel, str(build.processing_run_id))
+        source = self._session.get(
+            ProcessingRunModel,
+            str(build.source_pattern_run_id),
+        )
+        if (
+            run is None
+            or run.pipeline != "pattern_candidates"
+            or run.version != build.processing_version
+            or source is None
+            or source.pipeline != "patterns"
+            or source.status != ProcessingRunStatus.SUCCEEDED.value
+        ):
+            raise DatabaseError("Candidate build processing identity is invalid")
+        self._session.add(_candidate_build_to_model(build))
+        self._session.flush()
+        return build
+
+    def by_processing_run(self, processing_run_id: UUID) -> CandidateBuild | None:
+        model = self._session.get(CandidateBuildModel, str(processing_run_id))
+        return None if model is None else _candidate_build_from_model(model)
+
+
+class PatternCandidateRepository:
+    """Persist pattern candidates and their producing run without changing state."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def save(
+        self,
+        candidate: MemoryCandidate,
+        *,
+        processing_run_id: UUID,
+    ) -> MemoryCandidate:
+        if candidate.source_type != "pattern":
+            raise DatabaseError("Pattern candidate source type is invalid")
+        run = self._session.get(ProcessingRunModel, str(processing_run_id))
+        build = self._session.get(
+            CandidateBuildModel,
+            str(processing_run_id),
+        )
+        if (
+            run is None
+            or run.pipeline != "pattern_candidates"
+            or run.version != candidate.scoring_version
+            or build is None
+        ):
+            raise DatabaseError("Candidate processing run is missing or invalid")
+        source_pattern_ids = set(
+            self._session.scalars(
+                select(PatternProcessingRunModel.pattern_id).where(
+                    PatternProcessingRunModel.processing_run_id
+                    == build.source_pattern_run_id
+                )
+            )
+        )
+        if not {str(item) for item in candidate.source_ids} <= source_pattern_ids:
+            raise DatabaseError(
+                "Candidate pattern provenance is outside its source run"
+            )
+        persisted = PipelineRepository(self._session).save_candidate(candidate)
+        identity = {
+            "candidate_id": str(persisted.id),
+            "processing_run_id": str(processing_run_id),
+        }
+        if self._session.get(CandidateProcessingRunModel, identity) is None:
+            self._session.add(CandidateProcessingRunModel(**identity))
+        self._session.flush()
+        return persisted
+
+    def candidates_for_processing_run(
+        self,
+        processing_run_id: UUID,
+    ) -> tuple[MemoryCandidate, ...]:
+        models = self._session.scalars(
+            select(MemoryCandidateModel)
+            .join(
+                CandidateProcessingRunModel,
+                CandidateProcessingRunModel.candidate_id == MemoryCandidateModel.id,
+            )
+            .where(
+                CandidateProcessingRunModel.processing_run_id == str(processing_run_id)
+            )
+            .order_by(MemoryCandidateModel.id)
+        )
+        return tuple(_candidate_from_model(model) for model in models)
+
+    def pattern_ids(self, candidate_id: UUID) -> tuple[UUID, ...]:
+        return tuple(
+            UUID(value)
+            for value in self._session.scalars(
+                select(CandidatePatternModel.pattern_id)
+                .where(CandidatePatternModel.candidate_id == str(candidate_id))
+                .order_by(CandidatePatternModel.pattern_id)
+            )
+        )
+
+
+class CandidateDecisionRepository:
+    """Persist append-only candidate evaluations for replay comparison."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def save(self, decision: CandidateDecision) -> CandidateDecision:
+        existing = self._session.scalar(
+            select(CandidateDecisionModel).where(
+                CandidateDecisionModel.idempotency_key == decision.idempotency_key
+            )
+        )
+        if existing is not None:
+            persisted = _candidate_decision_from_model(existing)
+            if persisted != decision:
+                raise DatabaseError("Candidate decision identity conflicts")
+            return persisted
+        if self._session.get(MemoryCandidateModel, str(decision.candidate_id)) is None:
+            raise DatabaseError("Candidate decision candidate is missing")
+        run = self._session.get(ProcessingRunModel, str(decision.processing_run_id))
+        build = self._session.get(
+            CandidateEvaluationBuildModel,
+            str(decision.processing_run_id),
+        )
+        if (
+            run is None
+            or run.pipeline != "candidate_evaluation"
+            or run.version != decision.policy_version
+            or build is None
+            or build.policy_version != decision.policy_version
+            or build.acceptance_threshold != decision.acceptance_threshold
+        ):
+            raise DatabaseError("Candidate decision processing run is invalid")
+        candidate_link = self._session.get(
+            CandidateProcessingRunModel,
+            {
+                "candidate_id": str(decision.candidate_id),
+                "processing_run_id": build.source_candidate_run_id,
+            },
+        )
+        if candidate_link is None:
+            raise DatabaseError(
+                "Candidate decision provenance is outside its source run"
+            )
+        self._session.add(_candidate_decision_to_model(decision))
+        self._session.flush()
+        return decision
+
+    def decisions_for_processing_run(
+        self,
+        processing_run_id: UUID,
+    ) -> tuple[CandidateDecision, ...]:
+        models = self._session.scalars(
+            select(CandidateDecisionModel)
+            .where(CandidateDecisionModel.processing_run_id == str(processing_run_id))
+            .order_by(CandidateDecisionModel.candidate_id)
+        )
+        return tuple(_candidate_decision_from_model(model) for model in models)
+
+
+class CandidateEvaluationBuildRepository:
+    """Persist the full content-free policy used by an evaluation run."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def save(self, build: CandidateEvaluationBuild) -> CandidateEvaluationBuild:
+        existing = self._session.get(
+            CandidateEvaluationBuildModel,
+            str(build.processing_run_id),
+        )
+        if existing is not None:
+            persisted = _candidate_evaluation_build_from_model(existing)
+            if persisted != build:
+                raise DatabaseError("Candidate evaluation build identity conflicts")
+            return persisted
+        run = self._session.get(ProcessingRunModel, str(build.processing_run_id))
+        source = self._session.get(
+            ProcessingRunModel,
+            str(build.source_candidate_run_id),
+        )
+        if (
+            run is None
+            or run.pipeline != "candidate_evaluation"
+            or run.version != build.policy_version
+            or source is None
+            or source.pipeline != "pattern_candidates"
+            or source.status != ProcessingRunStatus.SUCCEEDED.value
+        ):
+            raise DatabaseError("Candidate evaluation build identity is invalid")
+        self._session.add(_candidate_evaluation_build_to_model(build))
+        self._session.flush()
+        return build
+
+    def by_processing_run(
+        self,
+        processing_run_id: UUID,
+    ) -> CandidateEvaluationBuild | None:
+        model = self._session.get(
+            CandidateEvaluationBuildModel,
+            str(processing_run_id),
+        )
+        return None if model is None else _candidate_evaluation_build_from_model(model)
+
+
 class CollectionRepository:
     """Persist collection control and pre-capture exclusion policy."""
 
@@ -1264,6 +1638,100 @@ def _persisted_event_type(value: str) -> EventType:
         return EventType.OTHER
 
 
+def _pattern_to_model(record: Pattern) -> PatternModel:
+    return PatternModel(
+        id=str(record.id),
+        idempotency_key=record.idempotency_key,
+        type=record.type.value,
+        summary=record.summary,
+        window_start=format_utc(record.window_start),
+        window_end=format_utc(record.window_end),
+        epistemic_status=record.epistemic_status.value,
+        confidence=record.confidence,
+        sensitivity=record.sensitivity.value,
+        evidence_count=record.evidence_count,
+        source_event_ids=[str(value) for value in record.source_event_ids],
+        projects=list(record.projects),
+        entities=list(record.entities),
+        metrics=record.metrics,
+        valid_from=format_utc(record.valid_from),
+        valid_until=(
+            None if record.valid_until is None else format_utc(record.valid_until)
+        ),
+        status=record.status.value,
+        processing_version=record.processing_version,
+        created_at=format_utc(record.created_at),
+    )
+
+
+def _pattern_from_model(model: PatternModel) -> Pattern:
+    return Pattern(
+        id=UUID(model.id),
+        idempotency_key=model.idempotency_key,
+        type=PatternType(model.type),
+        summary=model.summary,
+        window_start=parse_utc(model.window_start),
+        window_end=parse_utc(model.window_end),
+        epistemic_status=EpistemicStatus(model.epistemic_status),
+        confidence=model.confidence,
+        sensitivity=Sensitivity(model.sensitivity),
+        evidence_count=model.evidence_count,
+        source_event_ids=tuple(UUID(value) for value in model.source_event_ids),
+        projects=tuple(model.projects),
+        entities=tuple(model.entities),
+        metrics=model.metrics,
+        valid_from=parse_utc(model.valid_from),
+        valid_until=(
+            None if model.valid_until is None else parse_utc(model.valid_until)
+        ),
+        status=PatternStatus(model.status),
+        processing_version=model.processing_version,
+        created_at=parse_utc(model.created_at),
+    )
+
+
+def _pattern_build_to_model(record: PatternBuild) -> PatternBuildModel:
+    return PatternBuildModel(
+        processing_run_id=str(record.processing_run_id),
+        source_timeline_run_id=str(record.source_timeline_run_id),
+        processing_version=record.processing_version,
+        comparison_boundary=format_utc(record.comparison_boundary),
+        min_project_events=record.min_project_events,
+        resumption_gap_seconds=record.resumption_gap_seconds,
+        change_ratio=record.change_ratio,
+    )
+
+
+def _pattern_build_from_model(model: PatternBuildModel) -> PatternBuild:
+    return PatternBuild(
+        processing_run_id=UUID(model.processing_run_id),
+        source_timeline_run_id=UUID(model.source_timeline_run_id),
+        processing_version=model.processing_version,
+        comparison_boundary=parse_utc(model.comparison_boundary),
+        min_project_events=model.min_project_events,
+        resumption_gap_seconds=model.resumption_gap_seconds,
+        change_ratio=model.change_ratio,
+    )
+
+
+def _candidate_build_to_model(record: CandidateBuild) -> CandidateBuildModel:
+    return CandidateBuildModel(
+        processing_run_id=str(record.processing_run_id),
+        source_pattern_run_id=str(record.source_pattern_run_id),
+        processing_version=record.processing_version,
+        scoring_weights=record.scoring_weights,
+    )
+
+
+def _candidate_build_from_model(model: CandidateBuildModel) -> CandidateBuild:
+    return CandidateBuild(
+        processing_run_id=UUID(model.processing_run_id),
+        source_pattern_run_id=UUID(model.source_pattern_run_id),
+        processing_version=model.processing_version,
+        scoring_weights=model.scoring_weights,
+    )
+
+
 def _candidate_to_model(record: MemoryCandidate) -> MemoryCandidateModel:
     return MemoryCandidateModel(
         id=str(record.id),
@@ -1271,12 +1739,17 @@ def _candidate_to_model(record: MemoryCandidate) -> MemoryCandidateModel:
         text=record.text,
         source_type=record.source_type,
         source_ids=[str(item) for item in record.source_ids],
+        utility=record.utility,
         importance=record.importance,
         durability=record.durability,
         novelty=record.novelty,
+        recurrence=record.recurrence,
         confidence=record.confidence,
+        ambiguity=record.ambiguity,
+        redundancy=record.redundancy,
         sensitivity=record.sensitivity.value,
         score=record.score,
+        scoring_version=record.scoring_version,
         status=record.status.value,
         rejection_reason=record.rejection_reason,
         created_at=format_utc(record.created_at),
@@ -1293,18 +1766,83 @@ def _candidate_from_model(model: MemoryCandidateModel) -> MemoryCandidate:
         text=model.text,
         source_type=model.source_type,
         source_ids=tuple(UUID(item) for item in model.source_ids),
+        utility=model.utility,
         importance=model.importance,
         durability=model.durability,
         novelty=model.novelty,
+        recurrence=model.recurrence,
         confidence=model.confidence,
+        ambiguity=model.ambiguity,
+        redundancy=model.redundancy,
         sensitivity=Sensitivity(model.sensitivity),
         score=model.score,
+        scoring_version=model.scoring_version,
         status=CandidateStatus(model.status),
         rejection_reason=model.rejection_reason,
         created_at=parse_utc(model.created_at),
         processed_at=None
         if model.processed_at is None
         else parse_utc(model.processed_at),
+    )
+
+
+def _candidate_decision_to_model(
+    record: CandidateDecision,
+) -> CandidateDecisionModel:
+    return CandidateDecisionModel(
+        id=str(record.id),
+        idempotency_key=record.idempotency_key,
+        candidate_id=str(record.candidate_id),
+        processing_run_id=str(record.processing_run_id),
+        policy_version=record.policy_version,
+        acceptance_threshold=record.acceptance_threshold,
+        status=record.status.value,
+        reason=record.reason,
+        created_at=format_utc(record.created_at),
+    )
+
+
+def _candidate_decision_from_model(
+    model: CandidateDecisionModel,
+) -> CandidateDecision:
+    return CandidateDecision(
+        id=UUID(model.id),
+        idempotency_key=model.idempotency_key,
+        candidate_id=UUID(model.candidate_id),
+        processing_run_id=UUID(model.processing_run_id),
+        policy_version=model.policy_version,
+        acceptance_threshold=model.acceptance_threshold,
+        status=CandidateDecisionStatus(model.status),
+        reason=model.reason,
+        created_at=parse_utc(model.created_at),
+    )
+
+
+def _candidate_evaluation_build_to_model(
+    record: CandidateEvaluationBuild,
+) -> CandidateEvaluationBuildModel:
+    return CandidateEvaluationBuildModel(
+        processing_run_id=str(record.processing_run_id),
+        source_candidate_run_id=str(record.source_candidate_run_id),
+        policy_version=record.policy_version,
+        acceptance_threshold=record.acceptance_threshold,
+        minimum_confidence=record.minimum_confidence,
+        maximum_ambiguity=record.maximum_ambiguity,
+        maximum_redundancy=record.maximum_redundancy,
+    )
+
+
+def _candidate_evaluation_build_from_model(
+    model: CandidateEvaluationBuildModel,
+) -> CandidateEvaluationBuild:
+    return CandidateEvaluationBuild(
+        processing_run_id=UUID(model.processing_run_id),
+        source_candidate_run_id=UUID(model.source_candidate_run_id),
+        policy_version=model.policy_version,
+        acceptance_threshold=model.acceptance_threshold,
+        minimum_confidence=model.minimum_confidence,
+        maximum_ambiguity=model.maximum_ambiguity,
+        maximum_redundancy=model.maximum_redundancy,
     )
 
 

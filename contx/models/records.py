@@ -88,6 +88,26 @@ class CandidateStatus(StrEnum):
     STORED = "stored"
 
 
+class CandidateDecisionStatus(StrEnum):
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    DEFERRED = "deferred"
+
+
+class PatternType(StrEnum):
+    PROJECT_RECURRENCE = "project_recurrence"
+    PROJECT_RESUMPTION = "project_resumption"
+    ACTIVITY_INCREASE = "activity_increase"
+    ACTIVITY_DECREASE = "activity_decrease"
+    NEW_REPEATED_ACTIVITY = "new_repeated_activity"
+
+
+class PatternStatus(StrEnum):
+    ACTIVE = "active"
+    EXPIRED = "expired"
+    SUPERSEDED = "superseded"
+
+
 class MemoryLinkStatus(StrEnum):
     ACTIVE = "active"
     SUPERSEDED = "superseded"
@@ -411,18 +431,123 @@ class ActivityTimeline(DomainRecord):
         return self
 
 
+class Pattern(DomainRecord):
+    """A multi-event, replayable temporal inference."""
+
+    id: UUID
+    idempotency_key: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]+$")
+    type: PatternType
+    summary: str = Field(min_length=1, max_length=2000, repr=False)
+    window_start: datetime
+    window_end: datetime
+    epistemic_status: EpistemicStatus
+    confidence: float = Field(ge=0.0, le=1.0)
+    sensitivity: Sensitivity
+    evidence_count: int = Field(ge=2)
+    source_event_ids: tuple[UUID, ...] = Field(min_length=2)
+    projects: tuple[str, ...] = Field(default=(), repr=False)
+    entities: tuple[str, ...] = Field(default=(), repr=False)
+    metrics: dict[str, float | int | str] = Field(default_factory=dict)
+    valid_from: datetime
+    valid_until: datetime | None = None
+    status: PatternStatus = PatternStatus.ACTIVE
+    processing_version: str = Field(min_length=1, max_length=64)
+    created_at: datetime
+
+    _utc_timestamps = field_validator(
+        "window_start",
+        "window_end",
+        "valid_from",
+        "valid_until",
+        "created_at",
+    )(lambda value: None if value is None else require_aware_utc(value))
+
+    @model_validator(mode="after")
+    def validate_pattern(self) -> Self:
+        if self.window_start > self.window_end:
+            raise ValueError("pattern window cannot run backwards")
+        if self.valid_from < self.window_end:
+            raise ValueError(
+                "pattern cannot become valid before its evidence window ends"
+            )
+        if self.valid_until is not None and self.valid_from > self.valid_until:
+            raise ValueError("pattern validity cannot run backwards")
+        if self.evidence_count != len(self.source_event_ids):
+            raise ValueError("pattern evidence count must match source events")
+        if len(set(self.source_event_ids)) != len(self.source_event_ids):
+            raise ValueError("pattern source event identifiers must be unique")
+        if len(set(self.projects)) != len(self.projects):
+            raise ValueError("pattern projects must be unique")
+        if len(set(self.entities)) != len(self.entities):
+            raise ValueError("pattern entities must be unique")
+        return self
+
+    def status_at(self, at: datetime) -> PatternStatus:
+        """Resolve time-based expiration without mutating replay evidence."""
+        instant = require_aware_utc(at)
+        if (
+            self.status is PatternStatus.ACTIVE
+            and self.valid_until is not None
+            and instant >= self.valid_until
+        ):
+            return PatternStatus.EXPIRED
+        return self.status
+
+
+class PatternBuild(DomainRecord):
+    """Content-free inputs for one reproducible multi-event pattern replay."""
+
+    processing_run_id: UUID
+    source_timeline_run_id: UUID
+    processing_version: str = Field(min_length=1, max_length=64)
+    comparison_boundary: datetime
+    min_project_events: int = Field(ge=2, le=100)
+    resumption_gap_seconds: int = Field(ge=3600, le=30 * 24 * 3600)
+    change_ratio: float = Field(ge=1.1, le=10.0)
+
+    _utc_timestamp = field_validator("comparison_boundary")(require_aware_utc)
+
+
+class CandidateBuild(DomainRecord):
+    """Content-free provenance for one pattern-to-candidate replay."""
+
+    processing_run_id: UUID
+    source_pattern_run_id: UUID
+    processing_version: str = Field(min_length=1, max_length=64)
+    scoring_weights: dict[str, float]
+
+    @field_validator("scoring_weights")
+    @classmethod
+    def validate_scoring_weights(cls, value: dict[str, float]) -> dict[str, float]:
+        if not value:
+            raise ValueError("candidate scoring weights cannot be empty")
+        if any(
+            not key.strip() or not -1.0 <= weight <= 1.0
+            for key, weight in value.items()
+        ):
+            raise ValueError("candidate scoring weights are invalid")
+        return value
+
+
 class MemoryCandidate(DomainRecord):
     id: UUID
     idempotency_key: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]+$")
     text: str = Field(min_length=1, max_length=4000, repr=False)
     source_type: str = Field(min_length=1, max_length=64)
     source_ids: tuple[UUID, ...] = Field(min_length=1)
+    utility: float = Field(default=0.0, ge=0.0, le=1.0)
     importance: float = Field(ge=0.0, le=1.0)
     durability: float = Field(ge=0.0, le=1.0)
     novelty: float = Field(ge=0.0, le=1.0)
+    recurrence: float = Field(default=0.0, ge=0.0, le=1.0)
     confidence: float = Field(ge=0.0, le=1.0)
+    ambiguity: float = Field(default=0.0, ge=0.0, le=1.0)
+    redundancy: float = Field(default=0.0, ge=0.0, le=1.0)
     sensitivity: Sensitivity
     score: float = Field(ge=0.0, le=1.0)
+    scoring_version: str = Field(
+        default="legacy-candidate-v1", min_length=1, max_length=64
+    )
     status: CandidateStatus = CandidateStatus.PENDING
     rejection_reason: str | None = Field(default=None, max_length=255)
     created_at: datetime
@@ -482,6 +607,44 @@ class MemoryCandidate(DomainRecord):
             self.model_dump()
             | {"status": CandidateStatus.STORED, "processed_at": processed_at}
         )
+
+
+class CandidateDecision(DomainRecord):
+    """One append-only evaluation of a candidate under an explicit policy."""
+
+    id: UUID
+    idempotency_key: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]+$")
+    candidate_id: UUID
+    processing_run_id: UUID
+    policy_version: str = Field(min_length=1, max_length=64)
+    acceptance_threshold: float = Field(ge=0.0, le=1.0)
+    status: CandidateDecisionStatus
+    reason: str | None = Field(default=None, max_length=255)
+    created_at: datetime
+
+    _utc_timestamp = field_validator("created_at")(require_aware_utc)
+
+    @model_validator(mode="after")
+    def validate_decision(self) -> Self:
+        needs_reason = self.status in {
+            CandidateDecisionStatus.REJECTED,
+            CandidateDecisionStatus.DEFERRED,
+        }
+        if needs_reason != (self.reason is not None):
+            raise ValueError("rejected or deferred evaluations require one reason")
+        return self
+
+
+class CandidateEvaluationBuild(DomainRecord):
+    """Content-free policy inputs for one candidate evaluation replay."""
+
+    processing_run_id: UUID
+    source_candidate_run_id: UUID
+    policy_version: str = Field(min_length=1, max_length=64)
+    acceptance_threshold: float = Field(ge=0.0, le=1.0)
+    minimum_confidence: float = Field(ge=0.0, le=1.0)
+    maximum_ambiguity: float = Field(ge=0.0, le=1.0)
+    maximum_redundancy: float = Field(ge=0.0, le=1.0)
 
 
 class MemoryProvenance(DomainRecord):
