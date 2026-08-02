@@ -15,6 +15,7 @@ from contx.collectors.macos.capabilities import (
     detect_collection_capabilities,
 )
 from contx.collectors.macos.notifications import WorkspaceNotificationMonitor
+from contx.collectors.macos.screenshots import QuartzScreenshotSource
 
 __all__ = [
     "ActiveApplicationCollector",
@@ -23,6 +24,7 @@ __all__ = [
     "CollectionCapability",
     "MacOSActivitySampler",
     "QuartzIdleSecondsProbe",
+    "QuartzScreenshotSource",
     "ResolvedSystemStateProbe",
     "SystemSignals",
     "WorkspaceApplicationProbe",

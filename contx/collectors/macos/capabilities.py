@@ -101,10 +101,21 @@ def detect_collection_capabilities(
             enabled=settings.screenshots_enabled,
             module=quartz,
             preflight_name="CGPreflightScreenCaptureAccess",
-            missing_api_reason="screen_capture_preflight_unavailable",
+            missing_api_reason="screen_capture_api_unavailable",
             permission_reason="screen_recording_permission_missing",
             settings_path=(
                 "System Settings > Privacy & Security > Screen & System Audio Recording"
+            ),
+            required_api_names=(
+                "CGRectInfinite",
+                "kCGWindowListOptionOnScreenOnly",
+                "kCGNullWindowID",
+                "kCGWindowImageDefault",
+                "CGWindowListCreateImage",
+                "CFDataCreateMutable",
+                "CGImageDestinationCreateWithData",
+                "CGImageDestinationAddImage",
+                "CGImageDestinationFinalize",
             ),
         ),
     ]
@@ -139,6 +150,7 @@ def _permission_capability(
     missing_api_reason: str,
     permission_reason: str,
     settings_path: str,
+    required_api_names: tuple[str, ...] = (),
 ) -> CollectionCapability:
     if not enabled:
         return CollectionCapability(
@@ -146,7 +158,9 @@ def _permission_capability(
             status=CapabilityStatus.DISABLED,
             reason_code="disabled_by_configuration",
         )
-    if module is None or not hasattr(module, preflight_name):
+    if module is None or not all(
+        hasattr(module, name) for name in (preflight_name, *required_api_names)
+    ):
         return CollectionCapability(
             name=name,
             status=CapabilityStatus.UNAVAILABLE,

@@ -122,6 +122,15 @@ def _add_quartz_api(module: ModuleType, calls: list[str]) -> None:
 
     module.AXIsProcessTrusted = accessibility  # type: ignore[attr-defined]
     module.CGPreflightScreenCaptureAccess = screen_capture  # type: ignore[attr-defined]
+    module.CGRectInfinite = object()  # type: ignore[attr-defined]
+    module.kCGWindowListOptionOnScreenOnly = 1  # type: ignore[attr-defined]
+    module.kCGNullWindowID = 0  # type: ignore[attr-defined]
+    module.kCGWindowImageDefault = 0  # type: ignore[attr-defined]
+    module.CGWindowListCreateImage = lambda *_: object()  # type: ignore[attr-defined]
+    module.CFDataCreateMutable = lambda *_: bytearray()  # type: ignore[attr-defined]
+    module.CGImageDestinationCreateWithData = lambda *_: object()  # type: ignore[attr-defined]
+    module.CGImageDestinationAddImage = lambda *_: None  # type: ignore[attr-defined]
+    module.CGImageDestinationFinalize = lambda *_: True  # type: ignore[attr-defined]
 
 
 def _by_name(
