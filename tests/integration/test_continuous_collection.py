@@ -8,7 +8,7 @@ from uuid import UUID
 import pytest
 from sqlalchemy import Engine, select
 
-from contx.application import ContinuousCollectionRunner
+from contx.application import ContinuousCollectionRunner, ContinuousCollectionSession
 from contx.application.continuous_collection import StatefulCollector
 from contx.db import (
     create_database_engine,
@@ -110,6 +110,34 @@ def test_runner_purges_persists_flushes_and_audits_success(tmp_path: Path) -> No
         assert run.status == ProcessingRunStatus.SUCCEEDED.value
         assert run.input_count == 2
         assert run.output_count == 2
+    finally:
+        engine.dispose()
+
+
+def test_session_exposes_non_blocking_ticks_for_a_native_event_loop(
+    tmp_path: Path,
+) -> None:
+    engine = _engine(tmp_path)
+    clock = MutableClock(START)
+    observation = _observation(1, START)
+    session = ContinuousCollectionSession(
+        engine=engine,
+        collector=SequenceCollector(((observation,),)),
+        purge=FakePurge(),
+        clock=clock,
+        identifiers=SequenceIdentifiers((RUN_ID,)),
+        purge_interval=timedelta(minutes=1),
+    )
+    try:
+        session.start()
+        assert session.tick() == 1
+        result = session.stop()
+
+        assert result.cycles == 1
+        assert result.observations == 1
+        with session_scope(engine) as database_session:
+            persisted = database_session.scalars(select(ObservationModel)).one()
+        assert persisted.id == str(observation.id)
     finally:
         engine.dispose()
 
