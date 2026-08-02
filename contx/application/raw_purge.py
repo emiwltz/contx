@@ -50,11 +50,13 @@ class RawPurgeService:
         self._identifiers = identifiers
         self._batch_size = batch_size
 
-    def run(self) -> RawPurgeResult:
+    def run(self, *, include_unexpired: bool = False) -> RawPurgeResult:
         started_at = self._clock.now()
         running_run = ProcessingRun(
             id=self._identifiers.new(),
-            pipeline="raw_purge",
+            pipeline=(
+                "raw_purge_immediate" if include_unexpired else "raw_purge"
+            ),
             version=RAW_PURGE_VERSION,
             started_at=started_at,
         )
@@ -69,7 +71,14 @@ class RawPurgeService:
             with session_scope(self._engine) as session:
                 repository = RawObservationRepository(session)
                 referenced_paths = repository.artifact_paths()
-                expired = repository.expired(at=started_at, limit=self._batch_size)
+                selected = (
+                    repository.retained(limit=self._batch_size)
+                    if include_unexpired
+                    else repository.expired(
+                        at=started_at,
+                        limit=self._batch_size,
+                    )
+                )
             for artifact in self._raw_store.list_paths():
                 if str(artifact) in referenced_paths:
                     continue
@@ -77,7 +86,7 @@ class RawPurgeService:
                 self._raw_store.delete(artifact)
                 reclaimed += artifact_size
                 orphan_artifacts_deleted += 1
-            for observation in expired:
+            for observation in selected:
                 try:
                     artifact_size = 0
                     if observation.artifact_path is not None:
@@ -96,13 +105,13 @@ class RawPurgeService:
                 run = run.fail(
                     ended_at=ended_at,
                     error_code="raw_purge_partial_failure",
-                    input_count=len(expired),
+                    input_count=len(selected),
                     output_count=len(purged),
                 )
             else:
                 run = run.succeed(
                     ended_at=ended_at,
-                    input_count=len(expired),
+                    input_count=len(selected),
                     output_count=len(purged),
                 )
             self._save_run(run)

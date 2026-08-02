@@ -28,6 +28,8 @@ from contx.model_provider import (
     LocalModelRequest,
     LocalModelRuntimeStatus,
     LoopbackHttpEndpoint,
+    ModelAttempt,
+    ModelAttemptInvocation,
     ModelProvider,
     ModelTransformation,
     ModelTransformationStatus,
@@ -325,8 +327,10 @@ class LocalModelProcessingService:
             started_at=attempt_started_at,
         )
         self._save_transformation(running, run_id=run_id)
+        invocation = ModelAttemptInvocation.NOT_INVOKED
         try:
             request = self._request(running)
+            invocation = ModelAttemptInvocation.INVOKED
             execution = self._provider.interpret(request)
             try:
                 succeeded = running.succeed(execution)
@@ -340,7 +344,12 @@ class LocalModelProcessingService:
                 status=succeeded.status,
             )
         except ContxError as error:
-            failed = self._record_attempt_failure(running, error=error, run_id=run_id)
+            failed = self._record_attempt_failure(
+                running,
+                error=error,
+                run_id=run_id,
+                invocation=invocation,
+            )
             return _AttemptOutcome(
                 transformation_id=failed.id,
                 status=failed.status,
@@ -396,6 +405,13 @@ class LocalModelProcessingService:
         with session_scope(self._engine) as session:
             model_repository = ModelTransformationRepository(session)
             model_repository.save(transformation, processing_run_id=run_id)
+            model_repository.save_attempt(
+                _terminal_attempt(
+                    transformation,
+                    run_id=run_id,
+                    invocation=ModelAttemptInvocation.INVOKED,
+                )
+            )
             pipeline_repository = PipelineRepository(session)
             for observation in model_repository.source_observations(transformation):
                 if observation.processing_status is not ObservationStatus.COLLECTED:
@@ -412,6 +428,7 @@ class LocalModelProcessingService:
         *,
         error: ContxError,
         run_id: UUID,
+        invocation: ModelAttemptInvocation,
     ) -> ModelTransformation:
         ended_at = self._clock.now()
         code = _safe_model_processing_error_code(error)
@@ -424,7 +441,16 @@ class LocalModelProcessingService:
                 error_code=code,
                 next_attempt_at=ended_at + self._retry_delay(running.attempt_count),
             )
-        self._save_transformation(record, run_id=run_id)
+        with session_scope(self._engine) as session:
+            repository = ModelTransformationRepository(session)
+            repository.save(record, processing_run_id=run_id)
+            repository.save_attempt(
+                _terminal_attempt(
+                    record,
+                    run_id=run_id,
+                    invocation=invocation,
+                )
+            )
         return record
 
     def _retry_delay(self, attempt_count: int) -> timedelta:
@@ -461,6 +487,13 @@ class LocalModelProcessingService:
                     )
                 )
                 repository.save(recovered, processing_run_id=run_ids[-1])
+                repository.save_attempt(
+                    _terminal_attempt(
+                        recovered,
+                        run_id=run_ids[-1],
+                        invocation=ModelAttemptInvocation.UNKNOWN,
+                    )
+                )
                 for run_id in run_ids:
                     run = pipeline.processing_run_by_id(run_id)
                     if run is None:
@@ -541,3 +574,23 @@ def _safe_model_processing_error_code(error: Exception) -> str:
     if isinstance(error, PipelineError):
         return "pipeline_error"
     return "unexpected_model_processing_failure"
+
+
+def _terminal_attempt(
+    transformation: ModelTransformation,
+    *,
+    run_id: UUID,
+    invocation: ModelAttemptInvocation,
+) -> ModelAttempt:
+    if transformation.started_at is None or transformation.ended_at is None:
+        raise DatabaseError("Terminal model transformation lacks attempt timestamps")
+    return ModelAttempt(
+        transformation_id=transformation.id,
+        processing_run_id=run_id,
+        attempt_number=transformation.attempt_count,
+        invocation=invocation,
+        status=transformation.status,
+        error_code=transformation.last_error_code,
+        started_at=transformation.started_at,
+        ended_at=transformation.ended_at,
+    )

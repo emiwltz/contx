@@ -282,6 +282,52 @@ class ModelTransformationStatus(StrEnum):
     ABANDONED = "abandoned"
 
 
+class ModelAttemptInvocation(StrEnum):
+    NOT_INVOKED = "not_invoked"
+    INVOKED = "invoked"
+    UNKNOWN = "unknown"
+
+
+class ModelAttempt(BaseModel):
+    """Content-free immutable outcome for one transformation attempt."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    transformation_id: UUID
+    processing_run_id: UUID
+    attempt_number: int = Field(ge=1, le=10)
+    invocation: ModelAttemptInvocation
+    status: ModelTransformationStatus
+    error_code: str | None = Field(
+        default=None,
+        max_length=64,
+        pattern=r"^[a-z0-9_]+$",
+    )
+    started_at: datetime
+    ended_at: datetime
+
+    _utc_timestamps = field_validator("started_at", "ended_at")(
+        require_aware_utc
+    )
+
+    @model_validator(mode="after")
+    def validate_attempt(self) -> Self:
+        if self.status in {
+            ModelTransformationStatus.PENDING,
+            ModelTransformationStatus.RUNNING,
+        }:
+            raise ValueError("model attempts require a terminal status")
+        failed = self.status in {
+            ModelTransformationStatus.FAILED,
+            ModelTransformationStatus.ABANDONED,
+        }
+        if failed != (self.error_code is not None):
+            raise ValueError("failed model attempts require exactly one error code")
+        if self.ended_at < self.started_at:
+            raise ValueError("model attempt cannot end before it starts")
+        return self
+
+
 class ModelTransformation(BaseModel):
     """Persistent local-model work item and validated enriched output."""
 

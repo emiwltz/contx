@@ -1078,12 +1078,14 @@ Trois options doivent être comparées.
 * métadonnées structurées ;
 * recherche enrichie éventuelle.
 
-**[DÉCISION v0]** CONTX utilise l’option B dans sa forme minimale : OptMem
-amont reste append-only et produit directement le contexte sémantique ; SQLite
-conserve les statuts, la provenance, l’audit du modèle local et la relation
-linéaire `supersedes`. Une projection OptMem filtrée ou une évolution native du
-moteur ne sera introduite que si les évaluations d’agents ou de compression
-montrent que cette sémantique est insuffisante. Voir ADR 0013.
+**[DÉCISION v0]** CONTX conserve l’option B pour l’écriture et l’historique :
+OptMem amont reste append-only ; SQLite conserve les statuts, la provenance,
+l’audit du modèle local et la relation linéaire `supersedes`. Les évaluations
+d’historique long ont activé le repli prévu par l’ADR 0013 : `wake` est produit
+directement par une identité OptMem séparée, reconstruite atomiquement à partir
+des seuls souvenirs actifs sélectionnés par SQLite. `recall` et `zoom` restent
+branchés sur l’historique append-only. SQLite ne résume ni ne réécrit le
+contexte. Voir ADR 0015.
 
 ## 18.6 Corrections
 
@@ -1119,21 +1121,29 @@ dupliquer le souvenir ni rappeler le modèle.
 
 Les vues ont les sémantiques suivantes :
 
-* `wake` est chronologique ; une ligne `Correction:` plus récente fait autorité
-  sur l’affirmation plus ancienne qu’elle contredit, même si les deux lignes
-  brutes récentes sont visibles ;
-* la maintenance compresse progressivement l’original et sa correction en ne
-  conservant que le fait courant ;
+* `wake` synchronise puis lit une projection OptMem qui ne contient que les
+  `MemoryLink` actifs ; une affirmation superseded n’y est pas recopiée ;
+* la projection reprend le texte persistant exact, puis sa maintenance locale
+  Gemma/OptMem compresse progressivement les faits actifs ;
+* une génération n’est publiée qu’après compression complète et relecture du
+  même état actif SQLite ; une génération partielle ne remplace jamais la
+  précédente ;
+* un jeton de snapshot identifie la génération, afin qu’une pagination ne
+  mélange pas deux états actifs différents ;
+* `contx memory rebuild-active` reconstruit explicitement une nouvelle
+  génération complète lorsque le résumé actif est incorrect, sans modifier
+  l’arbre historique ;
 * `recall` et `zoom` sont des vues historiques et peuvent exposer l’original et
   sa correction ;
 * aucun agent ne peut exécuter une correction sans instruction explicite de
   l’utilisateur.
 
-La décision doit être rouverte si un agent réel traite encore une affirmation
-superseded comme courante, si un résumé reconstruit conserve une contradiction,
-si les chaînes de corrections consomment une part matériellement nuisible du
-budget de réveil, ou si une surface produit requiert une vue sémantique active
-que les vues historiques ne peuvent pas fournir correctement.
+La décision doit être rouverte si la reconstruction active crée une latence ou
+une consommation disque matériellement nuisible, si de grands ensembles actifs
+ne peuvent pas être compressés dans le budget local, si la pagination retenue
+est insuffisante en usage réel, ou si le texte exact d’une correction active
+reste sémantiquement ambigu. Une évolution native d’OptMem n’est envisagée
+qu’après démonstration de ces limites.
 
 ---
 
@@ -1625,73 +1635,73 @@ contx/
 ## Système
 
 ```text
-GET  /api/status
-POST /api/pause
-POST /api/resume
+GET  /api/v1/status
+POST /api/v1/pause
+POST /api/v1/resume
 ```
 
 ## Sources
 
 ```text
-GET    /api/sources
-GET    /api/exclusions
-POST   /api/exclusions
-DELETE /api/exclusions/{id}
+GET    /api/v1/sources
+GET    /api/v1/exclusions
+POST   /api/v1/exclusions
+DELETE /api/v1/exclusions/{id}
 ```
 
 ## Observations
 
 ```text
-GET    /api/observations
-GET    /api/observations/{id}
-DELETE /api/observations/{id}
+GET    /api/v1/observations
+GET    /api/v1/observations/{id}
+DELETE /api/v1/observations/{id}
 ```
 
 ## Événements
 
 ```text
-GET   /api/events
-GET   /api/events/{id}
-PATCH /api/events/{id}
+GET   /api/v1/events
+GET   /api/v1/events/{id}
+PATCH /api/v1/events/{id}
 ```
 
 ## Patterns
 
 ```text
-GET /api/patterns
-GET /api/patterns/{id}
+GET /api/v1/patterns
+GET /api/v1/patterns/{id}
 ```
 
 ## Candidats
 
 ```text
-GET  /api/memory-candidates
-POST /api/memory-candidates/{id}/accept
-POST /api/memory-candidates/{id}/reject
+GET  /api/v1/memory-candidates
+POST /api/v1/memory-candidates/{id}/accept
+POST /api/v1/memory-candidates/{id}/reject
 ```
 
 ## Mémoire
 
 ```text
-GET  /api/memory
-GET  /api/memory/wake
-POST /api/memory/proposals
-POST /api/memory/corrections
-GET  /api/memory/recall
+GET  /api/v1/memory
+GET  /api/v1/memory/wake
+POST /api/v1/memory/proposals
+POST /api/v1/memory/corrections
+GET  /api/v1/memory/recall
 ```
 
 ## Confidentialité
 
 ```text
-GET /api/privacy/model-transformations
-GET /api/privacy/raw-artifacts
+GET /api/v1/privacy/model-transformations
+GET /api/v1/privacy/raw-artifacts
 ```
 
 ## Traitements
 
 ```text
-GET  /api/processing/runs
-POST /api/processing/retry
+GET  /api/v1/processing/runs
+POST /api/v1/processing/retry
 ```
 
 Cette API est indicative. Les contrats doivent être versionnés.

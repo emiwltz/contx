@@ -12,9 +12,11 @@ from sqlalchemy import Engine
 
 from contx import __version__
 from contx.application import (
+    ActiveMemoryProjectionService,
     ActivityTimelineService,
     AgentProposalAdoptionService,
     AgentProposalService,
+    DataDeletionService,
     EventCorrectionService,
     LocalModelEventService,
     LocalModelProcessingService,
@@ -22,7 +24,6 @@ from contx.application import (
     MemoryMaintenanceService,
     PipelineService,
     RawPurgeService,
-    correction_content,
 )
 from contx.candidates.rules import VerticalSliceCandidateProducer
 from contx.collection import (
@@ -46,12 +47,19 @@ from contx.db import (
 )
 from contx.db.repositories import (
     AgentProposalRepository,
-    EventCorrectionRepository,
     ModelEventRepository,
     ModelTransformationRepository,
-    PipelineRepository,
 )
-from contx.errors import ContxError, PipelineError, RawStoreError
+from contx.errors import ConfigurationError, ContxError, PipelineError, RawStoreError
+from contx.evaluation import (
+    PilotManifest,
+    PilotResourceSampler,
+    PilotThresholds,
+    PilotWorkspace,
+    ResourceLimits,
+    ResourcePhase,
+    evaluate_pilot,
+)
 from contx.events import (
     MODEL_EVENT_PROCESSING_VERSION,
     ModelActivitySessionizer,
@@ -79,7 +87,6 @@ from contx.models import (
     AgentProposalStatus,
     AgentRole,
     CollectionControl,
-    EventCorrectionContent,
     ExclusionRuleType,
     ProposalReferenceType,
     SystemClock,
@@ -104,11 +111,13 @@ model_app = typer.Typer(help="Inspect the mandatory local multimodal model.")
 timeline_app = typer.Typer(help="Build, inspect, and correct activity timelines.")
 memory_app = typer.Typer(help="Inspect and maintain final semantic memory.")
 proposals_app = typer.Typer(help="Review and explicitly decide agent proposals.")
+pilot_app = typer.Typer(help="Prepare and score the controlled real-data pilot.")
 app.add_typer(exclusions_app, name="exclusions")
 app.add_typer(model_app, name="model")
 app.add_typer(timeline_app, name="timeline")
 app.add_typer(memory_app, name="memory")
 app.add_typer(proposals_app, name="proposals")
+app.add_typer(pilot_app, name="pilot")
 
 
 class RunSource(StrEnum):
@@ -281,6 +290,264 @@ def capabilities() -> None:
         typer.echo(f"{capability.name}: {capability.status.value}{detail}")
         if capability.settings_path is not None:
             typer.echo(f"  settings: {capability.settings_path}")
+
+
+@app.command()
+def web(
+    port: Annotated[
+        int,
+        typer.Option(min=1024, max=65_535, help="Loopback HTTP port."),
+    ] = 8711,
+) -> None:
+    """Serve the local control interface on 127.0.0.1 only."""
+    try:
+        import uvicorn
+
+        from contx.web import create_app, create_runtime
+
+        runtime = create_runtime(port=port)
+        web_app = create_app(runtime)
+    except (ContxError, ValueError) as error:
+        _abort(
+            error
+            if isinstance(error, ContxError)
+            else ConfigurationError(str(error))
+        )
+    uvicorn.run(
+        web_app,
+        host="127.0.0.1",
+        port=port,
+        access_log=False,
+        server_header=False,
+    )
+
+
+@app.command("delete-all")
+def delete_all_data(
+    confirmation: Annotated[
+        str,
+        typer.Option(
+            "--confirm",
+            help="Exact confirmation phrase: DELETE ALL CONTX DATA",
+        ),
+    ],
+) -> None:
+    """Permanently delete every configured CONTX data store."""
+    if confirmation != "DELETE ALL CONTX DATA":
+        raise typer.BadParameter("confirmation must be DELETE ALL CONTX DATA")
+    try:
+        result = DataDeletionService(paths=resolve_runtime_paths()).delete_all()
+    except ContxError as error:
+        _abort(error)
+    stores = ", ".join(result.removed_stores) or "none"
+    typer.echo(f"CONTX data deleted: {stores}")
+
+
+@pilot_app.command("prepare")
+def prepare_pilot(
+    directory: Annotated[
+        Path,
+        typer.Argument(help="New or empty private pilot evidence directory."),
+    ],
+    started_at: Annotated[
+        str,
+        typer.Option("--start", help="Timezone-aware ISO 8601 pilot start."),
+    ],
+    planned_end_at: Annotated[
+        str,
+        typer.Option("--end", help="Timezone-aware ISO 8601 pilot end."),
+    ],
+    timezone: Annotated[
+        str,
+        typer.Option(help="IANA timezone used to interpret the pilot."),
+    ] = "Europe/Paris",
+    target_machine: Annotated[
+        str,
+        typer.Option(help="Content-free target machine description."),
+    ] = "Mac M4 16 GB",
+    maximum_p95_cpu_percent: Annotated[
+        float | None,
+        typer.Option(
+            "--max-p95-cpu",
+            min=0.01,
+            max=100,
+            help="Operator-approved collector CPU limit; omit until decided.",
+        ),
+    ] = None,
+    maximum_p95_rss_bytes: Annotated[
+        int | None,
+        typer.Option(
+            "--max-p95-rss-bytes",
+            min=1,
+            help="Operator-approved collector memory limit; omit until decided.",
+        ),
+    ] = None,
+    maximum_p95_detection_latency_ms: Annotated[
+        float | None,
+        typer.Option(
+            "--max-p95-detection-ms",
+            min=0.01,
+            help="Operator-approved detection limit; omit until decided.",
+        ),
+    ] = None,
+) -> None:
+    """Create evaluation files without enabling collection or requesting access."""
+    try:
+        manifest = PilotManifest(
+            pilot_id=UuidIdentifierSource().new(),
+            started_at=_parse_pilot_datetime(started_at),
+            planned_end_at=_parse_pilot_datetime(planned_end_at),
+            timezone=timezone,
+            target_machine=target_machine,
+            thresholds=PilotThresholds(
+                resource_limits=ResourceLimits(
+                    p95_total_cpu_percent_max=maximum_p95_cpu_percent,
+                    p95_total_rss_bytes_max=maximum_p95_rss_bytes,
+                    p95_detection_latency_ms_max=(
+                        maximum_p95_detection_latency_ms
+                    ),
+                )
+            ),
+        )
+        workspace = PilotWorkspace(directory.expanduser().resolve(strict=False))
+        workspace.prepare(manifest)
+    except (ContxError, ValueError) as error:
+        _abort(
+            error
+            if isinstance(error, ContxError)
+            else ConfigurationError(f"Invalid pilot manifest: {error}")
+        )
+    typer.echo(f"pilot workspace prepared: {workspace.root}")
+    typer.echo("collection: unchanged; no permission was requested")
+
+
+@pilot_app.command("validate")
+def validate_pilot(
+    directory: Annotated[
+        Path,
+        typer.Argument(help="Private pilot evidence directory."),
+    ],
+    evaluated_at: Annotated[
+        str | None,
+        typer.Option("--at", help="Optional reproducible ISO 8601 cutoff."),
+    ] = None,
+) -> None:
+    """Validate paired evidence and print every aggregate acceptance gate."""
+    try:
+        workspace = PilotWorkspace(directory.expanduser().resolve(strict=False))
+        report = evaluate_pilot(
+            workspace.load(),
+            evaluated_at=(
+                SystemClock().now()
+                if evaluated_at is None
+                else _parse_pilot_datetime(evaluated_at)
+            ),
+        )
+    except (ContxError, ValueError) as error:
+        _abort(
+            error
+            if isinstance(error, ContxError)
+            else ConfigurationError(f"Invalid pilot cutoff: {error}")
+        )
+    for gate in report.gates:
+        typer.echo(f"{gate.key}: {gate.status.value} ({gate.detail})")
+    state = "ready" if report.ready_for_v0_decision else "not ready"
+    typer.echo(f"v0 decision: {state}")
+
+
+@pilot_app.command("report")
+def write_pilot_report(
+    directory: Annotated[
+        Path,
+        typer.Argument(help="Private pilot evidence directory."),
+    ],
+    evaluated_at: Annotated[
+        str | None,
+        typer.Option("--at", help="Optional reproducible ISO 8601 cutoff."),
+    ] = None,
+) -> None:
+    """Write a private aggregate report without raw or answer content."""
+    try:
+        workspace = PilotWorkspace(directory.expanduser().resolve(strict=False))
+        report = evaluate_pilot(
+            workspace.load(),
+            evaluated_at=(
+                SystemClock().now()
+                if evaluated_at is None
+                else _parse_pilot_datetime(evaluated_at)
+            ),
+        )
+        report_path = workspace.write_report(report)
+    except (ContxError, ValueError) as error:
+        _abort(
+            error
+            if isinstance(error, ContxError)
+            else ConfigurationError(f"Invalid pilot cutoff: {error}")
+        )
+    typer.echo(f"pilot report: {report_path}")
+    state = "ready" if report.ready_for_v0_decision else "not ready"
+    typer.echo(f"v0 decision: {state}")
+
+
+@pilot_app.command("sample-resources")
+def sample_pilot_resources(
+    directory: Annotated[
+        Path,
+        typer.Argument(help="Private pilot evidence directory."),
+    ],
+    phase: Annotated[
+        ResourcePhase,
+        typer.Option(help="Representative phase measured by this sample."),
+    ],
+    detection_latency_ms: Annotated[
+        float | None,
+        typer.Option(
+            "--detection-ms",
+            min=0,
+            help="Controlled app-transition latency; required for active collection.",
+        ),
+    ] = None,
+    local_model_pid: Annotated[
+        int | None,
+        typer.Option(
+            "--model-pid",
+            min=1,
+            help="Exact local-model PID during a model-processing sample.",
+        ),
+    ] = None,
+    web_pid: Annotated[
+        int | None,
+        typer.Option(
+            "--web-pid",
+            min=1,
+            help="Exact loopback web PID during a web-interaction sample.",
+        ),
+    ] = None,
+) -> None:
+    """Append content-free CPU, RSS, latency, and disk measurements."""
+    try:
+        workspace = PilotWorkspace(directory.expanduser().resolve(strict=False))
+        sample = PilotResourceSampler(
+            workspace=workspace,
+            paths=resolve_runtime_paths(),
+            clock=SystemClock(),
+        ).capture(
+            phase=phase,
+            detection_latency_ms=detection_latency_ms,
+            local_model_pid=local_model_pid,
+            web_pid=web_pid,
+        )
+    except (ContxError, ValueError) as error:
+        _abort(
+            error
+            if isinstance(error, ContxError)
+            else ConfigurationError(f"Invalid resource sample: {error}")
+        )
+    typer.echo(f"resource sample: {sample.captured_at.isoformat()}")
+    typer.echo(f"phase: {sample.phase.value}")
+    typer.echo(f"total cpu: {sample.total_cpu_percent:.2f}%")
+    typer.echo(f"total rss: {sample.total_rss_bytes} bytes")
+    typer.echo(f"raw disk: {sample.raw_disk_bytes} bytes")
 
 
 @model_app.command("status")
@@ -462,27 +729,9 @@ def correct_timeline_event(
         load_settings(paths)
         upgrade_database(paths.database_file)
         engine = create_database_engine(paths.database_file)
-        with session_scope(engine) as session:
-            event = PipelineRepository(session).event_by_id(event_id)
-            if event is None:
-                raise PipelineError("Cannot correct a missing event")
-            latest = (
-                EventCorrectionRepository(session)
-                .latest_for_lineages((event.lineage_key,))
-                .get(event.lineage_key)
-            )
-            current = (
-                correction_content(event) if latest is None else latest.replacement
-            )
-        try:
-            replacement = EventCorrectionContent.model_validate(
-                current.model_dump() | {"summary": summary}
-            )
-        except ValueError:
-            raise PipelineError("Event correction is invalid") from None
-        correction = EventCorrectionService(engine=engine).correct(
+        correction = EventCorrectionService(engine=engine).correct_summary(
             event_id=event_id,
-            replacement=replacement,
+            summary=summary,
             reason=reason,
             correction_id=UuidIdentifierSource().new(),
             created_at=SystemClock().now(),
@@ -735,20 +984,29 @@ def wake(
     part: Annotated[int, typer.Option(min=1, help="Context page to read.")] = 1,
     snapshot: Annotated[
         int | None,
-        typer.Option(min=0, help="Stable OptMem snapshot for later pages."),
+        typer.Option(min=0, help="Stable projection snapshot for later pages."),
     ] = None,
 ) -> None:
-    """Print semantic memory context directly from MemoryStore."""
+    """Print semantic context from the active-only OptMem projection."""
+    engine: Engine | None = None
     try:
         paths = resolve_runtime_paths()
+        initialize_runtime_paths(paths)
         settings = load_settings(paths)
-        memory = _build_memory_store(
-            paths.memory,
+        upgrade_database(paths.database_file)
+        engine = create_database_engine(paths.database_file)
+        projection_wake = _build_active_memory_projection_service(
+            engine=engine,
+            projection_root=paths.memory_projection,
+            model_settings=settings.model,
             wake_budget_bytes=settings.memory.wake_budget_bytes,
-        )
-        result = memory.wake(part=part, snapshot=snapshot)
+        ).wake(part=part, snapshot=snapshot)
+        result = projection_wake.wake
     except ContxError as error:
         _abort(error)
+    finally:
+        if engine is not None:
+            engine.dispose()
     if result.content:
         typer.echo(result.content, nl=False)
     if result.next_part is not None and result.snapshot is not None:
@@ -775,9 +1033,9 @@ def wake(
 
 @app.command()
 def recall(pattern: str) -> None:
-    """Search final memory directly with an OptMem regular expression."""
+    """Search append-only historical memory with an OptMem expression."""
     try:
-        memory = _configured_memory_store()
+        memory = _configured_historical_memory_store()
         result = memory.recall(pattern)
     except ContxError as error:
         _abort(error)
@@ -786,9 +1044,9 @@ def recall(pattern: str) -> None:
 
 @app.command()
 def zoom(block: str) -> None:
-    """Open one OptMem summary node into its two direct children."""
+    """Open one historical OptMem summary node into its direct children."""
     try:
-        memory = _configured_memory_store()
+        memory = _configured_historical_memory_store()
         result = memory.zoom(block)
     except ContxError as error:
         _abort(error)
@@ -1056,13 +1314,7 @@ def maintain_memory() -> None:
                 paths.memory,
                 wake_budget_bytes=settings.memory.wake_budget_bytes,
             ),
-            compressor=OllamaMemoryCompressor(
-                model=settings.model.model_name,
-                endpoint=settings.model.endpoint,
-                timeout_seconds=settings.model.timeout_seconds,
-                keep_alive=settings.model.keep_alive,
-                context_tokens=settings.model.context_tokens,
-            ),
+            compressor=_build_memory_compressor(settings.model),
             clock=SystemClock(),
             identifiers=UuidIdentifierSource(),
             max_compressions=settings.memory.max_compressions_per_cycle,
@@ -1080,11 +1332,37 @@ def maintain_memory() -> None:
     )
 
 
+@memory_app.command("rebuild-active")
+def rebuild_active_memory() -> None:
+    """Atomically rebuild wake context from the unchanged active-memory set."""
+    engine: Engine | None = None
+    try:
+        paths = resolve_runtime_paths()
+        initialize_runtime_paths(paths)
+        settings = load_settings(paths)
+        upgrade_database(paths.database_file)
+        engine = create_database_engine(paths.database_file)
+        result = _build_active_memory_projection_service(
+            engine=engine,
+            projection_root=paths.memory_projection,
+            model_settings=settings.model,
+            wake_budget_bytes=settings.memory.wake_budget_bytes,
+        ).rebuild()
+    except ContxError as error:
+        _abort(error)
+    finally:
+        if engine is not None:
+            engine.dispose()
+    typer.echo(f"active memories: {result.active_memory_count}")
+    typer.echo(f"compressions completed: {result.completed_compressions}")
+    typer.echo("active projection: rebuilt")
+
+
 @memory_app.command("invalidate-summary")
 def invalidate_memory_summary(block: str) -> None:
-    """Drop one incorrect summary so local maintenance can rebuild it."""
+    """Drop one historical summary so local maintenance can rebuild it."""
     try:
-        memory = _configured_memory_store()
+        memory = _configured_historical_memory_store()
         memory.invalidate_summary(block)
     except ContxError as error:
         _abort(error)
@@ -1104,10 +1382,12 @@ exits with code 3, follow the continuation or maintenance instruction on
 stderr, then retry until the command completes.
 
 Use `contx recall '<regex>'` to search exact memory text and `contx zoom
-<lo>-<hi>` to navigate historical summaries and raw entries. `wake` is
-chronological: a newer line beginning with `Correction:` supersedes the older
-claim it declares obsolete, even while both recent lines remain visible. Never
-call OptMem directly and never write to its files. A primary agent may use
+<lo>-<hi>` to navigate historical summaries and raw entries. `wake` reads a
+separate OptMem projection containing only active SQLite-backed memories;
+superseded source entries remain available only through the historical tools.
+If active wake summarization is wrong, ask the user before running `contx memory
+rebuild-active`; historical summary invalidation does not change active wake.
+Never call OptMem directly and never write to its files. A primary agent may use
 `contx propose '<one line>'
 --reference-type <event|pattern|memory> --reference <uuid>`; this records a
 proposal for CONTX validation and does not append final memory. Agents must not
@@ -1130,12 +1410,40 @@ def _build_memory_store(
     )
 
 
-def _configured_memory_store() -> MemoryStore:
+def _configured_historical_memory_store() -> MemoryStore:
     paths = resolve_runtime_paths()
     settings = load_settings(paths)
     return _build_memory_store(
         paths.memory,
         wake_budget_bytes=settings.memory.wake_budget_bytes,
+    )
+
+
+def _build_memory_compressor(settings: ModelSettings) -> OllamaMemoryCompressor:
+    return OllamaMemoryCompressor(
+        model=settings.model_name,
+        endpoint=settings.endpoint,
+        timeout_seconds=settings.timeout_seconds,
+        keep_alive=settings.keep_alive,
+        context_tokens=settings.context_tokens,
+    )
+
+
+def _build_active_memory_projection_service(
+    *,
+    engine: Engine,
+    projection_root: Path,
+    model_settings: ModelSettings,
+    wake_budget_bytes: int,
+) -> ActiveMemoryProjectionService:
+    return ActiveMemoryProjectionService(
+        engine=engine,
+        projection_root=projection_root,
+        memory_store_factory=lambda memory_directory: _build_memory_store(
+            memory_directory,
+            wake_budget_bytes=wake_budget_bytes,
+        ),
+        compressor=_build_memory_compressor(model_settings),
     )
 
 
@@ -1206,6 +1514,18 @@ def _parse_cli_datetime(value: str) -> datetime:
     except ValueError:
         raise PipelineError(
             "Timeline boundaries must be timezone-aware ISO 8601 timestamps"
+        ) from None
+
+
+def _parse_pilot_datetime(value: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            raise ValueError
+        return parsed
+    except ValueError:
+        raise ConfigurationError(
+            "Pilot timestamps must be timezone-aware ISO 8601 values"
         ) from None
 
 

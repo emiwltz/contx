@@ -16,8 +16,34 @@ artifact hashes are authoritative in `uv.lock`.
 | Typer | 0.27.0 | MIT | Actively maintained; adds Rich and Shellingham for CLI behavior. Pure Python on the target platform. | Keep command services independent of Typer so another CLI layer can call the same application contracts. |
 
 These libraries solve standardized or failure-prone boundaries. CONTX does not
-add FastAPI, OCR, or web dependencies until the milestone that has an immediate
-consumer for them.
+add OCR dependencies. J6 is now the immediate consumer for the web dependencies
+below.
+
+## J6 local web interface
+
+These constraints are selected in project metadata but are not yet resolved in
+`uv.lock` or `webui/package-lock.json`. The execution environment refused the
+required network-enabled resolution because its privileged-use quota is
+exhausted. Exact resolved versions and transitive hashes must replace the
+selected ranges here before J6 completion.
+
+| Dependency | Selected line | License | Cost and removal strategy |
+|---|---:|---|---|
+| [FastAPI](https://pypi.org/project/fastapi/) | `>=0.139,<0.140` | MIT | Typed local HTTP and OpenAPI boundary on Pydantic/Starlette. Replaceable without data migration if response validation and security middleware are preserved. |
+| [Uvicorn](https://pypi.org/project/uvicorn/) | `>=0.51,<0.52` | BSD-3-Clause | Minimal ASGI server, forced to literal loopback by CONTX. Replaceable by another local ASGI server after bind and shutdown tests. |
+| [httpx](https://pypi.org/project/httpx/) | `>=0.28,<1` | BSD-3-Clause | Development-only in-process FastAPI/Starlette integration tests. Not shipped as an application requirement. |
+
+| Web build dependency | Selected version | License | Scope and removal strategy |
+|---|---:|---|---|
+| [React](https://www.npmjs.com/package/react) and React DOM | `19.2.8` | MIT | Browser component layer only. Another `/api/v1` client can replace it without changing product data. |
+| [Vite](https://www.npmjs.com/package/vite) | `8.1.5` | MIT | Development server and static production bundler; absent at runtime after packaging. |
+| [TypeScript](https://www.npmjs.com/package/typescript) | `7.0.2` | Apache-2.0 | Strict build-time checking; generated JavaScript is the runtime artifact. |
+| `@types/react`, `@types/react-dom` | `19.2.7`, `19.2.3` | MIT | Build-time declarations only. |
+
+The React Vite plugin is intentionally omitted: the v0 interface does not need
+React Refresh in production, and Vite can compile the selected JSX transform
+from the TypeScript configuration. This keeps the build dependency graph
+smaller. The decision must be confirmed by the pending production build.
 
 ## External local model runtime
 

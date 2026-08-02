@@ -20,6 +20,12 @@ initial final-memory engine. All access remains behind the CONTX `MemoryStore`
 contract so that the backend can be evaluated, updated, or replaced without
 coupling the rest of the product to its storage internals.
 
+Under ADR 0015, CONTX uses two explicitly separated identities from the same
+reviewed executable: `memory/` is the append-only historical source for writes,
+`recall`, and `zoom`; `memory-active/` contains bounded content-addressed
+generations rebuilt from exact active SQLite-backed text for `wake`. No OptMem
+source modification is required by this projection strategy.
+
 ## Verification performed
 
 - The local clone is clean at the recorded upstream commit.

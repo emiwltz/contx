@@ -211,6 +211,42 @@ class EventCorrectionService:
     def __init__(self, *, engine: Engine) -> None:
         self._engine = engine
 
+    def correct_summary(
+        self,
+        *,
+        event_id: UUID,
+        summary: str,
+        reason: str,
+        correction_id: UUID,
+        created_at: datetime,
+    ) -> EventCorrection:
+        """Append a summary correction while preserving current event semantics."""
+        with session_scope(self._engine) as database_session:
+            event = PipelineRepository(database_session).event_by_id(event_id)
+            if event is None:
+                raise PipelineError("Cannot correct a missing event")
+            latest = (
+                EventCorrectionRepository(database_session)
+                .latest_for_lineages((event.lineage_key,))
+                .get(event.lineage_key)
+            )
+            current = (
+                correction_content(event) if latest is None else latest.replacement
+            )
+        try:
+            replacement = EventCorrectionContent.model_validate(
+                current.model_dump() | {"summary": summary}
+            )
+        except ValueError:
+            raise PipelineError("Event correction is invalid") from None
+        return self.correct(
+            event_id=event_id,
+            replacement=replacement,
+            reason=reason,
+            correction_id=correction_id,
+            created_at=created_at,
+        )
+
     def correct(
         self,
         *,

@@ -37,3 +37,7 @@ Every ADR records:
 - [0011 — Rebuild activity timelines as versioned session snapshots](0011-sessionized-event-replay.md)
 - [0012 — Preserve pattern, candidate, and decision replays as snapshots](0012-replayable-pattern-candidate-decisions.md)
 - [0013 — Keep v0 memory corrections append-only and explicit](0013-append-only-memory-corrections.md)
+- [0014 — Require explicit user adoption of agent proposals](0014-explicit-agent-proposal-adoption.md)
+- [0015 — Build `wake` from an atomic active-only OptMem projection](0015-active-optmem-wake-projection.md)
+- [0016 — Serve one same-origin loopback web interface](0016-loopback-web-interface.md)
+- [0017 — Evaluate v0 with paired, content-minimized pilot evidence](0017-paired-real-pilot-evaluation.md)

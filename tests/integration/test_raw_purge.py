@@ -107,6 +107,47 @@ def test_unreferenced_artifact_after_crash_is_removed_on_next_purge(
         engine.dispose()
 
 
+def test_explicit_immediate_purge_removes_unexpired_raw_data(
+    tmp_path: Path,
+) -> None:
+    engine = _engine(tmp_path)
+    store = FilesystemRawStore(tmp_path / "raw", disk_budget_bytes=1024)
+    captured = NOW - timedelta(hours=1)
+    artifact = store.write(
+        b"synthetic-unexpired-pixels",
+        artifact_id=OBSERVATION_ID,
+        suffix=".png",
+        captured_at=captured,
+        retention=timedelta(hours=48),
+    )
+    observation = _observation(artifact_path=str(artifact.path)).model_copy(
+        update={
+            "captured_at": captured,
+            "started_at": captured,
+            "ended_at": captured,
+            "expires_at": captured + timedelta(hours=48),
+            "created_at": captured,
+        }
+    )
+    _save_observation(engine, observation)
+    try:
+        result = RawPurgeService(
+            engine=engine,
+            raw_store=store,
+            clock=FixedClock(NOW),
+            identifiers=SequenceIdentifiers((RUN_ID,)),
+        ).run(include_unexpired=True)
+
+        assert result.succeeded
+        assert result.purged_observation_ids == (OBSERVATION_ID,)
+        assert not artifact.path.exists()
+        with session_scope(engine) as session:
+            run = session.scalars(select(ProcessingRunModel)).one()
+            assert run.pipeline == "raw_purge_immediate"
+    finally:
+        engine.dispose()
+
+
 def test_unsafe_artifact_path_fails_closed_and_is_audited(tmp_path: Path) -> None:
     engine = _engine(tmp_path)
     store = FilesystemRawStore(tmp_path / "raw", disk_budget_bytes=1024)

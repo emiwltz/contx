@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Engine, create_engine, event
+from sqlalchemy import Engine, create_engine, event, text
 from sqlalchemy.engine import URL
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -48,6 +48,20 @@ def session_scope(engine: Engine) -> Iterator[Session]:
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     with factory.begin() as session:
         yield session
+
+
+@contextmanager
+def immediate_session_scope(engine: Engine) -> Iterator[Session]:
+    """Reserve SQLite's writer slot for a short cross-store commit boundary."""
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    with factory() as session:
+        try:
+            session.execute(text("BEGIN IMMEDIATE"))
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
 
 
 def _prepare_database_file(path: Path) -> None:

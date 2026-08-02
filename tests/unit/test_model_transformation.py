@@ -9,6 +9,8 @@ from pydantic import ValidationError
 from contx.model_provider import (
     LocalModelExecution,
     LocalModelRuntimeStatus,
+    ModelAttempt,
+    ModelAttemptInvocation,
     ModelInterpretation,
     ModelTransformation,
     ModelTransformationStatus,
@@ -18,6 +20,7 @@ from contx.models import Sensitivity
 NOW = datetime(2026, 8, 2, 18, 0, tzinfo=UTC)
 OBSERVATION_ID = UUID("00000000-0000-0000-0000-000000000001")
 TRANSFORMATION_ID = UUID("00000000-0000-0000-0000-000000000002")
+RUN_ID = UUID("00000000-0000-0000-0000-000000000003")
 MODEL = "qwen3-vl:4b-instruct-q4_K_M"
 DIGEST = f"sha256:{'a' * 64}"
 
@@ -149,6 +152,28 @@ def test_failed_transformation_can_be_abandoned_without_rewriting_attempt_end() 
 
     assert abandoned.ended_at == attempt_ended
     assert abandoned.updated_at == NOW + timedelta(minutes=2)
+
+
+def test_model_attempt_requires_terminal_content_free_outcome() -> None:
+    attempt = ModelAttempt(
+        transformation_id=TRANSFORMATION_ID,
+        processing_run_id=RUN_ID,
+        attempt_number=1,
+        invocation=ModelAttemptInvocation.INVOKED,
+        status=ModelTransformationStatus.FAILED,
+        error_code="invalid_model_response",
+        started_at=NOW,
+        ended_at=NOW + timedelta(seconds=1),
+    )
+
+    assert attempt.invocation is ModelAttemptInvocation.INVOKED
+    with pytest.raises(ValidationError, match="terminal status"):
+        ModelAttempt.model_validate(
+            attempt.model_dump()
+            | {"status": ModelTransformationStatus.RUNNING, "error_code": None}
+        )
+    with pytest.raises(ValidationError, match="exactly one error"):
+        ModelAttempt.model_validate(attempt.model_dump() | {"error_code": None})
 
 
 def _pending(**overrides: object) -> ModelTransformation:

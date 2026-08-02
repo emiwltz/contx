@@ -74,6 +74,10 @@ class RuntimePaths:
         return self.application_support / "memory"
 
     @property
+    def memory_projection(self) -> Path:
+        return self.application_support / "memory-active"
+
+    @property
     def exports(self) -> Path:
         return self.application_support / "exports"
 
@@ -96,6 +100,7 @@ class RuntimePaths:
             self.caches,
             self.logs,
             self.memory,
+            self.memory_projection,
             self.exports,
             self.raw,
             self.processing,

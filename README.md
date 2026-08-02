@@ -32,7 +32,7 @@ flowchart LR
     model --> events["Events and provenance"]
     events --> patterns["Patterns and inferences"]
     patterns --> worker["Memory worker"]
-    worker --> memory["MemoryStore / OptMem"]
+    worker --> memory["Historical OptMem + active OptMem projection"]
     memory --> agents["Consuming agents"]
 
     controls["Pause and exclusions"] -. "before capture" .-> collectors
@@ -56,8 +56,8 @@ Excalidraw source are authoritative.
 | 4 | **Interprétation locale** | A mandatory local multimodal model interprets permitted screenshots and metadata, returns schema-validated summaries/classifications/projects/entities/sensitivity, and records inspectable provenance. |
 | 5 | **Base enrichie** | Structured events, summaries/themes/projects/entities, links back to raw evidence, model-transformation history, search/grouping/batch. |
 | 6 | **Agent de mémoire** | Single internal worker for v0: reads enriched events, discards noise, condenses what matters, avoids duplicates, writes short memories, triggers OptMem consolidation. |
-| 7 | **OptMem** | Append-only memory log, rebuildable summary tree, detailed recent / compressed old memories, `wake`/`recall`/`zoom`, the canonical active memory. |
-| 8 | **Passerelle agent** | Invokes OptMem, transports and paginates its output, and reports technical status separately. It never adds a second semantic context source. |
+| 7 | **OptMem** | Keeps the append-only source log and historical tree; a separately identified, atomically rebuilt OptMem generation contains only active SQLite-backed memories for `wake`. |
+| 8 | **Passerelle agent** | Synchronizes and invokes the active OptMem generation for `wake`, routes `recall`/`zoom` to history, preserves pagination generations, and never adds another semantic context source. |
 | 9 | **Agents consommateurs** | Hermes, OpenClaw, Codex, Claude Code… read the memory output directly, don’t necessarily access raw data, can propose a memory or correction, stay independent of CONTX. |
 
 ### Transversal guardrails
@@ -73,8 +73,9 @@ Excalidraw source are authoritative.
 |--------|---------|
 | **Base brute** | What was actually captured. |
 | **Base enrichie** | What CONTX understood and secured. |
-| **OptMem** | What CONTX decides to retain durably. |
-| **Sortie mémoire** | The budgeted OptMem view transported directly to the agent without semantic enrichment. |
+| **OptMem historique** | Every memory CONTX retained durably, including superseded correction history. |
+| **Projection OptMem active** | Exact active memory text selected by SQLite and compressed by OptMem/Gemma. |
+| **Sortie mémoire** | The budgeted active OptMem `wake` view transported directly to the agent without semantic enrichment. |
 
 ### Optional branches
 
@@ -95,7 +96,9 @@ The full list is in [§4 of the spec](./cahier_des_charges.md). The load-bearing
 - **A local multimodal model is mandatory for v0 semantic processing.** There is no deterministic production fallback and no remote provider.
 - **An observation never becomes a memory directly.** Observation → event → pattern/inference → candidate → stored memory are distinct stages.
 - **Agent proposals go through CONTX validation** before the `MemoryStore`; the agent never owns the memory; subagents never write to it.
-- **OptMem is the final context layer.** No separate Context Builder in v0.
+- **The active OptMem projection is the final context layer.** SQLite selects
+  active membership, but only OptMem/Gemma produce `wake`; there is no separate
+  Context Builder in v0.
 - **The user can pause collection instantly** and exclude apps/windows; the collector never screenshots blindly at a fixed cadence.
 - **Modular monolith.** Every replaceable component sits behind a stable interface.
 - **Quality over quantity.** CONTX never becomes an agent orchestrator and never executes the user's personal actions.
@@ -119,9 +122,9 @@ Memory candidates         (scored, deduplicated, fused, deferred if fragile)
     ↓
 Memory worker             (accepts / rejects / merges / corrects)
     ↓
-MemoryStore (OptMem)      (append-only log + rebuildable summary tree)
+MemoryStore               (append-only historical OptMem + active OptMem generation)
     ↓
-Context delivered to the agent  (wake, recall, zoom — directly, no Context Builder)
+Context delivered to the agent  (active wake; historical recall/zoom)
 ```
 
 The implemented v0.0.1 CLI surface is:
@@ -139,21 +142,25 @@ contx process                           # process one bounded local-model backlo
 contx timeline build --from <iso> --until <iso> # replay a frozen activity window
 contx timeline show <processing-run-id> # inspect one selected timeline snapshot
 contx timeline correct <event-id> --summary <text> --reason <text>
-contx wake                              # direct final-memory context
+contx wake                              # direct active-only OptMem context
 contx recall '<regex>'                  # historical raw-memory search
 contx zoom <node>                       # historical tree navigation
 contx memory maintain                   # bounded local-model compression
+contx memory rebuild-active             # atomic active wake-summary recovery
 contx propose '<memory>' --reference-type <type> --reference <uuid>
 contx proposals list                    # inspect the proposal inbox
 contx proposals show <proposal-uuid>    # review text, evidence reference, state
 contx proposals adopt <proposal-uuid>   # explicit user action + local validation
 contx proposals reject <proposal-uuid>  # explicit rejection, no memory write
 contx correct <memory-uuid> '<replacement>'
+contx pilot prepare <directory> --start <iso> --end <iso>
+contx pilot validate <directory>          # inspect incomplete/fail/review/pass gates
+contx pilot report <directory> --at <iso> # private aggregate v0 evidence
 ```
 
-Installed continuous collection is not activated. `wake` is chronological: a
-newer `Correction:` line is authoritative over the older claim it contradicts.
-`recall` and `zoom` deliberately retain historical behavior. Agent proposals
+Installed continuous collection is not activated. `wake` comes from an atomic
+OptMem projection containing only active SQLite-backed memories. `recall` and
+`zoom` deliberately retain append-only historical behavior. Agent proposals
 remain outside final memory until an explicit user adoption; Gemma validates
 support, novelty, and consistency, then CONTX appends the reviewed proposal
 unchanged. `proposals adopt`, `proposals reject`, and `correct` require an
@@ -175,9 +182,9 @@ explicit user instruction.
 | **v0.9** | **J7 real pilot** | 7–14 day pilot, ground truth, with/without CONTX comparison, error analysis, OptMem decision. |
 | **v1.0** | **J8 hardening** | Fixes, optimization, install/upgrade/uninstall, recovery, distribution, licensing, and documentation. |
 
-**Active goal:** complete v0.5 memory and agent integration while keeping the
-real v0.1 collector activation separately gated, then continue through the
-local UI and the explicitly approved v0 pilot (§37 and the
+**Active goal:** finish the blocked v0.6 build/browser verification while
+preparing the content-minimized v0.9 evaluation harness. Real v0.1 collector
+activation and the real pilot remain separately action-time gated (§37 and the
 [implementation plan](./docs/implementation-plan.md)).
 
 ---
@@ -236,18 +243,29 @@ the model.
 The completed v0.4 foundation adds immutable pattern snapshots, project
 recurrence and resumption, temporal changes, fused memory candidates,
 transparent acceptance decisions, and side-by-side rule and threshold replay.
-The in-progress v0.5 foundation promotes accepted candidates with transitive
+The completed v0.5 foundation promotes accepted candidates with transitive
 provenance, performs bounded local-model OptMem compression, exposes direct
 `wake`/`recall`/`zoom`, isolates agent proposals, and supports restart-safe
 append-only corrections. ADR 0013 selects explicit `Correction:` entries with
 SQLite sidecar status and provenance for v0. ADR 0014 adds explicit user
 proposal adoption, mandatory local semantic verification, unchanged OptMem
-append, transitive provenance, and restart-safe finalization. An active-only
-projection remains the evidence-triggered fallback.
+append, transitive provenance, and restart-safe finalization. The long-history
+matrix triggered ADR 0015: `wake` now uses an atomic, source-fingerprinted,
+active-only OptMem projection while `recall`, `zoom`, and source maintenance
+remain historical.
 
-The local web UI and real pilot belong to the following increments. OptMem is
-used from an ignored development snapshot; it is not bundled while
-redistributable rights remain undocumented. See
+The in-progress v0.6 source now adds a versioned `/api/v1` FastAPI contract,
+bounded inspection views, a same-origin React/Vite/TypeScript interface,
+loopback host/origin/content-type hardening, pause/resume and exclusion
+controls, active wake preview, append-only correction actions, proposal review,
+confirmed immediate raw purge, and narrow confirmed full deletion. The browser
+never receives raw filesystem paths. The web artifact is not yet runnable:
+dependency resolution, API tests, the frontend build, packaged-static checks,
+and browser QA remain blocked by the current execution-credit limit and J6 is
+therefore not marked complete.
+
+The real pilot belongs to the following increment. OptMem is used from an
+ignored development snapshot and is not bundled in the current checkout. See
 [`docs/evaluation/v0.1-preflight.md`](docs/evaluation/v0.1-preflight.md) for the
 current J1 evidence and remaining gates, and
 [`docs/evaluation/v0.2-local-model-preflight.md`](docs/evaluation/v0.2-local-model-preflight.md)
@@ -257,9 +275,13 @@ for the J3 replay and correction proof,
 [`docs/evaluation/v0.4-pattern-candidate-validation.md`](docs/evaluation/v0.4-pattern-candidate-validation.md)
 for the J4 decision replay, and
 [`docs/evaluation/v0.5-memory-correction-validation.md`](docs/evaluation/v0.5-memory-correction-validation.md)
-for the current J5 OptMem correction evidence, and
+for the initial J5 OptMem correction evidence,
 [`docs/evaluation/v0.5-agent-proposal-validation.md`](docs/evaluation/v0.5-agent-proposal-validation.md)
-for the explicit proposal-adoption and real-Gemma proof.
+for the explicit proposal-adoption and real-Gemma proof, and
+[`docs/evaluation/v0.5-active-projection-validation.md`](docs/evaluation/v0.5-active-projection-validation.md)
+for the long-history active-projection comparison, and
+[`docs/evaluation/v0.6-web-interface-validation.md`](docs/evaluation/v0.6-web-interface-validation.md)
+for the implemented web boundary and its pending dependency-backed checks.
 
 ---
 
@@ -308,7 +330,7 @@ contx/
 └── docs/{architecture,adr,evaluation}/
 ```
 
-Runtime data lives **outside the repo**. Durable state uses `~/Library/Application Support/CONTX/`, temporary raw data uses `~/Library/Caches/CONTX/`, and logs use `~/Library/Logs/CONTX/`. Private directories and files use restrictive local-user permissions.
+Runtime data lives **outside the repo**. Durable state uses `~/Library/Application Support/CONTX/`, including historical `memory/` and derived `memory-active/`; temporary raw data uses `~/Library/Caches/CONTX/`, and logs use `~/Library/Logs/CONTX/`. Private directories and files use restrictive local-user permissions.
 
 ---
 

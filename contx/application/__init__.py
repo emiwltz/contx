@@ -18,6 +18,17 @@ from contx.application.continuous_collection import (
     ContinuousCollectionSession,
     ThreadStopSignal,
 )
+from contx.application.data_deletion import DataDeletionResult, DataDeletionService
+from contx.application.inspection import (
+    ActivityInspection,
+    AgentInspection,
+    InspectionService,
+    MemoryInspection,
+    OperationalIssue,
+    OverviewInspection,
+    PrivacyInspection,
+    RawArtifactInspection,
+)
 from contx.application.local_model_events import (
     LocalModelEventResult,
     LocalModelEventService,
@@ -41,6 +52,12 @@ from contx.application.memory_maintenance import (
     MemoryMaintenanceResult,
     MemoryMaintenanceService,
 )
+from contx.application.memory_projection import (
+    ACTIVE_MEMORY_PROJECTION_VERSION,
+    ActiveMemoryProjectionResult,
+    ActiveMemoryProjectionService,
+    ActiveMemoryWakeResult,
+)
 from contx.application.pattern_analysis import (
     CandidateEvaluationResult,
     CandidateEvaluationService,
@@ -62,6 +79,8 @@ __all__ = [
     "ContinuousCollectionResult",
     "ContinuousCollectionRunner",
     "ContinuousCollectionSession",
+    "DataDeletionResult",
+    "DataDeletionService",
     "CandidateEvaluationResult",
     "CandidateEvaluationService",
     "EventCorrectionService",
@@ -70,8 +89,16 @@ __all__ = [
     "MEMORY_PROMOTION_VERSION",
     "MEMORY_CORRECTION_VERSION",
     "MEMORY_MAINTENANCE_VERSION",
+    "ACTIVE_MEMORY_PROJECTION_VERSION",
+    "ActiveMemoryProjectionResult",
+    "ActiveMemoryProjectionService",
+    "ActiveMemoryWakeResult",
+    "ActivityInspection",
+    "AgentInspection",
+    "InspectionService",
     "MemoryMaintenanceResult",
     "MemoryMaintenanceService",
+    "MemoryInspection",
     "MemoryCorrectionResult",
     "MemoryCorrectionService",
     "MemoryPromotionResult",
@@ -84,6 +111,10 @@ __all__ = [
     "PatternAnalysisService",
     "PatternCandidateResult",
     "PatternCandidateService",
+    "OperationalIssue",
+    "OverviewInspection",
+    "PrivacyInspection",
+    "RawArtifactInspection",
     "RawPurgeResult",
     "RawPurgeService",
     "ThreadStopSignal",

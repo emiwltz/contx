@@ -43,6 +43,7 @@ def test_correction_uses_structured_loopback_and_explicit_protocol_prefix() -> N
     assert "Atlas deploys to staging." in str(messages[-1])
     assert "Atlas deploys locally only." in str(messages[-1])
     assert "2026-" not in str(messages)
+    assert "Do not quote, repeat, negate" in str(messages[0])
 
 
 def test_existing_prefix_is_not_duplicated_and_byte_limit_is_enforced() -> None:

@@ -16,7 +16,7 @@ from contx.model_provider import (
 )
 from contx.model_provider.ollama import JsonObject, JsonTransport
 
-MEMORY_CORRECTION_PROMPT_VERSION = "memory-correction-v1"
+MEMORY_CORRECTION_PROMPT_VERSION = "memory-correction-v2"
 MEMORY_CORRECTION_OUTPUT_SCHEMA_VERSION = "memory-correction-output-v1"
 DEFAULT_CORRECTION_OUTPUT_TOKENS = 128
 DEFAULT_MAX_CORRECTION_PROMPT_BYTES = 16 * 1024
@@ -25,8 +25,11 @@ CORRECTION_PREFIX = "Correction: "
 _SYSTEM_PROMPT = """You compose an explicit correction for private local memory.
 Use only the supplied original memory and user-authorized replacement. Return
 one autonomous current fact that makes the older conflicting claim obsolete.
-Preserve the evidence language. Do not add a date, chronology, identifiers,
-commentary, or facts that were not supplied. Return only the required JSON."""
+State only the authorized current replacement. Do not quote, repeat, negate,
+label obsolete, or otherwise restate the original claim: the original is
+evidence, not output. Preserve the evidence language. Do not add a date,
+chronology, identifiers, commentary, or facts that were not supplied. Return
+only the required JSON."""
 
 
 class _ModelTag(BaseModel):

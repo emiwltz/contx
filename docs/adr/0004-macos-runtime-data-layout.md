@@ -33,7 +33,8 @@ Defaults:
 ~/Library/Application Support/CONTX/
     config.toml
     contx.db
-    memory/
+    memory/          # append-only historical OptMem source
+    memory-active/   # bounded, rebuildable OptMem projections (ADR 0015)
     exports/
 
 ~/Library/Caches/CONTX/

@@ -246,6 +246,119 @@ def test_empty_raw_purge_is_successful_and_audited(tmp_path: Path) -> None:
     assert "raw usage: 0 bytes" in status.stdout
 
 
+def test_delete_all_requires_exact_confirmation_and_stays_inside_runtime(
+    tmp_path: Path,
+) -> None:
+    runtime_root = tmp_path / "runtime"
+    environment = {RUNTIME_ROOT_ENV: str(runtime_root)}
+    outside = tmp_path / "must-remain.txt"
+    outside.write_text("safe", encoding="utf-8")
+    initialized = runner.invoke(app, ["init"], env=environment)
+
+    rejected = runner.invoke(
+        app,
+        ["delete-all", "--confirm", "DELETE"],
+        env=environment,
+    )
+    deleted = runner.invoke(
+        app,
+        ["delete-all", "--confirm", "DELETE ALL CONTX DATA"],
+        env=environment,
+    )
+
+    assert initialized.exit_code == 0
+    assert rejected.exit_code == 2
+    assert deleted.exit_code == 0
+    assert "application_support" in deleted.stdout
+    assert outside.read_text(encoding="utf-8") == "safe"
+    paths = resolve_runtime_paths(environment)
+    assert not paths.application_support.exists()
+    assert not paths.caches.exists()
+    assert not paths.logs.exists()
+
+
+def test_pilot_prepare_creates_private_evidence_without_touching_runtime(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "pilot"
+    runtime_root = tmp_path / "runtime"
+
+    result = runner.invoke(
+        app,
+        [
+            "pilot",
+            "prepare",
+            str(workspace),
+            "--start",
+            "2026-08-03T08:00:00+02:00",
+            "--end",
+            "2026-08-10T08:00:00+02:00",
+        ],
+        env={RUNTIME_ROOT_ENV: str(runtime_root)},
+    )
+
+    assert result.exit_code == 0
+    assert "collection: unchanged" in result.stdout
+    assert workspace.is_dir()
+    assert stat.S_IMODE(workspace.stat().st_mode) == 0o700
+    assert all(
+        stat.S_IMODE(path.stat().st_mode) == 0o600
+        for path in workspace.iterdir()
+    )
+    assert not runtime_root.exists()
+
+
+def test_empty_pilot_evidence_is_reported_as_incomplete(tmp_path: Path) -> None:
+    workspace = tmp_path / "pilot"
+    prepared = runner.invoke(
+        app,
+        [
+            "pilot",
+            "prepare",
+            str(workspace),
+            "--start",
+            "2026-08-03T08:00:00+02:00",
+            "--end",
+            "2026-08-10T08:00:00+02:00",
+        ],
+    )
+
+    validated = runner.invoke(
+        app,
+        [
+            "pilot",
+            "validate",
+            str(workspace),
+            "--at",
+            "2026-08-10T08:00:00+02:00",
+        ],
+    )
+
+    assert prepared.exit_code == 0
+    assert validated.exit_code == 0
+    assert "three_behavior_pairs: incomplete" in validated.stdout
+    assert "memory_provenance: incomplete" in validated.stdout
+    assert "v0 decision: not ready" in validated.stdout
+
+
+def test_pilot_prepare_rejects_a_duration_outside_protocol(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "pilot",
+            "prepare",
+            str(tmp_path / "pilot"),
+            "--start",
+            "2026-08-03T08:00:00+02:00",
+            "--end",
+            "2026-08-09T08:00:00+02:00",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "between 7 and 14 days" in result.stderr
+
+
 def test_capabilities_do_not_enable_or_request_sensitive_access(tmp_path: Path) -> None:
     environment = {RUNTIME_ROOT_ENV: str(tmp_path)}
 

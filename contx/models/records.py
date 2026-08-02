@@ -190,7 +190,7 @@ class Observation(DomainRecord):
 
     _utc_timestamps = field_validator(
         "captured_at", "started_at", "ended_at", "expires_at", "created_at"
-    )(require_aware_utc)
+    )(lambda value: None if value is None else require_aware_utc(value))
 
     @model_validator(mode="after")
     def validate_observation(self) -> Self:

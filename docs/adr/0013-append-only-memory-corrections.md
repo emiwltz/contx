@@ -4,6 +4,10 @@
 - **Date:** 2026-08-02
 - **Decision owner:** Emi
 
+> **Amendment:** ADR 0015 activates the fallback defined here. Correction
+> writes remain append-only as specified below. `wake` now reads an active-only
+> OptMem projection; `recall` and `zoom` retain the historical source semantics.
+
 ## Context
 
 ADRs 0002 and 0006 establish that `MemoryStore`, initially backed by upstream

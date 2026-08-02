@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -19,7 +20,7 @@ from contx.model_provider import (
 )
 from contx.model_provider.ollama import JsonObject, JsonTransport
 
-MEMORY_COMPRESSION_PROMPT_VERSION = "memory-compression-v1"
+MEMORY_COMPRESSION_PROMPT_VERSION = "memory-compression-v2"
 DEFAULT_COMPRESSION_OUTPUT_TOKENS = 128
 DEFAULT_MAX_COMPRESSION_PROMPT_BYTES = 16 * 1024
 
@@ -29,8 +30,17 @@ Preserve facts with lasting effect and invent nothing. A newer entry beginning
 with `Correction:` is authoritative over the older claim it contradicts. Keep
 the corrected current fact and remove every contradicted fragment; never turn
 the obsolete claim into history, a transition, or a date unless the correction
-itself preserves that fact. Return only the required JSON object. Do not add
-commentary, Markdown, or identifiers."""
+itself preserves that fact. Correction authority must survive every merge-tree
+level: if any supplied raw entry or child summary begins with `Correction:`,
+the returned summary MUST also begin with `Correction:`. When multiple supplied
+corrections conflict, they are ordered oldest first and the newest one is
+authoritative. The marker is protocol, not commentary. Return only the required
+JSON object. Do not add Markdown or identifiers."""
+
+_CORRECTION_EVIDENCE_PATTERN = re.compile(
+    r"^\s*#\d+(?:-\d+)?(?: \d{4}-\d{2}-\d{2})? (Correction:.*)$",
+    re.MULTILINE | re.IGNORECASE,
+)
 
 
 class _ModelTag(BaseModel):
@@ -119,7 +129,8 @@ class OllamaMemoryCompressor:
         return self._model_digest
 
     def compress(self, request: MemoryCompressionRequest) -> str:
-        if len(request.prompt.encode("utf-8")) > self._max_prompt_bytes:
+        user_prompt = _compression_prompt(request)
+        if len(user_prompt.encode("utf-8")) > self._max_prompt_bytes:
             raise LocalModelResponseError(
                 "Local memory compression prompt exceeded its safety limit"
             )
@@ -127,7 +138,7 @@ class OllamaMemoryCompressor:
         payload = self._transport.request(
             "POST",
             "/api/chat",
-            self._chat_payload(request),
+            self._chat_payload(request, user_prompt=user_prompt),
         )
         try:
             response = _ChatResponse.model_validate(payload)
@@ -152,15 +163,21 @@ class OllamaMemoryCompressor:
             raise LocalModelResponseError(
                 "Local memory compressor returned an invalid structured summary"
             ) from None
-        if "\n" in output.summary or "\r" in output.summary:
+        summary = output.summary.strip()
+        if "\n" in summary or "\r" in summary:
             raise LocalModelResponseError(
                 "Local memory compressor returned a multiline summary"
             )
-        if len(output.summary.strip().encode("utf-8")) > request.max_bytes:
+        if (
+            _CORRECTION_EVIDENCE_PATTERN.search(request.prompt) is not None
+            and not summary.casefold().startswith("correction:")
+        ):
+            summary = f"Correction: {summary}"
+        if len(summary.encode("utf-8")) > request.max_bytes:
             raise LocalModelResponseError(
                 "Local memory compressor exceeded the backend byte limit"
             )
-        return output.summary.strip()
+        return summary
 
     def _require_model(self) -> None:
         try:
@@ -185,16 +202,19 @@ class OllamaMemoryCompressor:
             )
         self._model_digest = selected.digest
 
-    def _chat_payload(self, request: MemoryCompressionRequest) -> Mapping[str, object]:
+    def _chat_payload(
+        self,
+        request: MemoryCompressionRequest,
+        *,
+        user_prompt: str,
+    ) -> Mapping[str, object]:
         return {
             "model": self._model,
             "messages": [
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {
                     "role": "user",
-                    "content": (
-                        f"Backend byte limit: {request.max_bytes}.\n\n{request.prompt}"
-                    ),
+                    "content": user_prompt,
                 },
             ],
             "stream": False,
@@ -208,6 +228,31 @@ class OllamaMemoryCompressor:
             },
             "keep_alive": self._keep_alive,
         }
+
+
+def _latest_correction(prompt: str) -> str | None:
+    matches = _CORRECTION_EVIDENCE_PATTERN.findall(prompt)
+    return None if not matches else matches[-1].strip()
+
+
+def _compression_prompt(request: MemoryCompressionRequest) -> str:
+    authority = _latest_correction(request.prompt)
+    authority_instruction = (
+        ""
+        if authority is None
+        else (
+            "\n\nNewest supplied correction, later than every other correction "
+            "above. It replaces only conflicting claims, not the whole older "
+            "summary. Read every supplied line: all older non-conflicting "
+            "durable facts MUST remain, compressed if needed. Do not answer "
+            "by copying the newest line alone:\n"
+            f"{authority}"
+        )
+    )
+    return (
+        f"Backend byte limit: {request.max_bytes}.\n\n"
+        f"{request.prompt}{authority_instruction}"
+    )
 
 
 def _summary_schema() -> JsonObject:

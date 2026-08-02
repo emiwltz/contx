@@ -17,6 +17,7 @@ from contx.model_provider import (
     LocalModelExecution,
     LocalModelRequest,
     LocalModelRuntimeStatus,
+    ModelAttemptInvocation,
     ModelInterpretation,
     ModelTransformation,
     ModelTransformationStatus,
@@ -220,6 +221,29 @@ def test_invalid_response_retries_when_due_and_succeeds_idempotently(
                 RUN_IDS[0],
                 RUN_IDS[2],
             )
+            attempts = repository.attempts()
+            assert tuple(
+                (
+                    attempt.attempt_number,
+                    attempt.invocation,
+                    attempt.status,
+                    attempt.error_code,
+                )
+                for attempt in attempts
+            ) == (
+                (
+                    1,
+                    ModelAttemptInvocation.INVOKED,
+                    ModelTransformationStatus.FAILED,
+                    "invalid_model_response",
+                ),
+                (
+                    2,
+                    ModelAttemptInvocation.INVOKED,
+                    ModelTransformationStatus.SUCCEEDED,
+                    None,
+                ),
+            )
             assert repository.count() == 1
     finally:
         engine.dispose()
@@ -267,6 +291,11 @@ def test_attempt_limit_and_missing_raw_artifact_end_in_terminal_audit(
             ).run_once()
             assert len(missing.abandoned_transformation_ids) == 1
             assert missing_provider.requests == []
+            with session_scope(second_engine) as session:
+                attempts = ModelTransformationRepository(session).attempts()
+                assert len(attempts) == 1
+                assert attempts[0].invocation is ModelAttemptInvocation.NOT_INVOKED
+                assert attempts[0].error_code == "raw_artifact_unavailable"
         finally:
             second_engine.dispose()
     finally:
@@ -344,6 +373,11 @@ def test_stale_running_attempt_is_failed_audited_and_retried(tmp_path: Path) -> 
             assert transformation is not None
             assert transformation.status is ModelTransformationStatus.SUCCEEDED
             assert transformation.attempt_count == 2
+            attempts = ModelTransformationRepository(session).attempts()
+            assert tuple(attempt.invocation for attempt in attempts) == (
+                ModelAttemptInvocation.UNKNOWN,
+                ModelAttemptInvocation.INVOKED,
+            )
     finally:
         engine.dispose()
 

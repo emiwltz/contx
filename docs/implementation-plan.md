@@ -21,7 +21,8 @@
 | v0.2 / J2 | Complete | Gemma 4 E4B QAT with prompt v9 passed the fixed 16/16 privacy and quality matrix, bounded cold/warm resource measurements were recorded, the persistent local model-to-event proof passed, and sensitive or forbidden output is blocked from durable memory |
 | v0.3 / J3 | Complete | Frozen-day sessionization produces a deterministic readable timeline; same-version replay is idempotent, changed versions coexist, and append-only corrections survive compatible evidence-lineage rebuilds |
 | v0.4 / J4 | Complete | Multi-day pattern detection, fused candidates, explicit scoring, rejection/deferral reasons, validity, and side-by-side rule and threshold replays passed the synthetic exit gate |
-| v0.5 / J5 | In progress | Promotion, bounded local compression, direct `wake`/`recall`/`zoom`, proposal isolation, and restart-safe append-only corrections are implemented; ADR 0013 selects upstream OptMem plus SQLite sidecar metadata, and real Codex plus local OpenCode followed the correction contract; proposal adoption remains a product decision |
+| v0.5 / J5 | Complete | Promotion, explicit proposal adoption, restart-safe corrections, historical `recall`/`zoom`, active-only `wake`, real-agent contracts, and the OptMem/Gemma long-history matrix pass under ADRs 0013–0015 |
+| v0.6 / J6 | In progress | Versioned FastAPI contracts, bounded inspection views, loopback hardening, React/Vite source, safety controls, confirmed raw/full deletion services, and non-web regression tests are implemented under ADR 0016; dependency resolution, API tests, frontend build, packaged-static verification, and browser QA are blocked by the execution quota |
 
 The completed vertical-slice evidence and residual limitations are recorded in
 `docs/evaluation/v0.0.1-validation.md`. Completion here does not imply that the
@@ -167,8 +168,9 @@ allowed to stop before memory when it is not useful enough to retain.
 
 ### 4.3 Context boundary
 
-`MemoryStore.wake()` is the only source of semantic memory context delivered
-by `contx wake`.
+The selected active `MemoryStore` generation's `wake()` output is the only
+source of semantic memory context delivered by `contx wake`. SQLite determines
+active membership but does not create, enrich, or rewrite that text.
 
 The agent gateway may:
 
@@ -215,7 +217,8 @@ The production defaults are:
 ~/Library/Application Support/CONTX/
     config.toml
     contx.db
-    memory/
+    memory/             # append-only historical OptMem source
+    memory-active/      # bounded, rebuildable active OptMem generations
     exports/
 
 ~/Library/Caches/CONTX/
@@ -784,20 +787,30 @@ The experiment measures correctness, correction behavior, context quality,
 rebuildability, latency, operational complexity, and exit cost. It does not
 select a fork merely because the code is available.
 
-The correction experiment is complete for v0. ADR 0013 selects upstream
-OptMem's append-only log with explicit `Correction:` entries and SQLite
-sidecar status, provenance, and model audit. `wake` remains chronological;
-`recall` and `zoom` are historical. Correction-aware local maintenance removes
-contradicted fragments when rebuilding summaries. The direct raw and rebuilt
-behaviors are recorded in
-`docs/evaluation/v0.5-memory-correction-validation.md`.
+ADR 0013 keeps upstream OptMem's append-only log with explicit `Correction:`
+entries and SQLite sidecar status, provenance, and model audit. The
+long-history matrix then activated its planned fallback through ADR 0015:
+`recall`, `zoom`, historical maintenance, and invalidation remain on the source
+identity, while `wake` comes directly from a separately identified OptMem
+generation containing exact active SQLite-backed memory text.
 
-An active-only OptMem projection is the first fallback if agent tests show that
-the protocol is ambiguous, summary rebuilding retains contradictions,
-correction chains materially crowd the wake budget, or a required product
-surface cannot safely use historical views. A native OptMem evolution remains
-deferred until a projection has demonstrated correctness or operational
-limits.
+The active projection is source-fingerprinted, built and fully compressed in a
+private temporary generation, revalidated against SQLite before atomic
+publication under a short SQLite writer reservation, and reused without model
+calls while unchanged. A failed or stale build cannot replace the current
+pointer. Generation-specific continuation tokens prevent pagination from
+mixing active snapshots. The current and one
+previous derived generation are retained; append-only source history is never
+pruned by projection cleanup. The comparison is recorded in
+`docs/evaluation/v0.5-active-projection-validation.md`.
+
+`contx memory rebuild-active` creates a distinct generation for the unchanged
+source fingerprint and is the atomic recovery path for a poor active summary;
+historical summary invalidation remains explicitly historical.
+
+A native OptMem evolution remains deferred until the projection demonstrates
+material correctness, latency, disk, concurrency, or maintenance limits in the
+pilot.
 
 Agent proposal adoption follows ADR 0014. `contx propose` remains an inbox-only
 operation. The user selects a pending record through `contx proposals adopt`;
@@ -819,6 +832,8 @@ recorded in `docs/evaluation/v0.5-agent-proposal-validation.md`.
 - output stays within its configured budget;
 - the memory remains usable without network access;
 - pending compression cannot silently block or corrupt wake;
+- a failed or concurrent projection rebuild cannot publish partial or stale
+  active context;
 - proposals and corrections are validated by CONTX;
 - proposal decisions survive replay and interruption without duplicate model
   calls or OptMem lines;
@@ -839,6 +854,14 @@ recorded in `docs/evaluation/v0.5-agent-proposal-validation.md`.
   sensitivity decisions;
 - settings and operational errors.
 
+Implementation uses one same-origin process under ADR 0016. `/api/v1` owns
+serialization only; `InspectionService` provides bounded reads and every
+mutation delegates to an existing application service. Raw paths are omitted.
+Host, origin, fetch-site, strict JSON content type, and response headers harden
+the browser boundary. Immediate raw purge and full deletion use separate exact
+confirmation phrases; implementing them does not authorize executing them on
+real data.
+
 The UI is a client of application services. It does not own business rules or
 become a second source of truth.
 
@@ -851,6 +874,12 @@ become a second source of truth.
 - the API is unreachable from non-loopback interfaces by default;
 - the UI exposes a clear degraded state when the required local model is
   unavailable.
+
+Current state: source implementation and 301 non-web regression tests pass.
+The gate remains open until dependency resolution, FastAPI integration tests,
+the TypeScript/Vite build, packaged static files, live loopback inspection, and
+browser QA pass. See
+`docs/evaluation/v0.6-web-interface-validation.md`.
 
 ## 15. Phase 9: v0.9 real pilot
 
@@ -885,6 +914,14 @@ Compare agent behavior with and without CONTX for:
 Measure accuracy, coverage, false memories, irrelevant memories, duplicates,
 manual corrections, provenance coverage, sensitive-content promotion, invalid
 model-output rate, context size, wake latency, CPU, memory, and disk use.
+
+ADR 0017 fixes the provisional paired scoring contract before results are
+known. `contx pilot prepare|validate|report` now provides a private, strict,
+cutoff-aware evidence workspace and aggregate report without activating
+collection. A native `libproc` sampler now appends content-free exact-PID CPU,
+RSS, latency, and safe-directory disk evidence for four representative phases.
+The real pilot remains unstarted. Safely derived technical snapshots are the
+remaining harness work before the action-time gate.
 
 ### 15.3 v0 exit gate
 

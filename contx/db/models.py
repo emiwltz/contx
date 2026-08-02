@@ -622,6 +622,36 @@ class ModelTransformationRunModel(Base):
     )
 
 
+class ModelAttemptModel(Base):
+    """Immutable content-free outcome for every local-model attempt."""
+
+    __tablename__ = "model_attempts"
+    __table_args__ = (
+        UniqueConstraint(
+            "transformation_id",
+            "processing_run_id",
+            name="uq_model_attempts_transformation_run",
+        ),
+    )
+
+    transformation_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("model_transformations.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer, primary_key=True)
+    processing_run_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("processing_runs.id", ondelete="RESTRICT"),
+        index=True,
+    )
+    invocation: Mapped[str] = mapped_column(String(32), index=True)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    error_code: Mapped[str | None] = mapped_column(String(64), index=True)
+    started_at: Mapped[UtcTimestamp] = mapped_column(String(32), index=True)
+    ended_at: Mapped[UtcTimestamp] = mapped_column(String(32), index=True)
+
+
 class CollectionControlModel(Base):
     """Singleton state controlling whether collection may run."""
 

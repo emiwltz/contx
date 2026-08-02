@@ -44,6 +44,7 @@ def test_compression_uses_bounded_structured_loopback_request() -> None:
     assert isinstance(messages, list)
     assert "Correction:" in str(messages[0])
     assert "never turn" in str(messages[0])
+    assert "survive every merge-tree" in str(messages[0])
     assert "private-memory-evidence" not in repr(request)
 
 
@@ -71,6 +72,43 @@ def test_compression_rejects_backend_byte_overflow() -> None:
 
     with pytest.raises(LocalModelResponseError, match="byte limit"):
         compressor.compress(_request())
+
+
+def test_compression_preserves_correction_authority_across_tree_merges() -> None:
+    request = MemoryCompressionRequest(
+        block="0-1",
+        prompt=(
+            "Compress memories #0-1.\n"
+            "  #0 2026-08-02 Atlas targets staging.\n"
+            "  #1 2026-08-02 Correction: Atlas targets local-only."
+        ),
+        max_bytes=280,
+    )
+    missing_marker = OllamaMemoryCompressor(
+        transport=RecordingTransport(
+            chat_content=json.dumps({"summary": "Atlas targets local-only."})
+        )
+    )
+
+    assert (
+        missing_marker.compress(request)
+        == "Correction: Atlas targets local-only."
+    )
+
+    retained_transport = RecordingTransport(
+        chat_content=json.dumps(
+            {"summary": "Correction: Atlas targets local-only."}
+        )
+    )
+    retained = OllamaMemoryCompressor(transport=retained_transport)
+    assert retained.compress(request).startswith("Correction:")
+
+    payload = retained_transport.calls[-1][2]
+    assert payload is not None
+    messages = payload["messages"]
+    assert isinstance(messages, list)
+    assert "Newest supplied correction" in str(messages[-1])
+    assert "Correction: Atlas targets local-only." in str(messages[-1])
 
 
 class RecordingTransport:

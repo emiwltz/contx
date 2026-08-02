@@ -30,6 +30,7 @@ from contx.db.models import (
     MemoryLinkModel,
     MemoryLinkProcessingRunModel,
     MemoryPromotionBuildModel,
+    ModelAttemptModel,
     ModelTransformationModel,
     ModelTransformationObservationModel,
     ModelTransformationRunModel,
@@ -43,6 +44,8 @@ from contx.db.models import (
 )
 from contx.errors import DatabaseError
 from contx.model_provider import (
+    ModelAttempt,
+    ModelAttemptInvocation,
     ModelInterpretation,
     ModelTransformation,
     ModelTransformationStatus,
@@ -276,6 +279,88 @@ class PipelineRepository:
         )
         return tuple(_candidate_from_model(model) for model in models)
 
+    def active_memory_records(
+        self,
+    ) -> tuple[tuple[MemoryLink, MemoryCandidate], ...]:
+        """Load the exact active-memory set in stable chronological order."""
+        rows = self._session.execute(
+            select(MemoryLinkModel, MemoryCandidateModel)
+            .join(
+                MemoryCandidateModel,
+                MemoryCandidateModel.id == MemoryLinkModel.candidate_id,
+            )
+            .where(MemoryLinkModel.status == MemoryLinkStatus.ACTIVE.value)
+            .order_by(MemoryLinkModel.created_at, MemoryLinkModel.id)
+        )
+        return tuple(
+            (_memory_link_from_model(link), _candidate_from_model(candidate))
+            for link, candidate in rows
+        )
+
+    def observations(self, *, limit: int = 100) -> tuple[Observation, ...]:
+        """Load recent observation metadata for local inspection."""
+        _validate_inspection_limit(limit)
+        models = self._session.scalars(
+            select(ObservationModel)
+            .order_by(ObservationModel.captured_at.desc(), ObservationModel.id.desc())
+            .limit(limit)
+        )
+        return tuple(_observation_from_model(model) for model in models)
+
+    def events(self, *, limit: int = 100) -> tuple[Event, ...]:
+        """Load recent semantic events in reverse chronological order."""
+        _validate_inspection_limit(limit)
+        models = self._session.scalars(
+            select(EventModel)
+            .order_by(EventModel.started_at.desc(), EventModel.id.desc())
+            .limit(limit)
+        )
+        return tuple(_event_from_model(model) for model in models)
+
+    def candidates(self, *, limit: int = 100) -> tuple[MemoryCandidate, ...]:
+        """Load recent memory candidates regardless of decision state."""
+        _validate_inspection_limit(limit)
+        models = self._session.scalars(
+            select(MemoryCandidateModel)
+            .order_by(
+                MemoryCandidateModel.created_at.desc(),
+                MemoryCandidateModel.id.desc(),
+            )
+            .limit(limit)
+        )
+        return tuple(_candidate_from_model(model) for model in models)
+
+    def memory_records(
+        self, *, limit: int = 100
+    ) -> tuple[tuple[MemoryLink, MemoryCandidate], ...]:
+        """Load recent final-memory links with their exact candidate text."""
+        _validate_inspection_limit(limit)
+        rows = self._session.execute(
+            select(MemoryLinkModel, MemoryCandidateModel)
+            .join(
+                MemoryCandidateModel,
+                MemoryCandidateModel.id == MemoryLinkModel.candidate_id,
+            )
+            .order_by(MemoryLinkModel.created_at.desc(), MemoryLinkModel.id.desc())
+            .limit(limit)
+        )
+        return tuple(
+            (_memory_link_from_model(link), _candidate_from_model(candidate))
+            for link, candidate in rows
+        )
+
+    def processing_runs(self, *, limit: int = 100) -> tuple[ProcessingRun, ...]:
+        """Load recent observable pipeline outcomes."""
+        _validate_inspection_limit(limit)
+        models = self._session.scalars(
+            select(ProcessingRunModel)
+            .order_by(
+                ProcessingRunModel.started_at.desc(), ProcessingRunModel.id.desc()
+            )
+            .limit(limit)
+        )
+        return tuple(_processing_run_from_model(model) for model in models)
+
     def count(
         self,
         model: type[ObservationModel]
@@ -287,6 +372,17 @@ class PipelineRepository:
         | type[ProcessingRunModel],
     ) -> int:
         return int(self._session.scalar(select(func.count()).select_from(model)) or 0)
+
+    def record_counts(self) -> dict[str, int]:
+        """Return bounded-label totals for the local status surface."""
+        return {
+            "observations": self.count(ObservationModel),
+            "events": self.count(EventModel),
+            "patterns": self.count(PatternModel),
+            "candidates": self.count(MemoryCandidateModel),
+            "memories": self.count(MemoryLinkModel),
+            "processing_runs": self.count(ProcessingRunModel),
+        }
 
     def _require_ids(
         self,
@@ -554,6 +650,49 @@ class ModelTransformationRepository:
     def by_id(self, transformation_id: UUID) -> ModelTransformation | None:
         model = self._session.get(ModelTransformationModel, str(transformation_id))
         return None if model is None else _model_transformation_from_model(model)
+
+    def save_attempt(self, attempt: ModelAttempt) -> ModelAttempt:
+        """Persist one immutable terminal attempt outcome idempotently."""
+        existing_model = self._session.get(
+            ModelAttemptModel,
+            (str(attempt.transformation_id), attempt.attempt_number),
+        )
+        if existing_model is not None:
+            existing = _model_attempt_from_model(existing_model)
+            if existing != attempt:
+                raise DatabaseError("Model attempt identity conflicts")
+            return existing
+        transformation = self._session.get(
+            ModelTransformationModel, str(attempt.transformation_id)
+        )
+        run = self._session.get(ProcessingRunModel, str(attempt.processing_run_id))
+        linked_run = self._session.get(
+            ModelTransformationRunModel,
+            (str(attempt.transformation_id), str(attempt.processing_run_id)),
+        )
+        if transformation is None or run is None or linked_run is None:
+            raise DatabaseError("Model attempt provenance is incomplete")
+        if transformation.attempt_count < attempt.attempt_number:
+            raise DatabaseError("Model attempt exceeds transformation state")
+        self._session.add(_model_attempt_to_model(attempt))
+        self._session.flush()
+        return attempt
+
+    def attempts(self, *, since: datetime | None = None) -> tuple[ModelAttempt, ...]:
+        """Load complete content-free attempt history in stable order."""
+        statement = select(ModelAttemptModel).order_by(
+            ModelAttemptModel.started_at,
+            ModelAttemptModel.transformation_id,
+            ModelAttemptModel.attempt_number,
+        )
+        if since is not None:
+            statement = statement.where(
+                ModelAttemptModel.started_at >= format_utc(since)
+            )
+        return tuple(
+            _model_attempt_from_model(model)
+            for model in self._session.scalars(statement)
+        )
 
     def by_idempotency_key(self, key: str) -> ModelTransformation | None:
         model = self._session.scalar(
@@ -861,6 +1000,19 @@ class ModelTransformationRepository:
             or 0
         )
 
+    def list(self, *, limit: int = 100) -> tuple[ModelTransformation, ...]:
+        """Load recent local-model transformations for privacy inspection."""
+        _validate_inspection_limit(limit)
+        models = self._session.scalars(
+            select(ModelTransformationModel)
+            .order_by(
+                ModelTransformationModel.created_at.desc(),
+                ModelTransformationModel.id.desc(),
+            )
+            .limit(limit)
+        )
+        return tuple(_model_transformation_from_model(model) for model in models)
+
     def _validate_sources(self, transformation: ModelTransformation) -> None:
         expected = {str(item) for item in transformation.source_observation_ids}
         observations = tuple(
@@ -1118,6 +1270,19 @@ class EventCorrectionRepository:
         model = self._session.get(EventCorrectionModel, str(correction_id))
         return None if model is None else _event_correction_from_model(model)
 
+    def list(self, *, limit: int = 100) -> tuple[EventCorrection, ...]:
+        """Load recent append-only event corrections."""
+        _validate_inspection_limit(limit)
+        models = self._session.scalars(
+            select(EventCorrectionModel)
+            .order_by(
+                EventCorrectionModel.created_at.desc(),
+                EventCorrectionModel.id.desc(),
+            )
+            .limit(limit)
+        )
+        return tuple(_event_correction_from_model(model) for model in models)
+
     def latest_for_lineages(
         self,
         lineage_keys: tuple[str, ...],
@@ -1230,6 +1395,16 @@ class PatternRepository:
     def by_id(self, pattern_id: UUID) -> Pattern | None:
         model = self._session.get(PatternModel, str(pattern_id))
         return None if model is None else _pattern_from_model(model)
+
+    def list(self, *, limit: int = 100) -> tuple[Pattern, ...]:
+        """Load recent detected patterns for local inspection."""
+        _validate_inspection_limit(limit)
+        models = self._session.scalars(
+            select(PatternModel)
+            .order_by(PatternModel.created_at.desc(), PatternModel.id.desc())
+            .limit(limit)
+        )
+        return tuple(_pattern_from_model(model) for model in models)
 
     def patterns_for_processing_run(
         self,
@@ -1466,6 +1641,19 @@ class CandidateDecisionRepository:
         )
         return tuple(_candidate_decision_from_model(model) for model in models)
 
+    def list(self, *, limit: int = 100) -> tuple[CandidateDecision, ...]:
+        """Load recent append-only promotion decisions."""
+        _validate_inspection_limit(limit)
+        models = self._session.scalars(
+            select(CandidateDecisionModel)
+            .order_by(
+                CandidateDecisionModel.created_at.desc(),
+                CandidateDecisionModel.id.desc(),
+            )
+            .limit(limit)
+        )
+        return tuple(_candidate_decision_from_model(model) for model in models)
+
 
 class CandidateEvaluationBuildRepository:
     """Persist the full content-free policy used by an evaluation run."""
@@ -1646,6 +1834,19 @@ class MemoryCorrectionRepository:
         model = self._session.get(MemoryCorrectionBuildModel, str(candidate_id))
         return None if model is None else _memory_correction_build_from_model(model)
 
+    def list_builds(self, *, limit: int = 100) -> tuple[MemoryCorrectionBuild, ...]:
+        """Load recent content-free memory-correction provenance."""
+        _validate_inspection_limit(limit)
+        models = self._session.scalars(
+            select(MemoryCorrectionBuildModel)
+            .order_by(
+                MemoryCorrectionBuildModel.ended_at.desc(),
+                MemoryCorrectionBuildModel.candidate_id.desc(),
+            )
+            .limit(limit)
+        )
+        return tuple(_memory_correction_build_from_model(model) for model in models)
+
     def finalize(
         self,
         *,
@@ -1754,12 +1955,16 @@ class AgentProposalRepository:
         self,
         *,
         status: AgentProposalStatus | None = None,
+        limit: int = 100,
     ) -> tuple[AgentProposal, ...]:
+        _validate_inspection_limit(limit)
         statement = select(AgentProposalModel)
         if status is not None:
             statement = statement.where(AgentProposalModel.status == status.value)
         models = self._session.scalars(
-            statement.order_by(AgentProposalModel.created_at, AgentProposalModel.id)
+            statement.order_by(
+                AgentProposalModel.created_at.desc(), AgentProposalModel.id.desc()
+            ).limit(limit)
         )
         return tuple(_agent_proposal_from_model(model) for model in models)
 
@@ -1797,6 +2002,23 @@ class AgentProposalAdoptionRepository:
             None
             if model is None
             else _agent_proposal_adoption_build_from_model(model)
+        )
+
+    def list_builds(
+        self, *, limit: int = 100
+    ) -> tuple[AgentProposalAdoptionBuild, ...]:
+        """Load recent content-free proposal validation provenance."""
+        _validate_inspection_limit(limit)
+        models = self._session.scalars(
+            select(AgentProposalAdoptionBuildModel)
+            .order_by(
+                AgentProposalAdoptionBuildModel.ended_at.desc(),
+                AgentProposalAdoptionBuildModel.proposal_id.desc(),
+            )
+            .limit(limit)
+        )
+        return tuple(
+            _agent_proposal_adoption_build_from_model(model) for model in models
         )
 
     def stage_acceptance(
@@ -2096,6 +2318,21 @@ class RawObservationRepository:
         )
         return tuple(_observation_from_model(model) for model in models)
 
+    def retained(self, *, limit: int = 1000) -> tuple[Observation, ...]:
+        """Load raw-bearing observations for an explicit immediate purge."""
+        if limit < 1:
+            raise ValueError("raw purge limit must be positive")
+        models = self._session.scalars(
+            select(ObservationModel)
+            .where(
+                ObservationModel.processing_status
+                != ObservationStatus.PURGED.value,
+            )
+            .order_by(ObservationModel.expires_at, ObservationModel.id)
+            .limit(limit)
+        )
+        return tuple(_observation_from_model(model) for model in models)
+
     def artifact_paths(self) -> frozenset[str]:
         return frozenset(
             path
@@ -2124,6 +2361,11 @@ class RawObservationRepository:
         model.processing_status = ObservationStatus.PURGED.value
         self._session.flush()
         return _observation_from_model(model)
+
+
+def _validate_inspection_limit(limit: int) -> None:
+    if not 1 <= limit <= 500:
+        raise ValueError("inspection limit must be between 1 and 500")
 
 
 def _observation_to_model(record: Observation) -> ObservationModel:
@@ -2924,6 +3166,32 @@ def _model_transformation_from_model(
             "created_at": parse_utc(model.created_at),
             "updated_at": parse_utc(model.updated_at),
         }
+    )
+
+
+def _model_attempt_to_model(record: ModelAttempt) -> ModelAttemptModel:
+    return ModelAttemptModel(
+        transformation_id=str(record.transformation_id),
+        attempt_number=record.attempt_number,
+        processing_run_id=str(record.processing_run_id),
+        invocation=record.invocation.value,
+        status=record.status.value,
+        error_code=record.error_code,
+        started_at=format_utc(record.started_at),
+        ended_at=format_utc(record.ended_at),
+    )
+
+
+def _model_attempt_from_model(model: ModelAttemptModel) -> ModelAttempt:
+    return ModelAttempt(
+        transformation_id=UUID(model.transformation_id),
+        processing_run_id=UUID(model.processing_run_id),
+        attempt_number=model.attempt_number,
+        invocation=ModelAttemptInvocation(model.invocation),
+        status=ModelTransformationStatus(model.status),
+        error_code=model.error_code,
+        started_at=parse_utc(model.started_at),
+        ended_at=parse_utc(model.ended_at),
     )
 
 

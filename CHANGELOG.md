@@ -59,6 +59,34 @@ guaranteed.
 - Explicit agent-proposal review commands, mandatory local semantic adoption,
   unchanged OptMem append, transitive provenance, audited negative decisions,
   and restart-safe idempotent recovery.
+- An atomic source-fingerprinted OptMem projection for active-only `wake`, with
+  exact SQLite-backed membership, complete local compression before publish,
+  stale-build detection, crash recovery, bounded generation retention, and
+  generation-stable pagination.
+- `contx memory rebuild-active` for safe local regeneration of a poor active
+  summary without mutating historical OptMem summaries.
+- A real 32-entry long-history comparison covering correction chains,
+  independent durable facts, historical inspection, and active projection
+  reuse with the installed local Gemma model.
+- A bounded inspection service and explicit `/api/v1` FastAPI contract for
+  status, activity, patterns, memory, privacy, processing, agent, and settings
+  views without exposing raw filesystem paths.
+- A same-origin React/Vite/TypeScript control interface source with visible
+  local-model degradation, pause/resume, exclusions, wake preview, append-only
+  corrections, proposal review, and inspectable provenance.
+- Loopback host, origin, fetch-site, strict JSON content-type, caching, framing,
+  referrer, and MIME-sniffing protections for the local browser boundary.
+- Exact-confirmation immediate raw purge and full-data deletion; complete
+  deletion refuses a running collector and unsafe filesystem roots, closes
+  SQLite, and retires the current API process.
+- A private, versioned real-pilot harness with independent ground truth,
+  same-task paired with/without-CONTX trials, technical and resource evidence,
+  privacy incidents, cutoff-aware scoring, and aggregate acceptance reports.
+- `contx pilot prepare`, `pilot validate`, and `pilot report` commands that do
+  not enable collection or request macOS permissions.
+- `contx pilot sample-resources` with exact-PID native macOS CPU/RSS sampling,
+  safe disk measurement, four representative phases, and atomic private
+  evidence append.
 
 ### Changed
 
@@ -73,5 +101,12 @@ guaranteed.
   synthetic matrix result and target-Mac resource comparison; Ollama thinking
   is disabled and model output is bounded to 512 tokens.
 - Selected upstream OptMem plus SQLite sidecar metadata for v0 corrections;
-  `wake` is chronological, `recall` and `zoom` are historical, and an
-  active-only projection remains the evidence-triggered fallback.
+  writes and source history remain append-only, while ADR 0015 now routes
+  `wake` through a separate active-only OptMem projection and keeps `recall`
+  and `zoom` historical.
+- Strengthened correction and compression prompts so current replacements do
+  not restate obsolete claims and `Correction:` authority survives tree merges.
+- Centralized event summary correction so CLI and HTTP clients preserve the
+  same append-only semantics.
+- Corrected persisted observations so optional activity interval boundaries
+  remain readable when absent.
