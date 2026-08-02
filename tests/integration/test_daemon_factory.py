@@ -1,0 +1,181 @@
+"""Disabled-by-default daemon composition and isolated synthetic execution."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import pytest
+from sqlalchemy import select
+
+from contx.collection import ActivitySample
+from contx.daemon import build_macos_collection_daemon
+from contx.db import create_database_engine, session_scope
+from contx.db.models import ObservationModel
+from contx.errors import ConfigurationError
+from contx.models import ActivityState
+from contx.settings import RuntimePaths, initialize_runtime_paths
+
+START = datetime(2026, 8, 2, 20, 0, tzinfo=UTC)
+
+
+class MutableClock:
+    def __init__(self) -> None:
+        self.value = START
+
+    def now(self) -> datetime:
+        return self.value
+
+
+class FixedSampler:
+    def sample(self) -> ActivitySample:
+        return ActivitySample(
+            observed_at=START,
+            activity_state=ActivityState.ACTIVE,
+            app_name="Synthetic Editor",
+            app_bundle_id="com.example.editor",
+        )
+
+
+class RecordingComponent:
+    def __init__(self) -> None:
+        self.started = 0
+        self.stopped = 0
+
+    def start(self) -> None:
+        self.started += 1
+
+    def refresh(self) -> object:
+        return object()
+
+    def stop(self) -> None:
+        self.stopped += 1
+
+
+class RecordingLease:
+    def __init__(self) -> None:
+        self.acquired = 0
+        self.released = 0
+
+    def acquire(self) -> None:
+        self.acquired += 1
+
+    def release(self) -> None:
+        self.released += 1
+
+
+class FakeTimer:
+    def __init__(self) -> None:
+        self.invalidated = False
+
+    def invalidate(self) -> None:
+        self.invalidated = True
+
+
+class FakeScheduler:
+    def __init__(self) -> None:
+        self.callback: Callable[[], None] | None = None
+        self.timer = FakeTimer()
+
+    def schedule(
+        self,
+        *,
+        interval_seconds: float,
+        callback: Callable[[], None],
+    ) -> FakeTimer:
+        assert interval_seconds == 1.0
+        self.callback = callback
+        return self.timer
+
+    def fire(self) -> None:
+        assert self.callback is not None
+        self.callback()
+
+
+class FakeApplication:
+    def __init__(self) -> None:
+        self.on_run: Callable[[], None] | None = None
+        self.stops = 0
+
+    def run(self) -> None:
+        assert self.on_run is not None
+        self.on_run()
+
+    def stop_(self, sender: object | None) -> None:
+        assert sender is None
+        self.stops += 1
+
+
+def test_default_configuration_refuses_to_build_background_daemon(
+    tmp_path: Path,
+) -> None:
+    paths = _paths(tmp_path)
+
+    with pytest.raises(ConfigurationError, match="disabled"):
+        build_macos_collection_daemon(paths=paths)
+
+    assert not paths.database_file.exists()
+
+
+def test_enabled_factory_runs_one_isolated_synthetic_cycle(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    initialize_runtime_paths(paths)
+    configured = paths.config_file.read_text().replace(
+        "background_collection_enabled = false",
+        "background_collection_enabled = true",
+    )
+    paths.config_file.write_text(configured)
+    clock = MutableClock()
+    scheduler = FakeScheduler()
+    application = FakeApplication()
+    notifications = RecordingComponent()
+    menu = RecordingComponent()
+    lease = RecordingLease()
+    daemon = build_macos_collection_daemon(
+        paths=paths,
+        clock=clock,
+        sampler=FixedSampler(),
+        notifications=notifications,
+        menu=menu,
+        lease=lease,
+        application=application,
+        scheduler=scheduler,
+    )
+
+    def run_cycle() -> None:
+        scheduler.fire()
+        clock.value = START + timedelta(seconds=10)
+        daemon.request_stop()
+        scheduler.fire()
+
+    application.on_run = run_cycle
+    result = daemon.run()
+
+    assert result is not None
+    assert result.cycles == 1
+    assert result.observations == 2
+    assert scheduler.timer.invalidated
+    assert application.stops == 1
+    assert notifications.started == notifications.stopped == 1
+    assert menu.started == menu.stopped == 1
+    assert lease.acquired == lease.released == 1
+    engine = create_database_engine(paths.database_file)
+    try:
+        with session_scope(engine) as session:
+            persisted = tuple(session.scalars(select(ObservationModel)))
+        assert len(persisted) == 2
+        assert {record.source_type for record in persisted} == {
+            "system_state",
+            "active_app",
+        }
+    finally:
+        engine.dispose()
+
+
+def _paths(root: Path) -> RuntimePaths:
+    return RuntimePaths(
+        application_support=root / "application-support",
+        caches=root / "caches",
+        logs=root / "logs",
+    )
