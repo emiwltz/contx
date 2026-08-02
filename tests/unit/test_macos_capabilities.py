@@ -101,6 +101,8 @@ def _module(name: str) -> ModuleType:
 def _add_cocoa_api(module: ModuleType) -> None:
     module.NSWorkspace = object()  # type: ignore[attr-defined]
     module.NSWorkspaceDidActivateApplicationNotification = object()  # type: ignore[attr-defined]
+    module.NSWorkspaceSessionDidBecomeActiveNotification = object()  # type: ignore[attr-defined]
+    module.NSWorkspaceSessionDidResignActiveNotification = object()  # type: ignore[attr-defined]
     module.NSWorkspaceWillSleepNotification = object()  # type: ignore[attr-defined]
     module.NSWorkspaceDidWakeNotification = object()  # type: ignore[attr-defined]
 

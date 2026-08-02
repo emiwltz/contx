@@ -64,6 +64,8 @@ def detect_collection_capabilities(
         for attribute in (
             "NSWorkspace",
             "NSWorkspaceDidActivateApplicationNotification",
+            "NSWorkspaceSessionDidBecomeActiveNotification",
+            "NSWorkspaceSessionDidResignActiveNotification",
             "NSWorkspaceWillSleepNotification",
             "NSWorkspaceDidWakeNotification",
         )
