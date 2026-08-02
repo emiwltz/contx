@@ -3,7 +3,7 @@
 
 ## Cahier des charges fondateur
 
-**Version :** 0.2
+**Version :** 0.3
 **Date :** 2 août 2026
 **Statut :** base de référence active
 **Propriétaire produit :** Emi
@@ -209,10 +209,10 @@ Les éléments suivants constituent la base stable de CONTX.
 2. **[INVARIANT]** CONTX est local-first.
 3. **[INVARIANT]** Les données brutes restent sur le Mac.
 4. **[INVARIANT]** Les données brutes sont supprimées au plus tard 48 heures après leur capture.
-5. **[INVARIANT]** Le filtrage des secrets et des données interdites est effectué localement.
-6. **[INVARIANT]** Les appels à un modèle distant sont optionnels.
-7. **[INVARIANT]** Les appels distants sont désactivés par défaut.
-8. **[INVARIANT]** L’utilisateur doit pouvoir inspecter les données qui quittent sa machine.
+5. **[INVARIANT]** L’extraction et l’interprétation sémantiques de la v0 utilisent obligatoirement un LLM local.
+6. **[INVARIANT]** Aucun fournisseur de modèle distant ni transport sortant de contenu utilisateur n’existe dans la v0.
+7. **[INVARIANT]** Les entrées, sorties et transformations du modèle local restent sur le Mac.
+8. **[INVARIANT]** L’utilisateur doit pouvoir inspecter les transformations produites par le modèle local.
 9. **[INVARIANT]** Une observation brute ne devient jamais directement un souvenir.
 10. **[INVARIANT]** Le système distingue observation, événement, pattern ou inférence, souvenir candidat et souvenir enregistré.
 11. **[INVARIANT]** Les souvenirs proposés par un agent passent par CONTX avant d’entrer dans la mémoire.
@@ -461,8 +461,8 @@ L’agent doit pouvoir remarquer un changement significatif, par exemple :
 └─────────────────────────┬────────────────────────────┘
                           ↓
 ┌──────────────────────────────────────────────────────┐
-│ Frontière de sécurité locale                         │
-│ OCR, détection de secrets, redaction, classification │
+│ Interprétation multimodale locale                    │
+│ Modèle local, schémas stricts, sensibilité, audit    │
 └─────────────────────────┬────────────────────────────┘
                           ↓
 ┌──────────────────────────────────────────────────────┐
@@ -587,7 +587,7 @@ La déduplication peut utiliser :
 * hash perceptuel ;
 * comparaison de régions ;
 * changement de fenêtre ;
-* variation du texte OCR ;
+* variation sémantique estimée localement ;
 * temporisation minimale.
 
 ## 10.6 Regroupement en sessions
@@ -633,7 +633,6 @@ Lorsqu’une application ou une fenêtre est exclue :
 
 * aucune capture d’écran ne doit être prise ;
 * aucun titre de fenêtre sensible ne doit être stocké ;
-* aucun OCR ne doit être exécuté ;
 * aucun contenu ne doit être transmis à un modèle ;
 * une observation minimale de type `excluded_activity` PEUT être conservée pour préserver la continuité temporelle.
 
@@ -716,44 +715,44 @@ La suppression sur SSD ne peut pas garantir un effacement physique forensique. C
 
 ---
 
-# 13. Frontière de sécurité locale
+# 13. Frontière d’interprétation locale
 
 ## 13.1 Principe
 
-**[INVARIANT]** Une donnée brute ne peut jamais être envoyée directement à une API distante.
+**[INVARIANT]** Aucun contenu utilisateur, brut ou enrichi, ne peut quitter le Mac dans la v0.
 
-Toute donnée doit passer par une frontière de sécurité locale.
+Toute interprétation sémantique doit passer par un modèle multimodal local derrière une interface typée.
 
 ## 13.2 Traitements locaux minimaux
 
 Le traitement local doit pouvoir :
 
-* extraire le texte ;
 * identifier l’application ;
 * récupérer les métadonnées de fenêtre ;
-* détecter des secrets ;
+* interpréter les captures autorisées et leurs métadonnées avec un modèle local ;
+* produire des événements structurés conformes à un schéma strict ;
+* identifier les projets, sujets et entités utiles ;
 * détecter des catégories sensibles ;
-* masquer les secrets ;
-* retirer les zones interdites ;
-* produire une représentation textuelle contrôlée ;
 * attribuer un niveau de sensibilité ;
-* conserver la provenance des transformations.
+* distinguer les faits observés des interprétations ;
+* conserver le modèle, sa version, la version du prompt, le schéma de sortie, la latence et la provenance des sources ;
+* refuser toute sortie invalide sans enregistrer son contenu dans les logs.
 
-## 13.3 Détection de secrets
+## 13.3 Données sensibles et secrets
 
-La détection ne doit pas reposer uniquement sur un LLM.
+La v0 ne possède pas de pipeline déterministe parallèle pour extraire, détecter ou masquer des secrets avant l’inférence. Des secrets peuvent donc apparaître dans les entrées du modèle local.
 
-Elle doit combiner :
+La sécurité repose sur les frontières suivantes :
 
-* expressions régulières ;
-* détection de formats connus ;
-* entropie ;
-* listes de mots-clés ;
-* règles par application ;
-* classifieur local éventuel ;
-* validation finale avant envoi.
+* exclusions appliquées avant toute capture ;
+* traitement exclusivement local ;
+* absence de transport sortant de contenu utilisateur ;
+* absence de contenu brut, d’entrée de modèle ou de sortie de modèle dans les logs techniques ;
+* classification locale de la sensibilité ;
+* refus de promouvoir délibérément un secret ou une donnée trop sensible vers la mémoire durable ;
+* audit inspectable des références d’entrée, de la transformation et de la décision de promotion.
 
-Catégories minimales :
+Les fixtures synthétiques doivent au minimum représenter :
 
 * clés API ;
 * tokens ;
@@ -766,19 +765,11 @@ Catégories minimales :
 * codes de récupération ;
 * informations explicitement interdites par l’utilisateur.
 
-## 13.4 Données distantes
+## 13.4 Absence de traitement distant en v0
 
-Les appels distants sont désactivés par défaut.
+La v0 ne contient ni fournisseur de modèle distant ni chemin réseau capable de transporter du contenu utilisateur. Le protocole loopback vers un runtime situé sur le même Mac constitue un traitement local.
 
-Lorsqu’ils sont activés :
-
-* seul du texte nettoyé doit être envoyé par défaut ;
-* aucune capture brute ne doit être envoyée dans la v0 ;
-* la charge utile doit être consultable ;
-* le fournisseur et le modèle doivent être enregistrés ;
-* l’heure de l’appel doit être enregistrée ;
-* la réponse doit être associée à la charge utile ;
-* l’utilisateur doit pouvoir désactiver immédiatement les appels.
+Tout traitement distant futur nécessite une nouvelle décision produit, un ADR et une frontière de sécurité dédiée avant que du contenu utilisateur puisse quitter le Mac.
 
 ---
 
@@ -1246,12 +1237,13 @@ Aucune ouverture réseau ne doit être activée automatiquement.
 ### Confidentialité
 
 * exclusions ;
-* secrets détectés ;
-* redactions ;
 * fichiers bruts ;
 * date d’expiration ;
-* appels distants ;
-* charges utiles envoyées.
+* exécutions du modèle local ;
+* références des entrées autorisées ;
+* modèle, version du prompt et schéma de sortie ;
+* sorties validées et niveau de sensibilité ;
+* décisions de promotion ou de rejet.
 
 ### Agent
 
@@ -1396,15 +1388,22 @@ supersedes_memory_id
 created_at
 ```
 
-## 21.7 Redaction
+## 21.7 ModelTransformation
 
 ```text
 id
+processing_run_id
 observation_id
-category
-original_location
-replacement
-rule
+provider
+model
+model_version
+prompt_version
+output_schema_version
+input_references
+output_reference
+sensitivity
+latency_ms
+status
 created_at
 ```
 
@@ -1461,11 +1460,11 @@ Les choix suivants constituent une base d’implémentation v0. Ils ne sont pas 
 * détection d’inactivité via les API système ;
 * lancement en arrière-plan via `launchd`.
 
-## 22.3 OCR
+## 22.3 Interprétation multimodale
 
-**[HYPOTHÈSE]** Apple Vision constitue le premier choix pour l’OCR local, car il est natif et adapté au Mac Apple Silicon.
+**[DÉCISION v0]** L’interprétation des captures et métadonnées autorisées dépend d’un modèle multimodal local. Un OCR autonome n’est pas nécessaire au chemin de production de la v0.
 
-L’OCR doit être encapsulé derrière une interface remplaçable.
+Un OCR local autonome peut être évalué plus tard comme optimisation derrière une interface remplaçable. Il ne doit pas devenir un fallback sémantique silencieux.
 
 ## 22.4 Modèles
 
@@ -1473,19 +1472,18 @@ Le système doit proposer une interface commune :
 
 ```python
 class ModelProvider:
-    def summarize(self, payload): ...
-    def classify(self, payload): ...
-    def infer_patterns(self, payload): ...
+    def interpret(self, request: ModelRequest) -> ModelResult: ...
 ```
 
-Backends possibles :
+Backends locaux possibles :
 
 * modèle local via MLX ;
 * modèle local via Ollama ;
-* modèle distant optionnel ;
-* règles déterministes sans modèle.
+* modèle local via `llama.cpp`.
 
-Le choix du modèle doit être fondé sur des benchmarks réalisés sur un Mac M4 avec 16 Go de RAM.
+Le choix du runtime et du modèle doit être fondé sur des benchmarks réalisés sur un Mac M4 avec 16 Go de RAM. Le fournisseur local doit retourner une sortie conforme à un schéma strict et enregistrer une provenance inspectable sans journaliser les contenus privés.
+
+Les fournisseurs distants et les règles déterministes sans modèle sont exclus du chemin sémantique de la v0.
 
 ## 22.5 Frontend
 
@@ -1624,8 +1622,8 @@ GET  /api/memory/recall
 ## Confidentialité
 
 ```text
-GET /api/privacy/redactions
-GET /api/privacy/outbound-requests
+GET /api/privacy/model-transformations
+GET /api/privacy/raw-artifacts
 ```
 
 ## Traitements
@@ -1650,7 +1648,6 @@ Le système doit être robuste face à :
 * mise en veille ;
 * perte de permission ;
 * modèle indisponible ;
-* API distante indisponible ;
 * traitement interrompu ;
 * doublon ;
 * corruption partielle ;
@@ -1687,10 +1684,11 @@ Les logs doivent :
 ## 26.1 Principes
 
 * aucune télémétrie par défaut ;
-* aucune donnée brute distante ;
+* aucun contenu utilisateur distant ;
 * permissions minimales ;
 * interface locale uniquement ;
-* secrets redigés ;
+* exclusions avant capture ;
+* modèle multimodal local obligatoire ;
 * rétention limitée ;
 * transparence des traitements ;
 * possibilité de suppression complète.
@@ -1842,7 +1840,8 @@ Mesures :
 * taux de doublons ;
 * taux de corrections manuelles ;
 * proportion de souvenirs avec provenance ;
-* taux de fuite de secrets ;
+* taux de contenus sensibles promus à tort ;
+* taux de sorties de modèle invalides ;
 * taille du contexte ;
 * temps de réveil ;
 * consommation de ressources.
@@ -1853,7 +1852,7 @@ Avant une première release utilisable :
 
 * 100 % des souvenirs acceptés doivent avoir une provenance ;
 * aucune donnée brute ne doit dépasser 48 heures ;
-* aucune clé API de la suite de tests ne doit apparaître dans un payload distant ;
+* aucun contenu utilisateur ne doit emprunter un transport distant ;
 * aucune application exclue ne doit produire de capture ;
 * le taux de souvenirs matériellement faux doit rester inférieur à 10 % sur le pilote ;
 * la majorité des événements jugés importants par l’utilisateur doit être retrouvée ;
@@ -1874,7 +1873,7 @@ Les seuils seront révisés après le premier pilote.
 * segmentation de sessions ;
 * score de candidat ;
 * validation de schéma ;
-* redaction ;
+* validation des sorties du modèle local ;
 * liens de provenance ;
 * transitions d’état.
 
@@ -1905,8 +1904,9 @@ Une suite de captures synthétiques doit contenir :
 La suite doit vérifier :
 
 * absence de capture lorsque l’exclusion s’applique ;
-* redaction correcte ;
-* absence de secret dans les payloads ;
+* absence de transmission distante ;
+* absence de promotion durable des secrets synthétiques ;
+* rejet des sorties de modèle invalides ;
 * absence de contenu sensible dans les logs.
 
 ## 29.4 Tests de replay
@@ -1972,21 +1972,24 @@ Critère de sortie :
 * les exclusions sont respectées ;
 * les données expirent correctement.
 
-## Jalon 2 : confidentialité locale
+## Jalon 2 : interprétation par modèle local
 
 Livrables :
 
-* OCR local ;
-* détection de secrets ;
-* redaction ;
+* interface typée `ModelProvider` ;
+* backend multimodal local ;
+* schémas stricts d’entrée et de sortie ;
 * niveaux de sensibilité ;
-* audit des transformations.
+* provenance du modèle, du prompt et des sources ;
+* audit des transformations locales.
 
 Critère de sortie :
 
-* aucune donnée brute n’est envoyée ;
-* les secrets de test sont bloqués ;
-* les transformations sont inspectables.
+* aucun contenu utilisateur n’est traité à distance ;
+* toutes les fixtures autorisées passent uniquement par le modèle local ;
+* les sources exclues n’atteignent jamais le modèle ;
+* les sorties invalides échouent sans fuite dans les logs ;
+* les transformations sont inspectables et rejouables.
 
 ## Jalon 3 : événements
 
@@ -2106,18 +2109,19 @@ Mesures :
 * rétention courte ;
 * transparence.
 
-## 31.2 Fuite de secrets
+## 31.2 Promotion d’informations sensibles
 
-Risque : une donnée sensible traverse le filtre.
+Risque : le modèle local interprète un secret ou une information sensible, puis le pipeline la promeut à tort vers une donnée durable.
 
 Mesures :
 
 * exclusions avant capture ;
-* règles déterministes ;
-* redaction locale ;
-* API distante désactivée ;
+* aucun transport distant de contenu utilisateur ;
+* classification locale de la sensibilité ;
+* validation stricte des sorties ;
+* décision explicite de promotion ou de rejet ;
 * suite de tests spécialisée ;
-* audit de payload.
+* provenance et audit des transformations.
 
 ## 31.3 Faux souvenirs
 
@@ -2160,7 +2164,7 @@ Mesures :
 
 ## 31.6 Surconsommation
 
-Risque : captures, OCR et modèles consomment trop de ressources.
+Risque : captures et modèles consomment trop de ressources.
 
 Mesures :
 
@@ -2243,11 +2247,11 @@ Les points suivants ne bloquent pas le début du développement.
 
 ## Traitement
 
-* modèle local ;
 * taille du modèle ;
 * utilisation de MLX ou Ollama ;
 * fréquence des batchs ;
-* précision requise pour l’OCR.
+* compromis entre précision, latence et mémoire ;
+* utilité éventuelle d’un OCR local comme optimisation.
 
 ## Patterns
 
@@ -2287,7 +2291,7 @@ La v0 est considérée comme fonctionnelle lorsque :
 5. Il respecte les exclusions avant capture.
 6. Il peut être mis en pause instantanément.
 7. Les données brutes sont supprimées dans les 48 heures.
-8. Les secrets de la suite de tests ne quittent jamais la machine.
+8. Aucun contenu utilisateur, y compris les secrets de la suite de tests, ne quitte jamais la machine.
 9. Les observations deviennent des événements structurés.
 10. Les événements possèdent une provenance.
 11. Le système détecte au moins certains patterns simples.
@@ -2298,7 +2302,7 @@ La v0 est considérée comme fonctionnelle lorsque :
 16. L’agent peut rechercher et explorer la mémoire.
 17. L’utilisateur peut inspecter la chaîne de transformation.
 18. L’utilisateur peut corriger un souvenir.
-19. Le système fonctionne sans API distante.
+19. Le système fonctionne sans API distante et exige un modèle multimodal local pour le traitement sémantique.
 20. L’interface locale permet de contrôler les fonctions principales.
 21. Le pilote démontre une amélioration sur les trois comportements cibles.
 22. Le système reste suffisamment léger pour un usage quotidien.
@@ -2370,9 +2374,9 @@ Une technologie ne doit pas devenir une dépendance structurelle lorsqu’une in
 
 Les éléments suivants doivent être remplaçables :
 
-* OCR ;
 * modèle local ;
-* fournisseur distant ;
+* runtime du modèle local ;
+* OCR local optionnel ;
 * stockage brut ;
 * moteur d’événements ;
 * moteur de patterns ;
@@ -2384,7 +2388,7 @@ Les éléments suivants doivent être remplaçables :
 
 # 36. Formulation finale de référence
 
-> CONTX est une infrastructure personnelle, local-first et open source qui observe de manière sélective l’activité d’un utilisateur sur son Mac afin de construire automatiquement la mémoire de travail de son agent personnel. Le système distingue les observations brutes, les événements interprétés, les patterns, les inférences et les souvenirs candidats. Les données brutes restent locales et sont supprimées au plus tard après 48 heures. Les informations sont filtrées, sécurisées et consolidées avant d’entrer dans OptMem ou dans un moteur mémoire dérivé. Cette mémoire constitue directement le contexte fourni à l’agent. CONTX vise à permettre à l’agent de reprendre les projets de l’utilisateur, de comprendre ce qui a occupé sa période récente et de détecter les changements significatifs dans son activité, sans transformer le produit en système de surveillance, en orchestrateur d’agents ou en mémoire générale de toute sa vie.
+> CONTX est une infrastructure personnelle, local-first et open source qui observe de manière sélective l’activité d’un utilisateur sur son Mac afin de construire automatiquement la mémoire de travail de son agent personnel. Le système distingue les observations brutes, les événements interprétés, les patterns, les inférences et les souvenirs candidats. Les données brutes restent locales et sont supprimées au plus tard après 48 heures. Un modèle multimodal local obligatoire interprète les captures et métadonnées autorisées ; aucun contenu utilisateur n’est traité à distance dans la v0. Les informations interprétées sont consolidées avant d’entrer dans OptMem ou dans un moteur mémoire dérivé. Cette mémoire constitue directement le contexte fourni à l’agent. CONTX vise à permettre à l’agent de reprendre les projets de l’utilisateur, de comprendre ce qui a occupé sa période récente et de détecter les changements significatifs dans son activité, sans transformer le produit en système de surveillance, en orchestrateur d’agents ou en mémoire générale de toute sa vie.
 
 ---
 
@@ -2408,4 +2412,4 @@ OptMem
 contx wake
 ```
 
-Ce premier fil vertical doit être fonctionnel et vérifié avant d’ajouter l’OCR avancé, les patterns complexes, un daemon de collecte ou une interface riche. Les détails, critères de sortie et points d’approbation sont définis dans `docs/implementation-plan.md`.
+Ce premier fil vertical doit être fonctionnel et vérifié avant d’ajouter l’interprétation multimodale locale, les patterns complexes, un daemon de collecte ou une interface riche. Les détails, critères de sortie et points d’approbation sont définis dans `docs/implementation-plan.md`.

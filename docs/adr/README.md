@@ -32,3 +32,4 @@ Every ADR records:
 - [0006 — Integrate OptMem behind MemoryStore](0006-optmem-integration.md)
 - [0007 — Keep the v0.1 macOS controller in Python and add Quartz](0007-macos-controller-and-quartz.md)
 - [0008 — Use ApplicationServices for authorized window titles](0008-applicationservices-window-titles.md)
+- [0009 — Require a local multimodal model in v0](0009-mandatory-local-model.md)

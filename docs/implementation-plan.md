@@ -80,7 +80,8 @@ A complete v0 must:
 - prevent direct agent writes to memory;
 - produce the agent's semantic context directly from `MemoryStore`;
 - allow the user to inspect and correct the transformation chain;
-- operate without a remote model;
+- require a local multimodal model for semantic processing;
+- operate without any remote model or outbound user-content path;
 - expose usable local controls;
 - demonstrate measurable benefit for project resumption, recent-period
   understanding, and change detection;
@@ -111,7 +112,7 @@ distribution:
 |---|---|---|
 | v0.0.1 | J0 plus minimal vertical slice | Reproducible foundation and one end-to-end path from observation to `contx wake` |
 | v0.1 | J1 | Controlled macOS collection, exclusions, bounded raw storage, and purge |
-| v0.2 | J2 | Local privacy boundary, OCR, redaction, sensitivity, and transformation audit |
+| v0.2 | J2 | Mandatory local multimodal interpretation, structured output, sensitivity, and transformation audit |
 | v0.3 | J3 | Rebuildable, provenance-backed events and activity timeline |
 | v0.4 | J4 | Multi-event patterns, changes, candidates, scoring, and worker decisions |
 | v0.5 | J5 | Complete memory lifecycle and real Codex integration |
@@ -670,34 +671,39 @@ No live screenshot collection begins merely because the code exists.
 - the user can see whether collection is active;
 - CPU, memory, detection latency, and raw disk use have measured baselines.
 
-## 10. Phase 4: v0.2 local privacy boundary
+## 10. Phase 4: v0.2 local model boundary
 
 ### 10.1 Scope
 
-- replaceable local OCR interface, with Apple Vision evaluated first;
-- deterministic secret detectors before any model-based classifier;
+- typed, replaceable `ModelProvider` contract with a local multimodal backend;
+- strict request and structured-result schemas;
+- direct local interpretation of permitted screenshots and metadata;
 - sensitivity categories and user-defined forbidden information;
-- local redaction and prohibited-region removal;
-- inspectable transformation report;
-- outbound-request audit model, even while remote calls remain disabled;
-- payload validation that fails closed.
+- prompt, model, schema, latency, source, and processing provenance;
+- inspectable local transformation records without private log payloads;
+- no remote provider or outbound user-content transport in v0;
+- result validation that fails closed.
 
 ### 10.2 Required fixtures
 
-Synthetic fixtures cover API keys, tokens, passwords, recovery codes, SSH
-material, payment data, medical text, login screens, password managers, and
-private browsing indicators. They contain no real credentials or personal
-data.
+Synthetic screenshot and metadata fixtures cover ordinary project work plus
+API keys, tokens, passwords, recovery codes, SSH material, payment data,
+medical text, login screens, password managers, and private browsing
+indicators. They contain no real credentials or personal data. Sensitive
+fixtures prove exclusion, sensitivity classification, rejection, logging, and
+local-only processing; they are not a requirement to mask content before the
+local model sees an authorized capture.
 
 ### 10.3 Exit gate
 
-- no raw artifact can cross the outbound boundary;
-- all test secrets are blocked or redacted;
-- excluded sources never reach OCR;
-- redaction provenance is inspectable;
-- logs and error paths contain no fixture secret;
-- remote calls remain disabled by default and the entire product still works
-  offline.
+- no user content can cross a remote boundary;
+- every authorized fixture is processed only by the local provider;
+- excluded sources never reach the model;
+- model, prompt, schema, source, latency, and decision provenance is
+  inspectable;
+- invalid model output is rejected without fixture content in logs or errors;
+- sensitive content is not promoted deliberately into durable memory;
+- the product requires a configured local model and works fully offline.
 
 ## 11. Phase 5: v0.3 events and activity timeline
 
@@ -795,7 +801,8 @@ select a fork merely because the code is available.
 - activity, events, and provenance;
 - patterns and their evidence;
 - candidates, memories, corrections, and wake preview;
-- privacy exclusions, redactions, raw expiry, and outbound audit;
+- privacy exclusions, raw expiry, local-model inputs/results/provenance, and
+  sensitivity decisions;
 - settings and operational errors.
 
 The UI is a client of application services. It does not own business rules or
@@ -808,7 +815,8 @@ become a second source of truth.
 - destructive actions name their scope and require confirmation;
 - the browser cannot access raw files by guessed paths;
 - the API is unreachable from non-loopback interfaces by default;
-- the UI remains usable when remote models are disabled.
+- the UI exposes a clear degraded state when the required local model is
+  unavailable.
 
 ## 15. Phase 9: v0.9 real pilot
 
@@ -841,8 +849,8 @@ Compare agent behavior with and without CONTX for:
 - change detection.
 
 Measure accuracy, coverage, false memories, irrelevant memories, duplicates,
-manual corrections, provenance coverage, secret leakage, context size, wake
-latency, CPU, memory, and disk use.
+manual corrections, provenance coverage, sensitive-content promotion, invalid
+model-output rate, context size, wake latency, CPU, memory, and disk use.
 
 ### 15.3 v0 exit gate
 
@@ -850,7 +858,8 @@ latency, CPU, memory, and disk use.
 - 100% of accepted memories have provenance;
 - no raw data exceeds 48 hours;
 - no excluded application produces a capture;
-- no synthetic test secret appears in an outbound payload;
+- no user content uses a remote transport;
+- no synthetic test secret is promoted deliberately into durable memory;
 - materially false memories remain below the provisional threshold;
 - the majority of user-important events are recoverable;
 - the context stays within budget;
@@ -897,7 +906,8 @@ Use the cheapest layer that proves the behavior:
 - unit tests for domain rules and state transitions;
 - integration tests for SQLite, filesystem, OptMem, process, and migration
   boundaries;
-- privacy tests for exclusions, redaction, payloads, and logs;
+- privacy tests for exclusions, local-only model transport, sensitive
+  promotion, invalid output, and logs;
 - replay tests for event, pattern, candidate, and memory policy changes;
 - performance tests for long-running collection, storage, and wake;
 - end-to-end tests for the critical user workflows.
@@ -947,8 +957,8 @@ At minimum:
 - source and derived identifiers allow provenance traversal;
 - logs contain categories and hashes or identifiers, not raw text by default;
 - purge, migration, memory append, and correction outcomes are auditable;
-- model provider, model identity, payload approval, and response linkage are
-  recorded before any future remote provider is enabled;
+- local model provider, model identity, prompt/schema versions, input
+  references, result linkage, and decision provenance are recorded;
 - operational status distinguishes disabled, paused, degraded, failed, and
   healthy states.
 
@@ -960,7 +970,8 @@ has already been implemented:
 - enabling persistent background collection;
 - enabling live screenshot collection;
 - enabling window-title collection outside a controlled test;
-- enabling a remote model or any outbound user-data payload;
+- introducing a remote model or any outbound user-data path, which also
+  requires a new product decision and ADR;
 - beginning the real-data pilot;
 - deleting real user data;
 - changing the 48-hour maximum retention invariant;
@@ -1018,7 +1029,8 @@ ground-truth comparison, and no direct observation-to-memory path.
 
 ### 21.3 Privacy failure before processing
 
-**Risk:** a sensitive application or screen is captured before redaction.
+**Risk:** a sensitive application or screen is captured before the local model
+can classify it.
 
 **Response:** exclusions and pause are enforced at collection time, screenshot
 work starts only after those gates pass, and live activation requires explicit
@@ -1066,8 +1078,8 @@ evidence to support them:
 - final OptMem upstream/adapted/forked strategy;
 - correction encoding and superseded-memory filtering details;
 - semantic search;
-- local model and MLX versus Ollama;
-- OCR accuracy target and final implementation;
+- local model identity and MLX versus Ollama/`llama.cpp` runtime;
+- whether standalone OCR provides enough measured value as an optimization;
 - screenshot format and visual-change thresholds;
 - sessionization and pattern thresholds;
 - final web design and notification behavior;

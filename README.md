@@ -2,7 +2,7 @@
 
 **A personal, local-first, open-source infrastructure that selectively observes your Mac activity to automatically build the working memory of your personal agent.**
 
-CONTX turns diffuse digital traces (active app, active window, durations, selective screenshots) into a compact, useful, evolving memory. Raw observations are filtered and secured locally, structured into events, patterns and inferences, distilled into memory candidates, then stored through a `MemoryStore` interface backed initially by [OptMem](./docs/third-party/optmem.md). The memory output **is** the context handed to the agent — there is no separate Context Builder.
+CONTX turns diffuse digital traces (active app, active window, durations, selective screenshots) into a compact, useful, evolving memory. Raw observations are interpreted by a mandatory local multimodal model, structured into events, patterns and inferences, distilled into memory candidates, then stored through a `MemoryStore` interface backed initially by [OptMem](./docs/third-party/optmem.md). The memory output **is** the context handed to the agent — there is no separate Context Builder.
 
 > CONTX est une infrastructure personnelle, local-first et open source qui observe de manière sélective l’activité d’un utilisateur sur son Mac afin de construire automatiquement la mémoire de travail de son agent personnel. ([cahier des charges, §36](./cahier_des_charges.md))
 
@@ -24,16 +24,27 @@ It targets three behaviors:
 
 ## Architecture
 
-The diagram below is a faithful Mermaid rendering of the reference schema in [`docs/architecture/CONTX_architecture_OptMem_final.excalidraw`](./docs/architecture/CONTX_architecture_OptMem_final.excalidraw). Open that file in [excalidraw.com](https://excalidraw.com) for the original hand-laid version.
+```mermaid
+flowchart LR
+    sources["Mac activity"] --> collectors["Local collectors"]
+    collectors --> raw["Bounded raw store"]
+    raw --> model["Mandatory local multimodal model"]
+    model --> events["Events and provenance"]
+    events --> patterns["Patterns and inferences"]
+    patterns --> worker["Memory worker"]
+    worker --> memory["MemoryStore / OptMem"]
+    memory --> agents["Consuming agents"]
 
-![CONTX architecture](docs/architecture/CONTX_architecture_OptMem_final.png)
+    controls["Pause and exclusions"] -. "before capture" .-> collectors
+    retention["48-hour maximum"] -. "raw retention" .-> raw
+    local["No remote user-content path in v0"] -. "processing boundary" .-> model
+```
 
-<details>
-<summary>Editable source</summary>
-
-The schema above is rendered from the Excalidraw source: [`docs/architecture/CONTX_architecture_OptMem_final.excalidraw`](./docs/architecture/CONTX_architecture_OptMem_final.excalidraw) — open it in [excalidraw.com](https://excalidraw.com) to edit.
-
-</details>
+The detailed hand-laid architecture remains editable in
+[`docs/architecture/CONTX_architecture_OptMem_final.excalidraw`](./docs/architecture/CONTX_architecture_OptMem_final.excalidraw).
+Open it in [excalidraw.com](https://excalidraw.com) to edit. The older PNG is a
+non-normative snapshot; the specification, ADRs, Mermaid diagram, and editable
+Excalidraw source are authoritative.
 
 ### What each stage does
 
@@ -42,8 +53,8 @@ The schema above is rendered from the Excalidraw source: [`docs/architecture/CON
 | 1 | **Sources** | v0 observes active application/window metadata, durations, idle state, selective screenshots, and agent proposals. Mail, messages, calendar, location, and personal photos are post-v0 scope. |
 | 2 | **Collecteurs locaux** | Detect novelties, avoid duplicates, add date/source/hash, respect per-source policy, stay light and modular. |
 | 3 | **Base brute locale** | Keep the original or its reference, store technical metadata, allow audit/correction/re-analysis, enforce a configurable retention capped at 48 hours, never leaves the machine. |
-| 4 | **Traitement local sûr** | OCR & extraction, summary & classification, project/entity detection, secret & sensitive-data redaction, produces an inspectable filtering report. |
-| 5 | **Base enrichie** | Structured clean events, summary/themes/projects/entities, link back to raw data, redaction history, search/grouping/batch. |
+| 4 | **Interprétation locale** | A mandatory local multimodal model interprets permitted screenshots and metadata, returns schema-validated summaries/classifications/projects/entities/sensitivity, and records inspectable provenance. |
+| 5 | **Base enrichie** | Structured events, summaries/themes/projects/entities, links back to raw evidence, model-transformation history, search/grouping/batch. |
 | 6 | **Agent de mémoire** | Single internal worker for v0: reads enriched events, discards noise, condenses what matters, avoids duplicates, writes short memories, triggers OptMem consolidation. |
 | 7 | **OptMem** | Append-only memory log, rebuildable summary tree, detailed recent / compressed old memories, `wake`/`recall`/`zoom`, the canonical active memory. |
 | 8 | **Passerelle agent** | Invokes OptMem, transports and paginates its output, and reports technical status separately. It never adds a second semantic context source. |
@@ -51,8 +62,8 @@ The schema above is rendered from the Excalidraw source: [`docs/architecture/CON
 
 ### Transversal guardrails
 
-- **Confidentialité** — raw data stays local; filtering required before any API; third-party protection; local mode always possible.
-- **Transparence** — see raw → enriched → memory; see masked items; see data sent to an API; readable audit log.
+- **Confidentialité** — raw data and user content stay on the Mac; v0 has no remote model provider or outbound user-content transport; local processing is mandatory.
+- **Transparence** — see raw → local-model transformation → enriched → memory, including model/prompt/schema versions and a readable audit log.
 - **Contrôle utilisateur** — enable/disable a source; shorten retention below the 48-hour maximum; correct, forget or suspend; export and migrate your data.
 - **Sobriété** — change detection, batch & cache, incremental processing, daily consolidation to start.
 
@@ -67,8 +78,11 @@ The schema above is rendered from the Excalidraw source: [`docs/architecture/CON
 
 ### Optional branches
 
-- **Modèle distant** — receives only authorized enriched events; may help summarize/select/consolidate; returns a proposal, never raw data. Off by default.
 - **Export Markdown** — a readable snapshot for Obsidian, backup, migration or an incompatible agent. Generated from CONTX. Never a second source of truth.
+
+A remote model is not a v0 branch. Adding one later would require a new product
+decision, ADR, and security boundary before any user content could leave the
+Mac.
 
 ---
 
@@ -76,9 +90,9 @@ The schema above is rendered from the Excalidraw source: [`docs/architecture/CON
 
 The full list is in [§4 of the spec](./cahier_des_charges.md). The load-bearing ones:
 
-- **Single user, local-first, fully offline-capable.** Raw data never leaves the Mac.
+- **Single user, local-first, fully offline-capable.** Raw data and model inputs/outputs never leave the Mac.
 - **Raw data deleted within 48 h of capture.** Every raw record carries `expires_at`; a logged purge runs regularly and at startup.
-- **Remote model calls are optional, disabled by default, and inspectable.** Raw data is never sent remotely.
+- **A local multimodal model is mandatory for v0 semantic processing.** There is no deterministic production fallback and no remote provider.
 - **An observation never becomes a memory directly.** Observation → event → pattern/inference → candidate → stored memory are distinct stages.
 - **Agent proposals go through CONTX validation** before the `MemoryStore`; the agent never owns the memory; subagents never write to it.
 - **OptMem is the final context layer.** No separate Context Builder in v0.
@@ -95,7 +109,7 @@ Mac activity
     ↓
 Raw observations          (active app, active window, durations, selective screenshots)
     ↓
-Local filtering & security (OCR, secret detection, redaction, classification)
+Local multimodal model    (interpretation, classification, sensitivity, provenance)
     ↓
 Structured events         (period, projects, entities, confidence, provenance)
     ↓
@@ -132,7 +146,7 @@ implemented commands yet.
 |---------|-----------|------|
 | **v0.0.1** | **J0 + vertical slice** | Repo, ADRs, schemas, migrations, minimal CLI, and one end-to-end `active app → wake` path. |
 | **v0.1** | **J1 macOS collection** | Active app/window, durations, idle detection, selective captures, exclusions, raw store, purge. |
-| **v0.2** | **J2 local privacy** | Local OCR, secret detection, redaction, sensitivity levels, transformation audit. |
+| **v0.2** | **J2 local model** | Mandatory local multimodal model, strict structured output, sensitivity levels, and transformation audit. |
 | **v0.3** | **J3 events** | Sessionisation, structured events, entities, projects, provenance, confidence. |
 | **v0.4** | **J4 patterns & candidates** | Repetition detection, temporal comparison, candidates, scoring, dedup, worker decisions. |
 | **v0.5** | **J5 memory & agent** | `MemoryStore`, complete OptMem lifecycle, `wake`/`recall`/`zoom`, proposals, corrections, Codex integration. |
@@ -172,7 +186,7 @@ single-process daemon, graceful shutdown, and a deterministic LaunchAgent
 manifest. The daemon remains disabled by default; no LaunchAgent, live title
 access, live screenshot capture, or real-data pilot has been activated.
 
-OCR/privacy processing, patterns, corrections, the local web UI, and the real
+Local-model processing, patterns, corrections, the local web UI, and the real
 pilot belong to the following v0 increments. OptMem is used from an ignored
 development snapshot; it is not bundled while redistributable rights remain
 undocumented. See
@@ -185,8 +199,8 @@ current J1 evidence and remaining gates.
 
 - **Python 3.12** via [uv](https://docs.astral.sh/uv/), Pydantic schemas, SQLite (WAL), SQLAlchemy 2, Alembic, Typer CLI, FastAPI when the local API has a consumer, pytest.
 - **macOS:** PyObjC (NSWorkspace, Accessibility API, ScreenCaptureKit/CoreGraphics), background launch via `launchd`.
-- **OCR** behind a replaceable interface; Apple Vision is the first candidate `[HYPOTHÈSE]`.
-- **Models** behind a `ModelProvider` interface; deterministic rules with no model are a valid backend.
+- **Local models** behind a typed `ModelProvider` interface; v0 requires a local multimodal backend and schema-validates every result.
+- **OCR** may later be evaluated as a local optimization, but is not a required production path or semantic fallback.
 - **Web UI (J6):** React + Vite + TypeScript SPA, bound to `127.0.0.1` only.
 
 Development setup:

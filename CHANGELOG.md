@@ -33,6 +33,9 @@ guaranteed.
 
 ### Changed
 
+- Revised the product specification to version 0.3: v0 now requires a local
+  multimodal model, removes deterministic semantic extraction and secret
+  redaction from scope, and prohibits remote user-content processing.
 - Defined v0 as Milestones 0 through 7 and v1 as Milestone 8 hardening.
 - Clarified that semantic agent context comes directly from `MemoryStore`.
 - Selected native macOS runtime data locations.
