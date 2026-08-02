@@ -5,6 +5,11 @@ from typing import Annotated
 import typer
 
 from contx import __version__
+from contx.db import (
+    current_database_revision,
+    head_database_revision,
+    upgrade_database,
+)
 from contx.errors import ContxError
 from contx.settings import (
     initialize_runtime_paths,
@@ -42,9 +47,13 @@ def initialize() -> None:
         paths = resolve_runtime_paths()
         initialize_runtime_paths(paths)
         load_settings(paths)
+        revision = upgrade_database(paths.database_file)
     except ContxError as error:
         _abort(error)
-    typer.echo("CONTX runtime paths initialized; background collection is disabled.")
+    typer.echo(
+        f"CONTX initialized at database revision {revision}; "
+        "background collection is disabled."
+    )
 
 
 @app.command()
@@ -53,6 +62,8 @@ def status() -> None:
     try:
         paths = resolve_runtime_paths()
         settings = load_settings(paths)
+        current_revision = current_database_revision(paths.database_file)
+        head_revision = head_database_revision()
     except ContxError as error:
         _abort(error)
 
@@ -60,6 +71,8 @@ def status() -> None:
     database_state = "present" if paths.database_file.is_file() else "missing"
     typer.echo(f"configuration: {config_state}")
     typer.echo(f"database: {database_state}")
+    schema_state = "current" if current_revision == head_revision else "not current"
+    typer.echo(f"schema: {schema_state}")
     typer.echo(
         "background collection: "
         + (

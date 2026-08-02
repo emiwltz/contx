@@ -18,6 +18,8 @@ guaranteed.
   environment.
 - Typed configuration, native macOS runtime paths, and idempotent private-path
   initialization.
+- Initial SQLite WAL schema with Alembic migrations, foreign-key-backed
+  provenance, and explicit transaction boundaries.
 
 ### Changed
 

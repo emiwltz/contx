@@ -22,8 +22,10 @@ def test_init_is_idempotent_and_status_is_truthful(tmp_path: Path) -> None:
     assert second.exit_code == 0
     assert status.exit_code == 0
     assert "configuration: present" in status.stdout
-    assert "database: missing" in status.stdout
+    assert "database: present" in status.stdout
+    assert "schema: current" in status.stdout
     assert "background collection: disabled" in status.stdout
 
     paths = resolve_runtime_paths(environment)
     assert stat.S_IMODE(paths.config_file.stat().st_mode) == 0o600
+    assert stat.S_IMODE(paths.database_file.stat().st_mode) == 0o600
