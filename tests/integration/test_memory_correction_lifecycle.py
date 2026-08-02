@@ -147,6 +147,77 @@ def test_interruption_after_append_leaves_retryable_pending_supersession(
         engine.dispose()
 
 
+def test_memory_corrections_form_one_linear_provenance_preserving_chain(
+    tmp_path: Path,
+) -> None:
+    engine = _engine(tmp_path)
+    memory = RecordingMemoryStore()
+    try:
+        original = _seed_memory(engine, memory, sensitivity=Sensitivity.PERSONAL)
+        first = MemoryCorrectionService(
+            engine=engine,
+            memory_store=memory,
+            composer=RecordingComposer("Correction: Atlas deploys locally only."),
+            clock=FixedClock(NOW + timedelta(minutes=1)),
+        ).correct(
+            memory_id=original.id,
+            replacement="Atlas deploys locally only.",
+        )
+        second_composer = RecordingComposer(
+            "Correction: Atlas now deploys to production only."
+        )
+        second_service = MemoryCorrectionService(
+            engine=engine,
+            memory_store=memory,
+            composer=second_composer,
+            clock=FixedClock(NOW + timedelta(minutes=2)),
+        )
+
+        second = second_service.correct(
+            memory_id=first.memory_link.id,
+            replacement="Atlas now deploys to production only.",
+        )
+        replay = second_service.correct(
+            memory_id=first.memory_link.id,
+            replacement="Atlas now deploys to production only.",
+        )
+
+        assert second.memory_link.supersedes_memory_id == first.memory_link.id
+        assert (
+            second.memory_link.provenance.pattern_ids
+            == first.memory_link.provenance.pattern_ids
+        )
+        assert (
+            second.memory_link.provenance.event_ids
+            == first.memory_link.provenance.event_ids
+        )
+        assert (
+            second.memory_link.provenance.observation_ids
+            == first.memory_link.provenance.observation_ids
+        )
+        assert replay.memory_link == second.memory_link
+        assert replay.replayed
+        assert len(second_composer.calls) == 1
+        assert memory.entries == (
+            "Atlas deploys to staging.",
+            "Correction: Atlas deploys locally only.",
+            "Correction: Atlas now deploys to production only.",
+        )
+        with session_scope(engine) as database_session:
+            repository = PipelineRepository(database_session)
+            persisted_original = repository.memory_link_by_id(original.id)
+            persisted_first = repository.memory_link_by_id(first.memory_link.id)
+            persisted_second = repository.memory_link_by_id(second.memory_link.id)
+            assert persisted_original is not None
+            assert persisted_first is not None
+            assert persisted_second is not None
+            assert persisted_original.status is MemoryLinkStatus.SUPERSEDED
+            assert persisted_first.status is MemoryLinkStatus.SUPERSEDED
+            assert persisted_second.status is MemoryLinkStatus.ACTIVE
+    finally:
+        engine.dispose()
+
+
 def test_sensitive_memory_cannot_cross_the_correction_boundary(
     tmp_path: Path,
 ) -> None:
