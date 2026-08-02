@@ -19,3 +19,11 @@ class PipelineError(ContxError):
 
 class CollectorUnavailableError(ContxError):
     """Raised when a requested local collection capability is unavailable."""
+
+
+class MemoryStoreError(ContxError):
+    """Raised when final memory cannot be read or updated safely."""
+
+
+class MemoryStoreUnavailableError(MemoryStoreError):
+    """Raised when the configured final-memory backend is unavailable."""

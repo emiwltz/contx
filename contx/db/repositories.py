@@ -120,6 +120,15 @@ class PipelineRepository:
         )
         return None if model is None else _memory_link_from_model(model)
 
+    def memory_link_by_candidate_id(self, candidate_id: UUID) -> MemoryLink | None:
+        """Load the final-memory link for one accepted candidate."""
+        model = self._session.scalar(
+            select(MemoryLinkModel).where(
+                MemoryLinkModel.candidate_id == str(candidate_id)
+            )
+        )
+        return None if model is None else _memory_link_from_model(model)
+
     def save_processing_run(self, run: ProcessingRun) -> ProcessingRun:
         model = self._session.get(ProcessingRunModel, str(run.id))
         if model is None:

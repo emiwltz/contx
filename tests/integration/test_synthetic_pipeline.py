@@ -13,12 +13,14 @@ from contx.db import create_database_engine, session_scope, upgrade_database
 from contx.db.models import (
     EventModel,
     MemoryCandidateModel,
+    MemoryLinkModel,
     ObservationModel,
     ProcessingRunModel,
 )
 from contx.db.repositories import PipelineRepository
-from contx.errors import PipelineError
+from contx.errors import MemoryStoreError, PipelineError
 from contx.events.rules import VerticalSliceEventBuilder
+from contx.memory_store import MemoryAppendResult, RecordingMemoryStore
 from contx.memory_worker import ThresholdMemoryWorker
 from contx.models import Observation, ProcessingRunStatus
 from contx.models.sources import UuidIdentifierSource
@@ -31,8 +33,9 @@ def test_synthetic_activity_produces_one_useful_and_one_rejected_candidate(
     tmp_path: Path,
 ) -> None:
     engine = _engine(tmp_path)
+    memory = RecordingMemoryStore()
     try:
-        result = _run_pipeline(engine)
+        result = _run_pipeline(engine, memory)
 
         assert result.run.status is ProcessingRunStatus.SUCCEEDED
         assert len(result.observations) == 5
@@ -43,6 +46,9 @@ def test_synthetic_activity_produces_one_useful_and_one_rejected_candidate(
         assert len(result.accepted_candidates) == 1
         assert result.accepted_candidates[0].source_type == "project_resumption"
         assert len(result.rejected_candidates) == 1
+        assert len(result.memory_links) == 1
+        assert len(memory.entries) == 1
+        assert result.accepted_candidates[0].status.value == "stored"
         assert (
             result.rejected_candidates[0].rejection_reason
             == "unsupported_or_below_memory_threshold"
@@ -55,9 +61,10 @@ def test_synthetic_activity_produces_one_useful_and_one_rejected_candidate(
 
 def test_synthetic_replay_does_not_duplicate_derived_records(tmp_path: Path) -> None:
     engine = _engine(tmp_path)
+    memory = RecordingMemoryStore()
     try:
-        first = _run_pipeline(engine)
-        second = _run_pipeline(engine)
+        first = _run_pipeline(engine, memory)
+        second = _run_pipeline(engine, memory)
 
         assert [item.id for item in first.observations] == [
             item.id for item in second.observations
@@ -67,7 +74,10 @@ def test_synthetic_replay_does_not_duplicate_derived_records(tmp_path: Path) -> 
             assert repository.count(ObservationModel) == 5
             assert repository.count(EventModel) == 2
             assert repository.count(MemoryCandidateModel) == 2
+            assert repository.count(MemoryLinkModel) == 1
             assert repository.count(ProcessingRunModel) == 2
+        assert first.memory_links == second.memory_links
+        assert len(memory.entries) == 1
     finally:
         engine.dispose()
 
@@ -82,9 +92,10 @@ def test_pipeline_failure_records_no_private_exception_message(tmp_path: Path) -
 
     clock = FixedClock(NOW)
     identifiers = UuidIdentifierSource()
+    memory = RecordingMemoryStore()
     try:
         with pytest.raises(PipelineError) as caught:
-            _service(engine, clock, identifiers).run_once(FailingCollector())
+            _service(engine, clock, identifiers, memory).run_once(FailingCollector())
 
         assert private_message not in str(caught.value)
         with session_scope(engine) as session:
@@ -96,23 +107,61 @@ def test_pipeline_failure_records_no_private_exception_message(tmp_path: Path) -
         engine.dispose()
 
 
+def test_pipeline_recovers_if_database_link_lags_memory_append(
+    tmp_path: Path,
+) -> None:
+    engine = _engine(tmp_path)
+
+    class FailOnceAfterAppend(RecordingMemoryStore):
+        def __init__(self) -> None:
+            super().__init__()
+            self.failed = False
+
+        def append(self, text: str, *, idempotency_key: str) -> MemoryAppendResult:
+            result = super().append(text, idempotency_key=idempotency_key)
+            if not self.failed:
+                self.failed = True
+                raise MemoryStoreError("injected boundary failure")
+            return result
+
+    memory = FailOnceAfterAppend()
+    try:
+        with pytest.raises(MemoryStoreError, match="boundary failure"):
+            _run_pipeline(engine, memory)
+
+        recovered = _run_pipeline(engine, memory)
+
+        assert len(memory.entries) == 1
+        assert len(recovered.memory_links) == 1
+        assert recovered.accepted_candidates[0].status.value == "stored"
+        with session_scope(engine) as session:
+            runs = tuple(session.scalars(select(ProcessingRunModel)))
+            assert [run.status for run in runs] == [
+                ProcessingRunStatus.FAILED.value,
+                ProcessingRunStatus.SUCCEEDED.value,
+            ]
+    finally:
+        engine.dispose()
+
+
 def _engine(tmp_path: Path) -> Engine:
     path = tmp_path / "contx.db"
     upgrade_database(path)
     return create_database_engine(path)
 
 
-def _run_pipeline(engine: Engine) -> PipelineResult:
+def _run_pipeline(engine: Engine, memory: RecordingMemoryStore) -> PipelineResult:
     clock = FixedClock(NOW)
     identifiers = UuidIdentifierSource()
     collector = SyntheticCollector.default(clock=clock, identifiers=identifiers)
-    return _service(engine, clock, identifiers).run_once(collector)
+    return _service(engine, clock, identifiers, memory).run_once(collector)
 
 
 def _service(
     engine: Engine,
     clock: FixedClock,
     identifiers: UuidIdentifierSource,
+    memory: RecordingMemoryStore,
 ) -> PipelineService:
     return PipelineService(
         engine=engine,
@@ -121,6 +170,7 @@ def _service(
             clock=clock, identifiers=identifiers
         ),
         memory_worker=ThresholdMemoryWorker(),
+        memory_store=memory,
         clock=clock,
         identifiers=identifiers,
     )
