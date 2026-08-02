@@ -1,5 +1,6 @@
 """CLI initialization integration tests."""
 
+import re
 import stat
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -11,7 +12,7 @@ from typer.testing import CliRunner
 import contx.cli.app as cli_module
 from contx.cli.app import app
 from contx.db import create_database_engine, session_scope
-from contx.db.repositories import PipelineRepository
+from contx.db.repositories import EventCorrectionRepository, PipelineRepository
 from contx.memory_store import RecordingMemoryStore
 from contx.model_provider import (
     DEFAULT_MODEL,
@@ -20,7 +21,14 @@ from contx.model_provider import (
     LocalModelRuntimeStatus,
     ModelInterpretation,
 )
-from contx.models import Observation, Sensitivity, SourceType
+from contx.models import (
+    EpistemicStatus,
+    Event,
+    EventType,
+    Observation,
+    Sensitivity,
+    SourceType,
+)
 from contx.raw_store import FilesystemRawStore
 from contx.settings import RUNTIME_ROOT_ENV, resolve_runtime_paths
 
@@ -168,6 +176,136 @@ def test_model_status_preflights_without_sending_user_content(
     assert "runtime: available" in result.stdout
     assert f"model: installed ({MODEL})" in result.stdout
     assert f"model digest: {'a' * 64}" in result.stdout
+
+
+def test_timeline_cli_builds_and_reads_an_empty_frozen_window(tmp_path: Path) -> None:
+    environment = {RUNTIME_ROOT_ENV: str(tmp_path)}
+    built = runner.invoke(
+        app,
+        [
+            "timeline",
+            "build",
+            "--from",
+            "2026-08-02T00:00:00Z",
+            "--until",
+            "2026-08-03T00:00:00Z",
+        ],
+        env=environment,
+    )
+
+    assert built.exit_code == 0
+    assert "run: succeeded" in built.stdout
+    assert "processing version: session-events-v1" in built.stdout
+    assert "transformations: 0" in built.stdout
+    assert "events: 0" in built.stdout
+    match = re.search(r"timeline run: ([0-9a-f-]{36})", built.stdout)
+    assert match is not None
+
+    shown = runner.invoke(
+        app,
+        ["timeline", "show", match.group(1)],
+        env=environment,
+    )
+
+    assert shown.exit_code == 0
+    assert f"timeline run: {match.group(1)}" in shown.stdout
+    assert "events: 0" in shown.stdout
+
+
+def test_timeline_cli_rejects_naive_boundaries_without_creating_a_run(
+    tmp_path: Path,
+) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "timeline",
+            "build",
+            "--from",
+            "2026-08-02T00:00:00",
+            "--until",
+            "2026-08-03T00:00:00",
+        ],
+        env={RUNTIME_ROOT_ENV: str(tmp_path)},
+    )
+
+    assert result.exit_code == 2
+    assert "timezone-aware ISO 8601" in result.stderr
+
+
+def test_timeline_cli_appends_a_summary_correction(tmp_path: Path) -> None:
+    environment = {RUNTIME_ROOT_ENV: str(tmp_path)}
+    assert runner.invoke(app, ["init"], env=environment).exit_code == 0
+    paths = resolve_runtime_paths(environment)
+    now = datetime.now(UTC)
+    observation_id = UUID("00000000-0000-0000-0000-000000000551")
+    event_id = UUID("00000000-0000-0000-0000-000000000552")
+    engine = create_database_engine(paths.database_file)
+    try:
+        with session_scope(engine) as session:
+            repository = PipelineRepository(session)
+            repository.save_observation(
+                Observation(
+                    id=observation_id,
+                    idempotency_key="1" * 64,
+                    source_type=SourceType.SYNTHETIC,
+                    captured_at=now,
+                    started_at=now,
+                    ended_at=now + timedelta(minutes=10),
+                    expires_at=now + timedelta(hours=48),
+                    created_at=now,
+                )
+            )
+            repository.save_event(
+                Event(
+                    id=event_id,
+                    idempotency_key="2" * 64,
+                    lineage_key="3" * 64,
+                    type=EventType.PROJECT_WORK,
+                    summary="Initial synthetic event.",
+                    facts={},
+                    started_at=now,
+                    ended_at=now + timedelta(minutes=10),
+                    valid_from=now,
+                    valid_until=now + timedelta(minutes=10),
+                    epistemic_status=EpistemicStatus.INFERRED,
+                    confidence=0.8,
+                    sensitivity=Sensitivity.PERSONAL,
+                    projects=("CONTX",),
+                    source_observation_ids=(observation_id,),
+                    processing_version="session-events-v1",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+    finally:
+        engine.dispose()
+
+    corrected = runner.invoke(
+        app,
+        [
+            "timeline",
+            "correct",
+            str(event_id),
+            "--summary",
+            "Corrected synthetic event.",
+            "--reason",
+            "The initial summary was intentionally wrong.",
+        ],
+        env=environment,
+    )
+
+    assert corrected.exit_code == 0
+    assert "correction appended:" in corrected.stdout
+    engine = create_database_engine(paths.database_file)
+    try:
+        with session_scope(engine) as session:
+            latest = EventCorrectionRepository(session).latest_for_lineages(
+                ("3" * 64,)
+            )["3" * 64]
+            assert latest.replacement.summary == "Corrected synthetic event."
+            assert latest.target_event_id == event_id
+    finally:
+        engine.dispose()
 
 
 def test_process_command_runs_synthetic_screenshot_backlog_without_collection(

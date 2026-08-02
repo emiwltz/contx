@@ -40,6 +40,8 @@ def test_defaults_are_safe(tmp_path: Path) -> None:
     assert settings.model.timeout_seconds == 120.0
     assert settings.model.context_tokens == 8192
     assert settings.model.max_output_tokens == 512
+    assert settings.events.session_gap_seconds == 600
+    assert settings.events.max_session_duration_seconds == 7200
 
 
 def test_environment_overrides_config(tmp_path: Path) -> None:

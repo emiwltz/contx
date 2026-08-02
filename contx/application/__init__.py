@@ -1,5 +1,11 @@
 """CONTX application services."""
 
+from contx.application.activity_timeline import (
+    ActivityTimelineBuildResult,
+    ActivityTimelineService,
+    EventCorrectionService,
+    correction_content,
+)
 from contx.application.continuous_collection import (
     ContinuousCollectionResult,
     ContinuousCollectionRunner,
@@ -18,9 +24,12 @@ from contx.application.pipeline import PipelineResult, PipelineService
 from contx.application.raw_purge import RawPurgeResult, RawPurgeService
 
 __all__ = [
+    "ActivityTimelineBuildResult",
+    "ActivityTimelineService",
     "ContinuousCollectionResult",
     "ContinuousCollectionRunner",
     "ContinuousCollectionSession",
+    "EventCorrectionService",
     "LocalModelProcessingResult",
     "LocalModelProcessingService",
     "LocalModelEventResult",
@@ -30,4 +39,5 @@ __all__ = [
     "RawPurgeResult",
     "RawPurgeService",
     "ThreadStopSignal",
+    "correction_content",
 ]

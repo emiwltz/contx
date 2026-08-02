@@ -3,6 +3,7 @@
 from contx.settings.models import (
     AppSettings,
     CollectionSettings,
+    EventSettings,
     ModelSettings,
     load_settings,
 )
@@ -17,6 +18,7 @@ __all__ = [
     "RUNTIME_ROOT_ENV",
     "AppSettings",
     "CollectionSettings",
+    "EventSettings",
     "ModelSettings",
     "RuntimePaths",
     "initialize_runtime_paths",

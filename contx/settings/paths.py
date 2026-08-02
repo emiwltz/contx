@@ -42,6 +42,10 @@ context_tokens = 8192
 max_output_tokens = 512
 max_image_mb = 20
 max_response_kb = 1024
+
+[events]
+session_gap_seconds = 600
+max_session_duration_seconds = 7200
 """
 
 

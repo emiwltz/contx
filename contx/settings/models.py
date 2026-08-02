@@ -85,6 +85,21 @@ class ModelSettings(BaseModel):
         return normalized
 
 
+class EventSettings(BaseModel):
+    """Deterministic activity-session policy for replayable timelines."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    session_gap_seconds: int = Field(default=600, ge=30, le=3600)
+    max_session_duration_seconds: int = Field(default=7200, ge=300, le=14400)
+
+    @model_validator(mode="after")
+    def validate_session_limits(self) -> Self:
+        if self.max_session_duration_seconds <= self.session_gap_seconds:
+            raise ValueError("maximum session duration must exceed the session gap")
+        return self
+
+
 class AppSettings(BaseModel):
     """Versioned CONTX configuration."""
 
@@ -93,6 +108,7 @@ class AppSettings(BaseModel):
     config_version: int = Field(default=1, ge=1, le=1)
     collection: CollectionSettings = Field(default_factory=CollectionSettings)
     model: ModelSettings = Field(default_factory=ModelSettings)
+    events: EventSettings = Field(default_factory=EventSettings)
 
 
 def load_settings(

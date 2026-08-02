@@ -1,7 +1,7 @@
 """Top-level CONTX command-line application."""
 
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Never
@@ -12,10 +12,13 @@ from sqlalchemy import Engine
 
 from contx import __version__
 from contx.application import (
+    ActivityTimelineService,
+    EventCorrectionService,
     LocalModelEventService,
     LocalModelProcessingService,
     PipelineService,
     RawPurgeService,
+    correction_content,
 )
 from contx.candidates.rules import VerticalSliceCandidateProducer
 from contx.collection import (
@@ -37,9 +40,19 @@ from contx.db import (
     session_scope,
     upgrade_database,
 )
-from contx.db.repositories import ModelEventRepository, ModelTransformationRepository
-from contx.errors import ContxError, RawStoreError
-from contx.events import MODEL_EVENT_PROCESSING_VERSION, ModelTransformationEventBuilder
+from contx.db.repositories import (
+    EventCorrectionRepository,
+    ModelEventRepository,
+    ModelTransformationRepository,
+    PipelineRepository,
+)
+from contx.errors import ContxError, PipelineError, RawStoreError
+from contx.events import (
+    MODEL_EVENT_PROCESSING_VERSION,
+    ModelActivitySessionizer,
+    ModelTransformationEventBuilder,
+    SessionizedModelEventBuilder,
+)
 from contx.events.rules import VerticalSliceEventBuilder
 from contx.memory_store import (
     MemoryStore,
@@ -54,12 +67,14 @@ from contx.model_provider import (
 )
 from contx.models import (
     CollectionControl,
+    EventCorrectionContent,
     ExclusionRuleType,
     SystemClock,
     UuidIdentifierSource,
 )
 from contx.raw_store import FilesystemRawStore
 from contx.settings import (
+    EventSettings,
     ModelSettings,
     initialize_runtime_paths,
     load_settings,
@@ -73,8 +88,10 @@ app = typer.Typer(
 )
 exclusions_app = typer.Typer(help="Manage pre-capture exclusion rules.")
 model_app = typer.Typer(help="Inspect the mandatory local multimodal model.")
+timeline_app = typer.Typer(help="Build, inspect, and correct activity timelines.")
 app.add_typer(exclusions_app, name="exclusions")
 app.add_typer(model_app, name="model")
+app.add_typer(timeline_app, name="timeline")
 
 
 class RunSource(StrEnum):
@@ -333,6 +350,132 @@ def process() -> None:
     typer.echo(f"model event backlog: {event_result.backlog_count}")
     if not model_result.succeeded or not event_result.succeeded:
         raise typer.Exit(code=2)
+
+
+@timeline_app.command("build")
+def build_timeline(
+    window_start: Annotated[
+        str,
+        typer.Option("--from", help="Inclusive timezone-aware ISO 8601 start."),
+    ],
+    window_end: Annotated[
+        str,
+        typer.Option("--until", help="Exclusive timezone-aware ISO 8601 end."),
+    ],
+) -> None:
+    """Rebuild one frozen interval without collecting or invoking a model."""
+    engine: Engine | None = None
+    try:
+        start = _parse_cli_datetime(window_start)
+        end = _parse_cli_datetime(window_end)
+        paths = resolve_runtime_paths()
+        initialize_runtime_paths(paths)
+        settings = load_settings(paths)
+        upgrade_database(paths.database_file)
+        engine = create_database_engine(paths.database_file)
+        clock = SystemClock()
+        result = _activity_timeline_service(
+            engine,
+            settings=settings.events,
+            clock=clock,
+            identifiers=UuidIdentifierSource(),
+        ).rebuild(window_start=start, window_end=end)
+    except ContxError as error:
+        _abort(error)
+    finally:
+        if engine is not None:
+            engine.dispose()
+    typer.echo(f"run: {result.run.status.value}")
+    typer.echo(f"timeline run: {result.run.id}")
+    typer.echo(f"processing version: {result.timeline.build.processing_version}")
+    typer.echo(f"transformations: {result.transformation_count}")
+    typer.echo(f"events: {len(result.timeline.entries)}")
+
+
+@timeline_app.command("show")
+def show_timeline(processing_run_id: UUID) -> None:
+    """Print one explicit replay snapshot with effective corrections."""
+    engine: Engine | None = None
+    try:
+        paths = resolve_runtime_paths()
+        initialize_runtime_paths(paths)
+        settings = load_settings(paths)
+        upgrade_database(paths.database_file)
+        engine = create_database_engine(paths.database_file)
+        timeline = _activity_timeline_service(
+            engine,
+            settings=settings.events,
+            clock=SystemClock(),
+            identifiers=UuidIdentifierSource(),
+        ).read(processing_run_id)
+    except ContxError as error:
+        _abort(error)
+    finally:
+        if engine is not None:
+            engine.dispose()
+    typer.echo(f"timeline run: {timeline.build.processing_run_id}")
+    typer.echo(f"processing version: {timeline.build.processing_version}")
+    typer.echo(
+        f"window: {timeline.build.window_start.isoformat()} "
+        f"to {timeline.build.window_end.isoformat()}"
+    )
+    typer.echo(f"events: {len(timeline.entries)}")
+    for entry in timeline.entries:
+        correction = "none" if entry.correction_id is None else str(entry.correction_id)
+        typer.echo(
+            f"{entry.started_at.isoformat()} to {entry.ended_at.isoformat()} "
+            f"{entry.type.value} event={entry.event_id} correction={correction}"
+        )
+        typer.echo(f"  summary: {entry.summary}")
+        if entry.projects:
+            typer.echo(f"  projects: {', '.join(entry.projects)}")
+
+
+@timeline_app.command("correct")
+def correct_timeline_event(
+    event_id: UUID,
+    summary: Annotated[str, typer.Option("--summary", help="Corrected summary.")],
+    reason: Annotated[str, typer.Option("--reason", help="Why this is corrected.")],
+) -> None:
+    """Append a summary correction while preserving evidence and history."""
+    engine: Engine | None = None
+    try:
+        paths = resolve_runtime_paths()
+        initialize_runtime_paths(paths)
+        load_settings(paths)
+        upgrade_database(paths.database_file)
+        engine = create_database_engine(paths.database_file)
+        with session_scope(engine) as session:
+            event = PipelineRepository(session).event_by_id(event_id)
+            if event is None:
+                raise PipelineError("Cannot correct a missing event")
+            latest = (
+                EventCorrectionRepository(session)
+                .latest_for_lineages((event.lineage_key,))
+                .get(event.lineage_key)
+            )
+            current = (
+                correction_content(event) if latest is None else latest.replacement
+            )
+        try:
+            replacement = EventCorrectionContent.model_validate(
+                current.model_dump() | {"summary": summary}
+            )
+        except ValueError:
+            raise PipelineError("Event correction is invalid") from None
+        correction = EventCorrectionService(engine=engine).correct(
+            event_id=event_id,
+            replacement=replacement,
+            reason=reason,
+            correction_id=UuidIdentifierSource().new(),
+            created_at=SystemClock().now(),
+        )
+    except ContxError as error:
+        _abort(error)
+    finally:
+        if engine is not None:
+            engine.dispose()
+    typer.echo(f"correction appended: {correction.id}")
 
 
 @app.command("run-once")
@@ -603,6 +746,39 @@ def _build_local_model_provider(settings: ModelSettings) -> OllamaModelProvider:
         max_image_bytes=settings.max_image_mb * 1024 * 1024,
         max_response_bytes=settings.max_response_kb * 1024,
     )
+
+
+def _activity_timeline_service(
+    engine: Engine,
+    *,
+    settings: EventSettings,
+    clock: SystemClock,
+    identifiers: UuidIdentifierSource,
+) -> ActivityTimelineService:
+    return ActivityTimelineService(
+        engine=engine,
+        sessionizer=ModelActivitySessionizer(
+            session_gap=timedelta(seconds=settings.session_gap_seconds),
+            max_session_duration=timedelta(
+                seconds=settings.max_session_duration_seconds
+            ),
+        ),
+        builder=SessionizedModelEventBuilder(clock=clock),
+        clock=clock,
+        identifiers=identifiers,
+    )
+
+
+def _parse_cli_datetime(value: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            raise ValueError
+        return parsed
+    except ValueError:
+        raise PipelineError(
+            "Timeline boundaries must be timezone-aware ISO 8601 timestamps"
+        ) from None
 
 
 def _build_raw_store(raw_directory: Path, *, budget_mb: int) -> FilesystemRawStore:
