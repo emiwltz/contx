@@ -45,6 +45,7 @@ from contx.models import (
     Observation,
     ObservationStatus,
     ProcessingRun,
+    ProcessingRunStatus,
     Sensitivity,
     SourceType,
 )
@@ -156,6 +157,14 @@ class PipelineRepository:
             _update_processing_run_model(model, run)
         self._session.flush()
         return run
+
+    def observation_by_id(self, observation_id: UUID) -> Observation | None:
+        model = self._session.get(ObservationModel, str(observation_id))
+        return None if model is None else _observation_from_model(model)
+
+    def processing_run_by_id(self, run_id: UUID) -> ProcessingRun | None:
+        model = self._session.get(ProcessingRunModel, str(run_id))
+        return None if model is None else _processing_run_from_model(model)
 
     def count(
         self,
@@ -299,6 +308,142 @@ class ModelTransformationRepository:
             .limit(limit)
         )
         return tuple(_model_transformation_from_model(model) for model in models)
+
+    def unqueued_screenshots(
+        self,
+        *,
+        at: datetime,
+        limit: int = 1000,
+    ) -> tuple[Observation, ...]:
+        if limit < 1:
+            raise ValueError("unqueued screenshot limit must be positive")
+        linked = (
+            select(ModelTransformationObservationModel.observation_id)
+            .where(
+                ModelTransformationObservationModel.observation_id
+                == ObservationModel.id
+            )
+            .exists()
+        )
+        models = self._session.scalars(
+            select(ObservationModel)
+            .where(
+                ObservationModel.source_type == SourceType.SCREENSHOT.value,
+                ObservationModel.processing_status == ObservationStatus.COLLECTED.value,
+                ObservationModel.excluded.is_(False),
+                ObservationModel.artifact_path.is_not(None),
+                ObservationModel.content_hash.is_not(None),
+                ObservationModel.expires_at > format_utc(at),
+                ~linked,
+            )
+            .order_by(ObservationModel.captured_at, ObservationModel.id)
+            .limit(limit)
+        )
+        return tuple(_observation_from_model(model) for model in models)
+
+    def unqueued_screenshot_count(self, *, at: datetime) -> int:
+        linked = (
+            select(ModelTransformationObservationModel.observation_id)
+            .where(
+                ModelTransformationObservationModel.observation_id
+                == ObservationModel.id
+            )
+            .exists()
+        )
+        return int(
+            self._session.scalar(
+                select(func.count())
+                .select_from(ObservationModel)
+                .where(
+                    ObservationModel.source_type == SourceType.SCREENSHOT.value,
+                    ObservationModel.processing_status
+                    == ObservationStatus.COLLECTED.value,
+                    ObservationModel.excluded.is_(False),
+                    ObservationModel.artifact_path.is_not(None),
+                    ObservationModel.content_hash.is_not(None),
+                    ObservationModel.expires_at > format_utc(at),
+                    ~linked,
+                )
+            )
+            or 0
+        )
+
+    def source_observations(
+        self,
+        transformation: ModelTransformation,
+    ) -> tuple[Observation, ...]:
+        models = tuple(
+            self._session.scalars(
+                select(ObservationModel).where(
+                    ObservationModel.id.in_(
+                        str(value) for value in transformation.source_observation_ids
+                    )
+                )
+            )
+        )
+        by_id = {UUID(model.id): _observation_from_model(model) for model in models}
+        try:
+            return tuple(
+                by_id[value] for value in transformation.source_observation_ids
+            )
+        except KeyError as error:
+            raise DatabaseError(
+                "A model transformation source observation is unavailable"
+            ) from error
+
+    def stale_running(
+        self,
+        *,
+        before: datetime,
+        limit: int = 1000,
+    ) -> tuple[ModelTransformation, ...]:
+        if limit < 1:
+            raise ValueError("stale model transformation limit must be positive")
+        models = self._session.scalars(
+            select(ModelTransformationModel)
+            .where(
+                ModelTransformationModel.status
+                == ModelTransformationStatus.RUNNING.value,
+                ModelTransformationModel.started_at <= format_utc(before),
+            )
+            .order_by(
+                ModelTransformationModel.started_at,
+                ModelTransformationModel.id,
+            )
+            .limit(limit)
+        )
+        return tuple(_model_transformation_from_model(model) for model in models)
+
+    def backlog_count(self) -> int:
+        return int(
+            self._session.scalar(
+                select(func.count())
+                .select_from(ModelTransformationModel)
+                .where(
+                    ModelTransformationModel.status.in_(
+                        (
+                            ModelTransformationStatus.PENDING.value,
+                            ModelTransformationStatus.RUNNING.value,
+                            ModelTransformationStatus.FAILED.value,
+                        )
+                    )
+                )
+            )
+            or 0
+        )
+
+    def abandoned_count(self) -> int:
+        return int(
+            self._session.scalar(
+                select(func.count())
+                .select_from(ModelTransformationModel)
+                .where(
+                    ModelTransformationModel.status
+                    == ModelTransformationStatus.ABANDONED.value
+                )
+            )
+            or 0
+        )
 
     def processing_run_ids(self, transformation_id: UUID) -> tuple[UUID, ...]:
         return tuple(
@@ -774,6 +919,21 @@ def _update_processing_run_model(
     model.error_summary = record.error_summary
 
 
+def _processing_run_from_model(model: ProcessingRunModel) -> ProcessingRun:
+    return ProcessingRun(
+        id=UUID(model.id),
+        pipeline=model.pipeline,
+        version=model.version,
+        started_at=parse_utc(model.started_at),
+        ended_at=None if model.ended_at is None else parse_utc(model.ended_at),
+        status=ProcessingRunStatus(model.status),
+        input_count=model.input_count,
+        output_count=model.output_count,
+        error_code=model.error_code,
+        error_summary=model.error_summary,
+    )
+
+
 def _model_transformation_to_model(
     record: ModelTransformation,
 ) -> ModelTransformationModel:
@@ -922,11 +1082,16 @@ def _validate_transformation_transition(
             in {
                 ModelTransformationStatus.SUCCEEDED,
                 ModelTransformationStatus.FAILED,
+                ModelTransformationStatus.ABANDONED,
             }
         )
         or (
             existing.status is ModelTransformationStatus.FAILED
-            and updated.status is ModelTransformationStatus.RUNNING
+            and updated.status
+            in {
+                ModelTransformationStatus.RUNNING,
+                ModelTransformationStatus.ABANDONED,
+            }
         )
     )
     if not allowed:

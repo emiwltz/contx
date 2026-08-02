@@ -244,6 +244,7 @@ class ModelTransformationStatus(StrEnum):
     RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+    ABANDONED = "abandoned"
 
 
 class ModelTransformation(BaseModel):
@@ -349,6 +350,18 @@ class ModelTransformation(BaseModel):
                 or self.last_error_code is not None
             ):
                 raise ValueError("succeeded model transformation state is inconsistent")
+        elif self.status is ModelTransformationStatus.FAILED:
+            if (
+                any(value is None for value in identity)
+                or self.attempt_count < 1
+                or self.started_at is None
+                or self.ended_at is None
+                or self.interpretation is not None
+                or any(value is not None for value in metrics)
+                or self.next_attempt_at is None
+                or self.last_error_code is None
+            ):
+                raise ValueError("failed model transformation state is inconsistent")
         elif (
             any(value is None for value in identity)
             or self.attempt_count < 1
@@ -356,10 +369,10 @@ class ModelTransformation(BaseModel):
             or self.ended_at is None
             or self.interpretation is not None
             or any(value is not None for value in metrics)
-            or self.next_attempt_at is None
+            or self.next_attempt_at is not None
             or self.last_error_code is None
         ):
-            raise ValueError("failed model transformation state is inconsistent")
+            raise ValueError("abandoned model transformation state is inconsistent")
         if (
             self.started_at is not None
             and self.ended_at is not None
@@ -435,7 +448,7 @@ class ModelTransformation(BaseModel):
             or execution.prompt_version != self.prompt_version
             or execution.output_schema_version != self.output_schema_version
             or execution.image_sha256 != self.image_sha256
-            or execution.started_at != self.started_at
+            or (self.started_at is not None and execution.started_at < self.started_at)
         ):
             raise ValueError("model execution provenance does not match its work item")
         return type(self).model_validate(
@@ -443,7 +456,6 @@ class ModelTransformation(BaseModel):
             | {
                 "status": ModelTransformationStatus.SUCCEEDED,
                 "interpretation": execution.interpretation,
-                "started_at": execution.started_at,
                 "ended_at": execution.ended_at,
                 "wall_duration_ms": execution.wall_duration_ms,
                 "runtime_duration_ms": execution.runtime_duration_ms,
@@ -477,6 +489,39 @@ class ModelTransformation(BaseModel):
                 "prompt_eval_count": None,
                 "eval_count": None,
                 "next_attempt_at": next_attempt,
+                "last_error_code": error_code,
+                "updated_at": ended,
+            }
+        )
+
+    def abandon(
+        self,
+        *,
+        ended_at: datetime,
+        error_code: str,
+    ) -> Self:
+        """Stop running or retrying a transformation without losing its audit."""
+        if self.status not in {
+            ModelTransformationStatus.RUNNING,
+            ModelTransformationStatus.FAILED,
+        }:
+            raise ValueError("only running or failed model work can be abandoned")
+        ended = require_aware_utc(ended_at)
+        return type(self).model_validate(
+            self.model_dump()
+            | {
+                "status": ModelTransformationStatus.ABANDONED,
+                "ended_at": (
+                    ended
+                    if self.status is ModelTransformationStatus.RUNNING
+                    else self.ended_at
+                ),
+                "wall_duration_ms": None,
+                "runtime_duration_ms": None,
+                "load_duration_ms": None,
+                "prompt_eval_count": None,
+                "eval_count": None,
+                "next_attempt_at": None,
                 "last_error_code": error_code,
                 "updated_at": ended,
             }

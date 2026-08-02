@@ -96,7 +96,12 @@ class Observation(DomainRecord):
     app_bundle_id: str | None = Field(default=None, max_length=255)
     window_title: str | None = None
     artifact_path: str | None = None
-    content_hash: str | None = Field(default=None, max_length=64)
+    content_hash: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]+$",
+    )
     perceptual_hash: str | None = Field(default=None, max_length=128)
     excluded: bool = False
     exclusion_reason: str | None = Field(default=None, max_length=255)

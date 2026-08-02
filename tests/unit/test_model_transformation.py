@@ -89,7 +89,21 @@ def test_transformation_rejects_inconsistent_states_and_non_loopback_endpoint() 
         )
 
 
-def test_execution_start_must_match_the_persisted_attempt() -> None:
+def test_execution_cannot_start_before_the_persisted_attempt() -> None:
+    running = _pending().start(runtime=_runtime(), started_at=NOW)
+    execution = LocalModelExecution.model_validate(
+        _execution().model_dump()
+        | {
+            "started_at": NOW - timedelta(milliseconds=1),
+            "ended_at": NOW + timedelta(seconds=1),
+        }
+    )
+
+    with pytest.raises(ValueError, match="provenance"):
+        running.succeed(execution)
+
+
+def test_success_preserves_dispatch_time_when_provider_starts_later() -> None:
     running = _pending().start(runtime=_runtime(), started_at=NOW)
     execution = LocalModelExecution.model_validate(
         _execution().model_dump()
@@ -99,8 +113,42 @@ def test_execution_start_must_match_the_persisted_attempt() -> None:
         }
     )
 
-    with pytest.raises(ValueError, match="provenance"):
-        running.succeed(execution)
+    succeeded = running.succeed(execution)
+
+    assert succeeded.started_at == NOW
+
+
+def test_abandoned_transformation_is_terminal_and_not_due() -> None:
+    running = _pending().start(runtime=_runtime(), started_at=NOW)
+
+    abandoned = running.abandon(
+        ended_at=NOW + timedelta(seconds=1),
+        error_code="raw_artifact_unavailable",
+    )
+
+    assert abandoned.status is ModelTransformationStatus.ABANDONED
+    assert abandoned.next_attempt_at is None
+    assert abandoned.last_error_code == "raw_artifact_unavailable"
+    with pytest.raises(ValueError, match="pending or failed"):
+        abandoned.start(runtime=_runtime(), started_at=NOW + timedelta(minutes=1))
+
+
+def test_failed_transformation_can_be_abandoned_without_rewriting_attempt_end() -> None:
+    running = _pending().start(runtime=_runtime(), started_at=NOW)
+    attempt_ended = NOW + timedelta(seconds=1)
+    failed = running.fail(
+        ended_at=attempt_ended,
+        error_code="runtime_unavailable",
+        next_attempt_at=NOW + timedelta(minutes=1),
+    )
+
+    abandoned = failed.abandon(
+        ended_at=NOW + timedelta(minutes=2),
+        error_code="model_digest_changed",
+    )
+
+    assert abandoned.ended_at == attempt_ended
+    assert abandoned.updated_at == NOW + timedelta(minutes=2)
 
 
 def _pending(**overrides: object) -> ModelTransformation:
