@@ -10,6 +10,19 @@
 
 **Normative source:** `cahier_des_charges.md`
 
+## Execution status
+
+| Scope | Status | Evidence |
+|---|---|---|
+| Phase 0 decision baseline | Complete | ADRs 0001–0006, aligned specification and architecture, Apache-2.0 baseline, OptMem provenance gate |
+| J0 engineering foundation | Complete | Locked Python 3.12 package, private runtime paths, Alembic/SQLite WAL, strict schemas and repositories |
+| v0.0.1 vertical slice | Complete | Synthetic and live one-shot collectors, candidate decision, OptMem persistence, provenance, direct `contx wake`, replay/failure tests |
+| v0.1 / J1 | Next | Controlled collection, exclusions, bounded raw storage, purge, and visible daemon control |
+
+The completed vertical-slice evidence and residual limitations are recorded in
+`docs/evaluation/v0.0.1-validation.md`. Completion here does not imply that the
+whole v0 is complete; v0 still requires J1 through J7 and the real pilot.
+
 ## 1. Purpose
 
 This document turns the founding specification and the decisions accepted by

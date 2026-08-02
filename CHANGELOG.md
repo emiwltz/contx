@@ -26,6 +26,10 @@ guaranteed.
   positive memory decision and a justified trivial-activity rejection.
 - An explicit one-shot macOS frontmost-application collector that stores no
   window title, screenshot, or artifact.
+- A typed final-memory contract with deterministic test storage and a
+  checksum-pinned, bounded OptMem subprocess adapter.
+- Crash-recoverable idempotent memory appends, SQLite provenance links, and
+  direct `contx wake` context output.
 
 ### Changed
 

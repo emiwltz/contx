@@ -14,8 +14,8 @@ artifact hashes are authoritative in `uv.lock`.
 | Typer | 0.27.0 | MIT | Actively maintained; adds Rich and Shellingham for CLI behavior. Pure Python on the target platform. | Keep command services independent of Typer so another CLI layer can call the same application contracts. |
 
 These libraries solve standardized or failure-prone boundaries. CONTX does not
-add FastAPI, PyObjC, OCR, model, or web dependencies until the milestone that
-has an immediate consumer for them.
+add FastAPI, OCR, model, or web dependencies until the milestone that has an
+immediate consumer for them.
 
 ## Development and build tools
 

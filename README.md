@@ -2,7 +2,7 @@
 
 **A personal, local-first, open-source infrastructure that selectively observes your Mac activity to automatically build the working memory of your personal agent.**
 
-CONTX turns diffuse digital traces (active app, active window, durations, selective screenshots) into a compact, useful, evolving memory. Raw observations are filtered and secured locally, structured into events, patterns and inferences, distilled into memory candidates, then stored through a `MemoryStore` interface backed by [OptMem](./optmem/). The memory output **is** the context handed to the agent — there is no separate Context Builder.
+CONTX turns diffuse digital traces (active app, active window, durations, selective screenshots) into a compact, useful, evolving memory. Raw observations are filtered and secured locally, structured into events, patterns and inferences, distilled into memory candidates, then stored through a `MemoryStore` interface backed initially by [OptMem](./docs/third-party/optmem.md). The memory output **is** the context handed to the agent — there is no separate Context Builder.
 
 > CONTX est une infrastructure personnelle, local-first et open source qui observe de manière sélective l’activité d’un utilisateur sur son Mac afin de construire automatiquement la mémoire de travail de son agent personnel. ([cahier des charges, §36](./cahier_des_charges.md))
 
@@ -110,17 +110,19 @@ MemoryStore (OptMem)      (append-only log + rebuildable summary tree)
 Context delivered to the agent  (wake, recall, zoom — directly, no Context Builder)
 ```
 
-The agent reaches CONTX through a small CLI:
+The implemented v0.0.1 CLI surface is:
 
 ```text
-contx wake                 # get the final memory context
-contx recall <query>       # search the memory
-contx zoom <node>          # navigate the summary tree
-contx propose "<memory>"   # propose a memory (goes through validation, not direct write)
-contx correct <id> "<fix>" # correct an existing memory
-contx status              # collection state
-contx pause / resume       # instant pause / resume
+contx init                              # initialize paths and database, collection off
+contx status                            # inspect initialization and safe defaults
+contx run-once --source synthetic       # deterministic end-to-end proof
+contx run-once --source active-app      # one explicit macOS metadata sample
+contx wake                              # direct final-memory context
 ```
+
+`recall`, `zoom`, agent proposals, corrections, pause/resume, and continuous
+collection are planned milestone capabilities and are not advertised as
+implemented commands yet.
 
 ---
 
@@ -138,13 +140,34 @@ contx pause / resume       # instant pause / resume
 | **v0.9** | **J7 real pilot** | 7–14 day pilot, ground truth, with/without CONTX comparison, error analysis, OptMem decision. |
 | **v1.0** | **J8 hardening** | Fixes, optimization, install/upgrade/uninstall, recovery, distribution, licensing, and documentation. |
 
-**Active goal:** complete the Phase 0 decision baseline, then deliver v0.0.1 — `active app → local observation → simple event → memory candidate → OptMem → contx wake` — before OCR, complex patterns, a daemon, or any web UI (§37 and the [implementation plan](./docs/implementation-plan.md)).
+**Active goal:** build v0.1 controlled macOS collection on the verified v0.0.1
+vertical slice, then continue through the complete v0 pilot (§37 and the
+[implementation plan](./docs/implementation-plan.md)).
 
 ---
 
 ## Current state
 
-Greenfield. The repository contains the specification, working agreement, implementation plan, initial ADRs, architecture assets, and an ignored local reference clone of OptMem (`optmem/`). No CONTX product code has been written yet.
+v0.0.1 is implemented and verified. It includes:
+
+- a reproducible Python 3.12 package and locked environment;
+- private native macOS runtime paths and strict configuration;
+- an Alembic-managed SQLite WAL database;
+- strict `Observation`, `Event`, `MemoryCandidate`, `MemoryLink`, and
+  `ProcessingRun` contracts with queryable provenance;
+- a deterministic project-resumption pipeline and a conservative rejection
+  path;
+- explicit one-shot active-application collection with no window title,
+  screenshot, OCR artifact, network call, or background process;
+- a typed `MemoryStore`, a checksum-pinned isolated OptMem adapter, append
+  recovery, and direct `contx wake` output.
+
+The active-app collector may report that no frontmost application is available
+in a headless or restricted host session. Continuous collection, exclusions,
+bounded raw artifacts, OCR/privacy processing, patterns, corrections, local UI,
+and the real pilot belong to the following v0 increments. OptMem is used from
+an ignored development snapshot; it is not bundled while redistributable rights
+remain undocumented.
 
 ---
 
@@ -156,13 +179,21 @@ Greenfield. The repository contains the specification, working agreement, implem
 - **Models** behind a `ModelProvider` interface; deterministic rules with no model are a valid backend.
 - **Web UI (J6):** React + Vite + TypeScript SPA, bound to `127.0.0.1` only.
 
-Once the scaffold exists:
+Development setup:
 
 ```sh
-uv sync          # create venv, install dependencies
-uv run pytest    # run the test suite
+uv sync --locked # create the Python 3.12 environment from uv.lock
+uv run pytest -q # run the test suite
 uv run contx --help
+uv run contx init
+uv run contx run-once --source synthetic
+uv run contx wake
 ```
+
+The last two commands require the reviewed OptMem executable. A development
+checkout is resolved from `optmem/memo`; an installed copy can be selected with
+an absolute `CONTX_OPTMEM_EXECUTABLE` path. CONTX rejects a file whose SHA-256
+does not match the recorded snapshot instead of running unreviewed code.
 
 ---
 
@@ -175,14 +206,13 @@ contx/
 ├── optmem/                        # local reference clone — ignored and untracked
 ├── docs/architecture/             # architecture diagrams (Excalidraw source)
 ├── pyproject.toml
-├── apps/{api,cli,web}/
 ├── contx/                         # the Python package
-│   ├── collectors/  raw_store/  privacy/  processing/
-│   ├── events/  patterns/  candidates/  memory_worker/
-│   ├── memory_store/  agent_gateway/  audit/
+│   ├── application/  cli/  collectors/
+│   ├── events/  candidates/  memory_worker/  memory_store/
 │   ├── models/  settings/  db/
-├── migrations/  tests/  fixtures/  scripts/
-└── docs/{architecture,adr,evaluation,threat-model}/
+│   └── db/migrations/
+├── tests/{unit,integration}/
+└── docs/{architecture,adr,evaluation}/
 ```
 
 Runtime data lives **outside the repo**. Durable state uses `~/Library/Application Support/CONTX/`, temporary raw data uses `~/Library/Caches/CONTX/`, and logs use `~/Library/Logs/CONTX/`. Private directories and files use restrictive local-user permissions.
@@ -197,7 +227,9 @@ Runtime data lives **outside the repo**. Durable state uses `~/Library/Applicati
 - [`docs/adr/`](./docs/adr/) — accepted architecture and product decisions.
 - [`docs/dependencies.md`](./docs/dependencies.md) — dependency rationale, licensing, transitive cost, and exit strategy.
 - [`docs/third-party/optmem.md`](./docs/third-party/optmem.md) — OptMem provenance and redistribution gate.
-- [`optmem/README.md`](./optmem/README.md) — OptMem contract: `wake`, `note`, `nap`, `recall <regex>`, `zoom <lo>-<hi>`, `forget`.
+- `optmem/README.md` in a local development checkout — upstream OptMem
+  contract; the ignored snapshot is intentionally absent from CONTX release
+  artifacts.
 - [`docs/architecture/CONTX_architecture_OptMem_final.excalidraw`](./docs/architecture/CONTX_architecture_OptMem_final.excalidraw) — original architecture schema (open in [excalidraw.com](https://excalidraw.com)).
 
 ---

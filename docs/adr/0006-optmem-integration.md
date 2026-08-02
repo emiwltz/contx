@@ -43,6 +43,19 @@ distinguishable.
 The final upstream, sidecar, or evolved OptMem strategy remains an experiment
 until the v0 pilot.
 
+For the v0.0.1 process boundary, the adapter pins the reviewed `memo`
+executable by SHA-256, passes only a small allowlisted environment, bounds
+runtime and stdout/stderr, enforces UTF-8 and the 280-byte entry limit, and
+protects its CONTX-owned state with local-user permissions.
+
+OptMem and SQLite cannot share a transaction. The adapter therefore keeps an
+atomic, private idempotency sidecar keyed by a digest of the CONTX candidate
+key. If interruption occurs after OptMem appends but before the sidecar or
+SQLite link commits, exact OptMem recall recovers the backend identity on the
+next pipeline run. Technical identifiers are not injected into semantic memory
+text. This recovery strategy is covered by failure-injection tests and may be
+replaced when an evolved backend offers native idempotency metadata.
+
 ## Rationale
 
 This exercises the actual memory algorithm early while preserving a stable

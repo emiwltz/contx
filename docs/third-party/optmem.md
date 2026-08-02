@@ -6,6 +6,8 @@
 - **Creator:** Victor Taelin
 - **Upstream repository:** <https://github.com/VictorTaelin/OptMem>
 - **Development snapshot:** `1fb164cf39028047781f72ac3bb1e5a691c1dcb0`
+- **Reviewed executable SHA-256:**
+  `3dc120d01be3115ef6267eab4103e7909fc830d6227b549f20991ba999ee9ffb`
 - **Snapshot commit date:** 2026-07-30
 - **Recorded by CONTX:** 2026-08-02
 - **Current local location:** `optmem/`
@@ -21,6 +23,8 @@ coupling the rest of the product to its storage internals.
 ## Verification performed
 
 - The local clone is clean at the recorded upstream commit.
+- The adapter refuses to execute a development file that does not match the
+  reviewed SHA-256 digest.
 - The local source tree contains no `LICENSE` or `COPYING` file.
 - The public upstream repository viewed on 2026-08-02 contains no displayed
   license file.
