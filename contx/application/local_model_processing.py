@@ -245,6 +245,11 @@ class LocalModelProcessingService:
             observations = repository.unqueued_screenshots(
                 at=at,
                 limit=self._queue_limit,
+                provider="ollama",
+                endpoint=self._endpoint,
+                configured_model=self._configured_model,
+                prompt_version=PROMPT_VERSION,
+                output_schema_version=OUTPUT_SCHEMA_VERSION,
             )
             records = tuple(
                 self._pending(observation, created_at=at)
@@ -287,6 +292,11 @@ class LocalModelProcessingService:
             return ModelTransformationRepository(session).due(
                 at=at,
                 limit=self._batch_size,
+                provider="ollama",
+                endpoint=self._endpoint,
+                configured_model=self._configured_model,
+                prompt_version=PROMPT_VERSION,
+                output_schema_version=OUTPUT_SCHEMA_VERSION,
             )
 
     def _attempt(
@@ -487,8 +497,18 @@ class LocalModelProcessingService:
     def _queue_counts(self, *, at: datetime) -> tuple[int, int]:
         with session_scope(self._engine) as session:
             repository = ModelTransformationRepository(session)
-            backlog = repository.backlog_count() + repository.unqueued_screenshot_count(
-                at=at
+            configuration = {
+                "provider": "ollama",
+                "endpoint": self._endpoint,
+                "configured_model": self._configured_model,
+                "prompt_version": PROMPT_VERSION,
+                "output_schema_version": OUTPUT_SCHEMA_VERSION,
+            }
+            backlog = repository.backlog_count(
+                **configuration
+            ) + repository.unqueued_screenshot_count(
+                at=at,
+                **configuration,
             )
             return backlog, repository.abandoned_count()
 

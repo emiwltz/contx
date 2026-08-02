@@ -12,6 +12,8 @@ from contx.db import create_database_engine, session_scope, upgrade_database
 from contx.db.repositories import ModelTransformationRepository, PipelineRepository
 from contx.errors import LocalModelResponseError
 from contx.model_provider import (
+    OUTPUT_SCHEMA_VERSION,
+    PROMPT_VERSION,
     LocalModelExecution,
     LocalModelRequest,
     LocalModelRuntimeStatus,
@@ -387,6 +389,50 @@ def test_changed_model_digest_abandons_failed_replay_without_mixing_provenance(
         engine.dispose()
 
 
+def test_new_prompt_version_queues_separate_replay_without_mixing_old_work(
+    tmp_path: Path,
+) -> None:
+    engine = _database_engine(tmp_path)
+    clock = MutableClock(NOW)
+    store, observation = _stored_screenshot(tmp_path)
+    provider = SyntheticModelProvider(clock=clock)
+    _persist_observation(engine, observation)
+    old_key = _transformation_key(observation, prompt_version="local-screen-v1")
+    old = ModelTransformation(
+        id=UUID("00000000-0000-0000-0000-000000000104"),
+        idempotency_key=old_key,
+        source_observation_ids=(observation.id,),
+        endpoint="http://127.0.0.1:11434",
+        configured_model=MODEL,
+        prompt_version="local-screen-v1",
+        image_sha256=observation.content_hash or "0" * 64,
+        next_attempt_at=NOW,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    with session_scope(engine) as session:
+        ModelTransformationRepository(session).save(old)
+    try:
+        result = _service(
+            engine,
+            store,
+            provider,
+            clock,
+            identifiers=(RUN_IDS[0],),
+        ).run_once()
+
+        assert len(result.queued_transformation_ids) == 1
+        assert result.queued_transformation_ids[0] != old.id
+        assert result.succeeded_transformation_ids == result.queued_transformation_ids
+        assert result.backlog_count == 0
+        with session_scope(engine) as session:
+            repository = ModelTransformationRepository(session)
+            assert repository.count() == 2
+            assert repository.by_id(old.id) == old
+    finally:
+        engine.dispose()
+
+
 def _service(
     engine: Engine,
     store: FilesystemRawStore,
@@ -457,7 +503,11 @@ def _pending_for(observation: Observation, *, at: datetime) -> ModelTransformati
     )
 
 
-def _transformation_key(observation: Observation) -> str:
+def _transformation_key(
+    observation: Observation,
+    *,
+    prompt_version: str = PROMPT_VERSION,
+) -> str:
     from contx.models.common import build_idempotency_key
 
     return build_idempotency_key(
@@ -467,8 +517,8 @@ def _transformation_key(observation: Observation) -> str:
         "ollama",
         "http://127.0.0.1:11434",
         MODEL,
-        "local-screen-v1",
-        "model-interpretation-v1",
+        prompt_version,
+        OUTPUT_SCHEMA_VERSION,
     )
 
 

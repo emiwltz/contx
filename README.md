@@ -189,10 +189,14 @@ access, live screenshot capture, or real-data pilot has been activated.
 The in-progress v0.2 foundation now adds mandatory local-model settings, a
 literal-loopback-only Ollama transport, a strict multimodal interpretation
 schema, model/prompt/schema/source and latency provenance, a content-free
-preflight command, and a synthetic visual benchmark. The selected development
-model is `qwen3-vl:4b-instruct-q4_K_M`; model files live in Ollama's external
-local store and are never committed. Persistence, backlog processing, and the
-event-builder replacement remain to be implemented before J2 is complete.
+preflight command, a restart-safe version-scoped processing queue, persisted
+transformation/run provenance, bounded retry and interruption recovery,
+content-free backlog status, and synthetic visual and full-pipeline validators.
+The selected development model is `qwen3-vl:4b-instruct-q4_K_M`; model files
+live in Ollama's external local store and are never committed. `contx process`
+processes one bounded backlog batch without collecting new data. The
+model-driven event builder, comprehensive sensitive-fixture evaluation, and
+resource gates remain before J2 is complete.
 
 Patterns, corrections, the local web UI, and the real pilot belong to the
 following v0 increments. OptMem is used from an ignored development snapshot;

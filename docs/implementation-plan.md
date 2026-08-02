@@ -18,6 +18,7 @@
 | J0 engineering foundation | Complete | Locked Python 3.12 package, private runtime paths, Alembic/SQLite WAL, strict schemas and repositories |
 | v0.0.1 vertical slice | Complete | Synthetic and live one-shot collectors, candidate decision, OptMem persistence, provenance, direct `contx wake`, replay/failure tests |
 | v0.1 / J1 | In progress | Controlled metadata and screenshot policy, exclusions, bounded raw storage, restart-safe purge, gated AppKit daemon, menu control, permission preflights, and launchd manifest are implemented; real activation, installation, one-day collection, and measured target-Mac baselines remain gated |
+| v0.2 / J2 | In progress | Mandatory loopback Ollama boundary, strict prompt v2/schema validation, persisted version-scoped transformations, restart-safe backlog/retry, `contx process`, and a real synthetic full-pipeline proof are implemented; event building, comprehensive sensitive fixtures, and resource gates remain |
 
 The completed vertical-slice evidence and residual limitations are recorded in
 `docs/evaluation/v0.0.1-validation.md`. Completion here does not imply that the

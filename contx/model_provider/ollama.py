@@ -43,6 +43,7 @@ _GRAMMAR_SCHEMA_KEYS = frozenset(
         "additionalProperties",
     }
 )
+_INTERPRETATION_FIELDS = frozenset(ModelInterpretation.model_fields)
 
 
 class JsonTransport(Protocol):
@@ -276,19 +277,27 @@ class OllamaModelProvider:
         ended_at = self._clock.now()
         try:
             response = _OllamaChatResponse.model_validate(response_payload)
-            if (
-                not response.done
-                or response.message.role != "assistant"
-                or response.model != self._model
-            ):
-                raise ValueError("incomplete local model response")
+        except ValidationError:
+            raise LocalModelResponseError(
+                "Local model returned an invalid response envelope"
+            ) from None
+        if (
+            not response.done
+            or response.message.role != "assistant"
+            or response.model != self._model
+        ):
+            raise LocalModelResponseError(
+                "Local model response identity or completion was invalid"
+            )
+        try:
             interpretation = ModelInterpretation.model_validate_json(
                 response.message.content,
                 strict=True,
             )
-        except (ValidationError, ValueError):
+        except ValidationError as error:
             raise LocalModelResponseError(
-                "Local model returned an invalid structured interpretation"
+                "Local model returned an invalid structured interpretation "
+                f"({_safe_validation_locations(error)})"
             ) from None
         return LocalModelExecution(
             request_id=request.id,
@@ -353,6 +362,25 @@ class OllamaModelProvider:
 
 def _nanoseconds_to_milliseconds(value: int | None) -> int | None:
     return None if value is None else value // 1_000_000
+
+
+def _safe_validation_locations(error: ValidationError) -> str:
+    """Describe schema failures without including generated private values."""
+    labels: list[str] = []
+    for item in error.errors(include_input=False, include_url=False)[:5]:
+        location = (
+            ".".join(
+                (
+                    str(part)
+                    if isinstance(part, int)
+                    else (part if part in _INTERPRETATION_FIELDS else "field")
+                )
+                for part in item["loc"]
+            )
+            or "response"
+        )
+        labels.append(f"{location}:{item['type']}")
+    return ",".join(labels) or "response:invalid"
 
 
 def _ollama_grammar_schema() -> JsonObject:

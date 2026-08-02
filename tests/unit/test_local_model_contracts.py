@@ -50,6 +50,14 @@ def test_interpretation_rejects_duplicate_provenance_labels() -> None:
         _interpretation(projects=("CONTX", "CONTX"))
 
 
+def test_public_interpretation_rejects_claimed_sensitive_categories() -> None:
+    with pytest.raises(ValidationError, match="sensitive or forbidden"):
+        _interpretation(
+            sensitivity=Sensitivity.PUBLIC,
+            sensitive_categories=(SensitiveCategory.CREDENTIAL,),
+        )
+
+
 def test_interpretation_repr_hides_derived_private_text() -> None:
     interpretation = _interpretation(summary="private-derived-summary")
 
@@ -82,7 +90,7 @@ def _interpretation(**overrides: object) -> ModelInterpretation:
         "projects": ("CONTX",),
         "entities": ("Ollama",),
         "sensitivity": Sensitivity.PERSONAL,
-        "sensitive_categories": (SensitiveCategory.OTHER,),
+        "sensitive_categories": (),
         "confidence": 0.8,
         "memory_relevance": 0.7,
     }

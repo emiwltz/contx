@@ -41,6 +41,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--endpoint", default=DEFAULT_ENDPOINT)
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--iterations", type=int, default=1)
+    parser.add_argument(
+        "--metadata-profile",
+        choices=("benchmark", "pipeline"),
+        default="benchmark",
+        help="Select one hard-coded synthetic metadata profile.",
+    )
     arguments = parser.parse_args(argv)
     if not 1 <= arguments.iterations <= 10:
         parser.error("--iterations must be between 1 and 10")
@@ -58,6 +64,19 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     image = build_synthetic_activity_png()
     digest = hashlib.sha256(image).hexdigest()
+    metadata = (
+        {
+            "app_name": "Synthetic Code Editor",
+            "app_bundle_id": "io.contx.synthetic-pipeline",
+            "window_title": "CONTX persisted local-model validation",
+        }
+        if arguments.metadata_profile == "pipeline"
+        else {
+            "app_name": "Synthetic Code Editor",
+            "app_bundle_id": "io.contx.synthetic-benchmark",
+            "window_title": "CONTX local model benchmark",
+        }
+    )
     for iteration in range(1, arguments.iterations + 1):
         captured_at = clock.now()
         execution = provider.interpret(
@@ -70,9 +89,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 started_at=captured_at,
                 ended_at=captured_at,
                 activity_state=ActivityState.ACTIVE,
-                app_name="Synthetic Code Editor",
-                app_bundle_id="io.contx.synthetic-benchmark",
-                window_title="CONTX local model benchmark",
+                app_name=metadata["app_name"],
+                app_bundle_id=metadata["app_bundle_id"],
+                window_title=metadata["window_title"],
                 image_sha256=digest,
                 image_bytes=image,
             )

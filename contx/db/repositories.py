@@ -286,10 +286,27 @@ class ModelTransformationRepository:
         )
         return None if model is None else _model_transformation_from_model(model)
 
-    def due(self, *, at: datetime, limit: int = 10) -> tuple[ModelTransformation, ...]:
+    def due(
+        self,
+        *,
+        at: datetime,
+        limit: int = 10,
+        provider: str | None = None,
+        endpoint: str | None = None,
+        configured_model: str | None = None,
+        prompt_version: str | None = None,
+        output_schema_version: str | None = None,
+    ) -> tuple[ModelTransformation, ...]:
         if limit < 1:
             raise ValueError("model transformation limit must be positive")
-        models = self._session.scalars(
+        configuration = _optional_model_configuration(
+            provider,
+            endpoint,
+            configured_model,
+            prompt_version,
+            output_schema_version,
+        )
+        statement = (
             select(ModelTransformationModel)
             .where(
                 ModelTransformationModel.status.in_(
@@ -307,6 +324,15 @@ class ModelTransformationRepository:
             )
             .limit(limit)
         )
+        if configuration is not None:
+            statement = statement.where(
+                ModelTransformationModel.provider == configuration[0],
+                ModelTransformationModel.endpoint == configuration[1],
+                ModelTransformationModel.configured_model == configuration[2],
+                ModelTransformationModel.prompt_version == configuration[3],
+                ModelTransformationModel.output_schema_version == configuration[4],
+            )
+        models = self._session.scalars(statement)
         return tuple(_model_transformation_from_model(model) for model in models)
 
     def unqueued_screenshots(
@@ -314,17 +340,42 @@ class ModelTransformationRepository:
         *,
         at: datetime,
         limit: int = 1000,
+        provider: str | None = None,
+        endpoint: str | None = None,
+        configured_model: str | None = None,
+        prompt_version: str | None = None,
+        output_schema_version: str | None = None,
     ) -> tuple[Observation, ...]:
         if limit < 1:
             raise ValueError("unqueued screenshot limit must be positive")
-        linked = (
+        configuration = _optional_model_configuration(
+            provider,
+            endpoint,
+            configured_model,
+            prompt_version,
+            output_schema_version,
+        )
+        linked_statement = (
             select(ModelTransformationObservationModel.observation_id)
+            .join(
+                ModelTransformationModel,
+                ModelTransformationModel.id
+                == ModelTransformationObservationModel.transformation_id,
+            )
             .where(
                 ModelTransformationObservationModel.observation_id
                 == ObservationModel.id
             )
-            .exists()
         )
+        if configuration is not None:
+            linked_statement = linked_statement.where(
+                ModelTransformationModel.provider == configuration[0],
+                ModelTransformationModel.endpoint == configuration[1],
+                ModelTransformationModel.configured_model == configuration[2],
+                ModelTransformationModel.prompt_version == configuration[3],
+                ModelTransformationModel.output_schema_version == configuration[4],
+            )
+        linked = linked_statement.exists()
         models = self._session.scalars(
             select(ObservationModel)
             .where(
@@ -341,15 +392,44 @@ class ModelTransformationRepository:
         )
         return tuple(_observation_from_model(model) for model in models)
 
-    def unqueued_screenshot_count(self, *, at: datetime) -> int:
-        linked = (
+    def unqueued_screenshot_count(
+        self,
+        *,
+        at: datetime,
+        provider: str | None = None,
+        endpoint: str | None = None,
+        configured_model: str | None = None,
+        prompt_version: str | None = None,
+        output_schema_version: str | None = None,
+    ) -> int:
+        configuration = _optional_model_configuration(
+            provider,
+            endpoint,
+            configured_model,
+            prompt_version,
+            output_schema_version,
+        )
+        linked_statement = (
             select(ModelTransformationObservationModel.observation_id)
+            .join(
+                ModelTransformationModel,
+                ModelTransformationModel.id
+                == ModelTransformationObservationModel.transformation_id,
+            )
             .where(
                 ModelTransformationObservationModel.observation_id
                 == ObservationModel.id
             )
-            .exists()
         )
+        if configuration is not None:
+            linked_statement = linked_statement.where(
+                ModelTransformationModel.provider == configuration[0],
+                ModelTransformationModel.endpoint == configuration[1],
+                ModelTransformationModel.configured_model == configuration[2],
+                ModelTransformationModel.prompt_version == configuration[3],
+                ModelTransformationModel.output_schema_version == configuration[4],
+            )
+        linked = linked_statement.exists()
         return int(
             self._session.scalar(
                 select(func.count())
@@ -414,23 +494,44 @@ class ModelTransformationRepository:
         )
         return tuple(_model_transformation_from_model(model) for model in models)
 
-    def backlog_count(self) -> int:
-        return int(
-            self._session.scalar(
-                select(func.count())
-                .select_from(ModelTransformationModel)
-                .where(
-                    ModelTransformationModel.status.in_(
-                        (
-                            ModelTransformationStatus.PENDING.value,
-                            ModelTransformationStatus.RUNNING.value,
-                            ModelTransformationStatus.FAILED.value,
-                        )
+    def backlog_count(
+        self,
+        *,
+        provider: str | None = None,
+        endpoint: str | None = None,
+        configured_model: str | None = None,
+        prompt_version: str | None = None,
+        output_schema_version: str | None = None,
+    ) -> int:
+        configuration = _optional_model_configuration(
+            provider,
+            endpoint,
+            configured_model,
+            prompt_version,
+            output_schema_version,
+        )
+        statement = (
+            select(func.count())
+            .select_from(ModelTransformationModel)
+            .where(
+                ModelTransformationModel.status.in_(
+                    (
+                        ModelTransformationStatus.PENDING.value,
+                        ModelTransformationStatus.RUNNING.value,
+                        ModelTransformationStatus.FAILED.value,
                     )
                 )
             )
-            or 0
         )
+        if configuration is not None:
+            statement = statement.where(
+                ModelTransformationModel.provider == configuration[0],
+                ModelTransformationModel.endpoint == configuration[1],
+                ModelTransformationModel.configured_model == configuration[2],
+                ModelTransformationModel.prompt_version == configuration[3],
+                ModelTransformationModel.output_schema_version == configuration[4],
+            )
+        return int(self._session.scalar(statement) or 0)
 
     def abandoned_count(self) -> int:
         return int(
@@ -1062,6 +1163,33 @@ def _require_same_transformation_identity(
         replayed.image_sha256,
     ):
         raise DatabaseError("Model transformation idempotency key conflicts")
+
+
+def _optional_model_configuration(
+    provider: str | None,
+    endpoint: str | None,
+    configured_model: str | None,
+    prompt_version: str | None,
+    output_schema_version: str | None,
+) -> tuple[str, str, str, str, str] | None:
+    values = (
+        provider,
+        endpoint,
+        configured_model,
+        prompt_version,
+        output_schema_version,
+    )
+    if all(value is None for value in values):
+        return None
+    if any(value is None for value in values):
+        raise ValueError("model configuration filters must be provided together")
+    return (
+        str(provider),
+        str(endpoint),
+        str(configured_model),
+        str(prompt_version),
+        str(output_schema_version),
+    )
 
 
 def _validate_transformation_transition(

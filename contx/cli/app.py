@@ -11,7 +11,11 @@ import typer
 from sqlalchemy import Engine
 
 from contx import __version__
-from contx.application import PipelineService, RawPurgeService
+from contx.application import (
+    LocalModelProcessingService,
+    PipelineService,
+    RawPurgeService,
+)
 from contx.candidates.rules import VerticalSliceCandidateProducer
 from contx.collection import (
     CollectionControlService,
@@ -29,8 +33,10 @@ from contx.db import (
     create_database_engine,
     current_database_revision,
     head_database_revision,
+    session_scope,
     upgrade_database,
 )
+from contx.db.repositories import ModelTransformationRepository
 from contx.errors import ContxError, RawStoreError
 from contx.events.rules import VerticalSliceEventBuilder
 from contx.memory_store import (
@@ -39,7 +45,11 @@ from contx.memory_store import (
     resolve_optmem_executable,
 )
 from contx.memory_worker import ThresholdMemoryWorker
-from contx.model_provider import OllamaModelProvider
+from contx.model_provider import (
+    OUTPUT_SCHEMA_VERSION,
+    PROMPT_VERSION,
+    OllamaModelProvider,
+)
 from contx.models import (
     CollectionControl,
     ExclusionRuleType,
@@ -116,6 +126,8 @@ def status() -> None:
     engine: Engine | None = None
     control: CollectionControl | None = None
     raw_usage: int | None = None
+    model_backlog: int | None = None
+    abandoned_transformations: int | None = None
     try:
         paths = resolve_runtime_paths()
         settings = load_settings(paths)
@@ -126,6 +138,23 @@ def status() -> None:
             controls = CollectionControlService(engine=engine, clock=SystemClock())
             controls.initialize()
             control = controls.control()
+            with session_scope(engine) as session:
+                model_repository = ModelTransformationRepository(session)
+                model_backlog = model_repository.backlog_count(
+                    provider="ollama",
+                    endpoint=settings.model.endpoint,
+                    configured_model=settings.model.model_name,
+                    prompt_version=PROMPT_VERSION,
+                    output_schema_version=OUTPUT_SCHEMA_VERSION,
+                ) + model_repository.unqueued_screenshot_count(
+                    at=SystemClock().now(),
+                    provider="ollama",
+                    endpoint=settings.model.endpoint,
+                    configured_model=settings.model.model_name,
+                    prompt_version=PROMPT_VERSION,
+                    output_schema_version=OUTPUT_SCHEMA_VERSION,
+                )
+                abandoned_transformations = model_repository.abandoned_count()
         if paths.raw.is_dir():
             raw_usage = _build_raw_store(
                 paths.raw, budget_mb=settings.collection.raw_disk_budget_mb
@@ -180,6 +209,10 @@ def status() -> None:
     typer.echo(f"raw retention: {settings.collection.raw_retention_hours}h")
     if raw_usage is not None:
         typer.echo(f"raw usage: {raw_usage} bytes")
+    if model_backlog is not None:
+        typer.echo(f"model backlog: {model_backlog}")
+    if abandoned_transformations is not None:
+        typer.echo(f"model abandoned: {abandoned_transformations}")
     collection_state = (
         "unavailable"
         if control is None
@@ -229,6 +262,52 @@ def local_model_status() -> None:
         typer.echo(f"model digest: {status.model_digest}")
     if status.reason_code is not None:
         typer.echo(f"reason: {status.reason_code}")
+
+
+@app.command()
+def process() -> None:
+    """Process a bounded screenshot backlog through the configured local model."""
+    engine: Engine | None = None
+    try:
+        paths = resolve_runtime_paths()
+        initialize_runtime_paths(paths)
+        settings = load_settings(paths)
+        upgrade_database(paths.database_file)
+        engine = create_database_engine(paths.database_file)
+        clock = SystemClock()
+        result = LocalModelProcessingService(
+            engine=engine,
+            raw_store=_build_raw_store(
+                paths.raw,
+                budget_mb=settings.collection.raw_disk_budget_mb,
+            ),
+            provider=_build_local_model_provider(settings.model),
+            endpoint=settings.model.endpoint,
+            configured_model=settings.model.model_name,
+            max_image_bytes=settings.model.max_image_mb * 1024 * 1024,
+            clock=clock,
+            identifiers=UuidIdentifierSource(),
+        ).run_once()
+    except ContxError as error:
+        _abort(error)
+    finally:
+        if engine is not None:
+            engine.dispose()
+
+    runtime_state = "available" if result.runtime.runtime_available else "unavailable"
+    model_state = "installed" if result.runtime.model_available else "missing"
+    typer.echo(f"run: {result.run.status.value}")
+    typer.echo(f"runtime: {runtime_state}")
+    typer.echo(f"model: {model_state} ({result.runtime.model})")
+    typer.echo(f"queued transformations: {len(result.queued_transformation_ids)}")
+    typer.echo(f"succeeded transformations: {len(result.succeeded_transformation_ids)}")
+    typer.echo(f"failed transformations: {len(result.failed_transformation_ids)}")
+    typer.echo(f"abandoned transformations: {len(result.abandoned_transformation_ids)}")
+    typer.echo(f"recovered transformations: {len(result.recovered_transformation_ids)}")
+    typer.echo(f"model backlog: {result.backlog_count}")
+    typer.echo(f"model abandoned total: {result.total_abandoned_count}")
+    if not result.succeeded:
+        raise typer.Exit(code=2)
 
 
 @app.command("run-once")

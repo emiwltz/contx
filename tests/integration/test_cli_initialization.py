@@ -1,15 +1,26 @@
 """CLI initialization integration tests."""
 
 import stat
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from typer.testing import CliRunner
 
 import contx.cli.app as cli_module
 from contx.cli.app import app
+from contx.db import create_database_engine, session_scope
+from contx.db.repositories import PipelineRepository
 from contx.memory_store import RecordingMemoryStore
-from contx.model_provider import LocalModelRuntimeStatus
+from contx.model_provider import (
+    LocalModelExecution,
+    LocalModelRequest,
+    LocalModelRuntimeStatus,
+    ModelInterpretation,
+)
+from contx.models import Observation, Sensitivity, SourceType
+from contx.raw_store import FilesystemRawStore
 from contx.settings import RUNTIME_ROOT_ENV, resolve_runtime_paths
 
 runner = CliRunner()
@@ -155,3 +166,134 @@ def test_model_status_preflights_without_sending_user_content(
     assert "runtime: available" in result.stdout
     assert "model: installed (qwen3-vl:4b-instruct-q4_K_M)" in result.stdout
     assert f"model digest: {'a' * 64}" in result.stdout
+
+
+def test_process_command_runs_synthetic_screenshot_backlog_without_collection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    environment = {RUNTIME_ROOT_ENV: str(tmp_path)}
+    assert runner.invoke(app, ["init"], env=environment).exit_code == 0
+    paths = resolve_runtime_paths(environment)
+    now = datetime.now(UTC)
+    observation_id = UUID("00000000-0000-0000-0000-000000000501")
+    png = b"\x89PNG\r\n\x1a\nsynthetic-cli-model-fixture"
+    store = FilesystemRawStore(paths.raw, disk_budget_bytes=1024 * 1024)
+    artifact = store.write(
+        png,
+        artifact_id=observation_id,
+        suffix=".png",
+        captured_at=now,
+        retention=timedelta(hours=48),
+    )
+    observation = Observation(
+        id=observation_id,
+        idempotency_key="d" * 64,
+        source_type=SourceType.SCREENSHOT,
+        captured_at=now,
+        started_at=now,
+        ended_at=now,
+        app_name="Synthetic Editor",
+        app_bundle_id="com.example.editor",
+        window_title="Synthetic CLI model test",
+        artifact_path=str(artifact.path),
+        content_hash=artifact.content_hash,
+        expires_at=artifact.expires_at,
+        created_at=now,
+    )
+    engine = create_database_engine(paths.database_file)
+    try:
+        with session_scope(engine) as session:
+            PipelineRepository(session).save_observation(observation)
+    finally:
+        engine.dispose()
+
+    class AvailableProvider:
+        def status(self) -> LocalModelRuntimeStatus:
+            return LocalModelRuntimeStatus(
+                endpoint="http://127.0.0.1:11434",
+                runtime_available=True,
+                runtime_version="0.32.5",
+                model="qwen3-vl:4b-instruct-q4_K_M",
+                model_available=True,
+                model_digest="a" * 64,
+            )
+
+        def interpret(self, request: LocalModelRequest) -> LocalModelExecution:
+            called_at = datetime.now(UTC)
+            return LocalModelExecution(
+                request_id=request.id,
+                source_observation_ids=request.source_observation_ids,
+                endpoint="http://127.0.0.1:11434",
+                runtime_version="0.32.5",
+                model="qwen3-vl:4b-instruct-q4_K_M",
+                model_digest="a" * 64,
+                image_sha256=request.image_sha256,
+                interpretation=ModelInterpretation(
+                    summary="Testing the CONTX process command.",
+                    activity_type="testing",
+                    observed_facts=("A synthetic editor is visible.",),
+                    inferred_context=("The local pipeline is under test.",),
+                    projects=("CONTX",),
+                    entities=("Ollama",),
+                    sensitivity=Sensitivity.PERSONAL,
+                    sensitive_categories=(),
+                    confidence=0.9,
+                    memory_relevance=0.7,
+                ),
+                started_at=called_at,
+                ended_at=called_at,
+                wall_duration_ms=0,
+            )
+
+    monkeypatch.setattr(
+        cli_module,
+        "_build_local_model_provider",
+        lambda _settings: AvailableProvider(),
+    )
+
+    processed = runner.invoke(app, ["process"], env=environment)
+    status = runner.invoke(app, ["status"], env=environment)
+
+    assert processed.exit_code == 0
+    assert "run: succeeded" in processed.stdout
+    assert "queued transformations: 1" in processed.stdout
+    assert "succeeded transformations: 1" in processed.stdout
+    assert "model backlog: 0" in processed.stdout
+    assert "model backlog: 0" in status.stdout
+    assert "model abandoned: 0" in status.stdout
+
+
+def test_process_command_reports_required_model_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class UnavailableProvider:
+        def status(self) -> LocalModelRuntimeStatus:
+            return LocalModelRuntimeStatus(
+                endpoint="http://127.0.0.1:11434",
+                runtime_available=False,
+                model="qwen3-vl:4b-instruct-q4_K_M",
+                model_available=False,
+                reason_code="runtime_unavailable",
+            )
+
+        def interpret(self, _request: LocalModelRequest) -> LocalModelExecution:
+            raise AssertionError("unavailable model must not receive content")
+
+    monkeypatch.setattr(
+        cli_module,
+        "_build_local_model_provider",
+        lambda _settings: UnavailableProvider(),
+    )
+
+    result = runner.invoke(
+        app,
+        ["process"],
+        env={RUNTIME_ROOT_ENV: str(tmp_path)},
+    )
+
+    assert result.exit_code == 2
+    assert "run: failed" in result.stdout
+    assert "runtime: unavailable" in result.stdout
+    assert "model backlog: 0" in result.stdout

@@ -103,11 +103,25 @@ def test_invalid_model_content_is_rejected_without_echoing_it() -> None:
     assert private_content not in str(caught.value)
 
 
+def test_invalid_model_field_name_is_not_echoed_in_safe_diagnostic() -> None:
+    private_field = "private-generated-field-name"
+    payload = json.loads(RecordingTransport().chat_content)
+    payload[private_field] = "synthetic-private-value"
+    transport = RecordingTransport(chat_content=json.dumps(payload))
+    provider = _provider(transport)
+
+    with pytest.raises(LocalModelResponseError) as caught:
+        provider.interpret(_request())
+
+    assert private_field not in str(caught.value)
+    assert "field:extra_forbidden" in str(caught.value)
+
+
 def test_response_from_another_model_identity_is_rejected() -> None:
     transport = RecordingTransport(response_model="other-local-model")
     provider = _provider(transport)
 
-    with pytest.raises(LocalModelResponseError, match="invalid structured"):
+    with pytest.raises(LocalModelResponseError, match="identity or completion"):
         provider.interpret(_request())
 
 
