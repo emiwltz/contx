@@ -47,6 +47,15 @@ guaranteed.
   rebuilds without changing source evidence or sensitivity.
 - `contx timeline build`, `timeline show`, and `timeline correct` commands for
   explicit replay, inspection, and correction.
+- Immutable multi-event pattern snapshots for recurrence, project resumption,
+  and temporal change, plus fused memory candidates and append-only policy
+  decisions with complete replay provenance.
+- Provenance-preserving promotion of accepted candidates to OptMem, bounded
+  local-model compression, direct historical `recall` and `zoom`, and stable
+  agent memory instructions.
+- Restart-safe append-only memory corrections composed by the mandatory local
+  model, with explicit `Correction:` semantics, linear supersession, inherited
+  provenance, idempotent OptMem recovery, and content-free model audit.
 
 ### Changed
 
@@ -60,3 +69,6 @@ guaranteed.
 - Selected `gemma4:e4b-it-qat` as the v0 default local model after a 16/16
   synthetic matrix result and target-Mac resource comparison; Ollama thinking
   is disabled and model output is bounded to 512 tokens.
+- Selected upstream OptMem plus SQLite sidecar metadata for v0 corrections;
+  `wake` is chronological, `recall` and `zoom` are historical, and an
+  active-only projection remains the evidence-triggered fallback.

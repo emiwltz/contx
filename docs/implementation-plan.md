@@ -21,6 +21,7 @@
 | v0.2 / J2 | Complete | Gemma 4 E4B QAT with prompt v9 passed the fixed 16/16 privacy and quality matrix, bounded cold/warm resource measurements were recorded, the persistent local model-to-event proof passed, and sensitive or forbidden output is blocked from durable memory |
 | v0.3 / J3 | Complete | Frozen-day sessionization produces a deterministic readable timeline; same-version replay is idempotent, changed versions coexist, and append-only corrections survive compatible evidence-lineage rebuilds |
 | v0.4 / J4 | Complete | Multi-day pattern detection, fused candidates, explicit scoring, rejection/deferral reasons, validity, and side-by-side rule and threshold replays passed the synthetic exit gate |
+| v0.5 / J5 | In progress | Promotion, bounded local compression, direct `wake`/`recall`/`zoom`, proposal isolation, and restart-safe append-only corrections are implemented; ADR 0013 selects upstream OptMem plus SQLite sidecar metadata, while real Codex and second-agent contract validation remain |
 
 The completed vertical-slice evidence and residual limitations are recorded in
 `docs/evaluation/v0.0.1-validation.md`. Completion here does not imply that the
@@ -782,6 +783,21 @@ Compare through the same replay fixtures:
 The experiment measures correctness, correction behavior, context quality,
 rebuildability, latency, operational complexity, and exit cost. It does not
 select a fork merely because the code is available.
+
+The correction experiment is complete for v0. ADR 0013 selects upstream
+OptMem's append-only log with explicit `Correction:` entries and SQLite
+sidecar status, provenance, and model audit. `wake` remains chronological;
+`recall` and `zoom` are historical. Correction-aware local maintenance removes
+contradicted fragments when rebuilding summaries. The direct raw and rebuilt
+behaviors are recorded in
+`docs/evaluation/v0.5-memory-correction-validation.md`.
+
+An active-only OptMem projection is the first fallback if agent tests show that
+the protocol is ambiguous, summary rebuilding retains contradictions,
+correction chains materially crowd the wake budget, or a required product
+surface cannot safely use historical views. A native OptMem evolution remains
+deferred until a projection has demonstrated correctness or operational
+limits.
 
 ### 13.3 Exit gate
 

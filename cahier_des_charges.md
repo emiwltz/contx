@@ -1078,7 +1078,12 @@ Trois options doivent être comparées.
 * métadonnées structurées ;
 * recherche enrichie éventuelle.
 
-**[OUVERT]** Le choix final doit être fait après un prototype et une évaluation, pas avant.
+**[DÉCISION v0]** CONTX utilise l’option B dans sa forme minimale : OptMem
+amont reste append-only et produit directement le contexte sémantique ; SQLite
+conserve les statuts, la provenance, l’audit du modèle local et la relation
+linéaire `supersedes`. Une projection OptMem filtrée ou une évolution native du
+moteur ne sera introduite que si les évaluations d’agents ou de compression
+montrent que cette sémantique est insuffisante. Voir ADR 0013.
 
 ## 18.6 Corrections
 
@@ -1103,6 +1108,32 @@ reconstruction des résumés
 ```
 
 La mémoire fournie à l’agent ne doit pas présenter un ancien souvenir et sa correction comme deux vérités équivalentes.
+
+**[DÉCISION v0]** Une correction autorisée explicitement par l’utilisateur est
+reformulée en fait courant autonome par le modèle local obligatoire, puis
+ajoutée sous la forme `Correction: <fait courant>`. CONTX ajoute lui-même ce
+marqueur de protocole. La correction hérite de toute la provenance du souvenir
+cible ; SQLite active le successeur et marque la cible `superseded` uniquement
+après l’ajout OptMem réussi. Un échec intermédiaire doit rester rejouable sans
+dupliquer le souvenir ni rappeler le modèle.
+
+Les vues ont les sémantiques suivantes :
+
+* `wake` est chronologique ; une ligne `Correction:` plus récente fait autorité
+  sur l’affirmation plus ancienne qu’elle contredit, même si les deux lignes
+  brutes récentes sont visibles ;
+* la maintenance compresse progressivement l’original et sa correction en ne
+  conservant que le fait courant ;
+* `recall` et `zoom` sont des vues historiques et peuvent exposer l’original et
+  sa correction ;
+* aucun agent ne peut exécuter une correction sans instruction explicite de
+  l’utilisateur.
+
+La décision doit être rouverte si un agent réel traite encore une affirmation
+superseded comme courante, si un résumé reconstruit conserve une contradiction,
+si les chaînes de corrections consomment une part matériellement nuisible du
+budget de réveil, ou si une surface produit requiert une vue sémantique active
+que les vues historiques ne peuvent pas fournir correctement.
 
 ---
 

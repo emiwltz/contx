@@ -140,11 +140,18 @@ contx timeline build --from <iso> --until <iso> # replay a frozen activity windo
 contx timeline show <processing-run-id> # inspect one selected timeline snapshot
 contx timeline correct <event-id> --summary <text> --reason <text>
 contx wake                              # direct final-memory context
+contx recall '<regex>'                  # historical raw-memory search
+contx zoom <node>                       # historical tree navigation
+contx memory maintain                   # bounded local-model compression
+contx propose '<memory>' --reference-type <type> --reference <uuid>
+contx correct <memory-uuid> '<replacement>'
 ```
 
-`recall`, `zoom`, agent proposals, memory corrections, and installed continuous
-collection are planned milestone capabilities and are not advertised as
-implemented commands yet.
+Installed continuous collection is not activated. `wake` is chronological: a
+newer `Correction:` line is authoritative over the older claim it contradicts.
+`recall` and `zoom` deliberately retain historical behavior. Agent proposals
+remain outside final memory, and `correct` requires an explicit user
+instruction.
 
 ---
 
@@ -162,10 +169,10 @@ implemented commands yet.
 | **v0.9** | **J7 real pilot** | 7–14 day pilot, ground truth, with/without CONTX comparison, error analysis, OptMem decision. |
 | **v1.0** | **J8 hardening** | Fixes, optimization, install/upgrade/uninstall, recovery, distribution, licensing, and documentation. |
 
-**Active goal:** build v0.4 multi-event patterns, change detection, memory
-candidates, and transparent worker decisions while keeping the real v0.1
-collector activation separately gated, then continue through the complete v0
-pilot (§37 and the [implementation plan](./docs/implementation-plan.md)).
+**Active goal:** complete v0.5 memory and agent integration while keeping the
+real v0.1 collector activation separately gated, then continue through the
+local UI and the explicitly approved v0 pilot (§37 and the
+[implementation plan](./docs/implementation-plan.md)).
 
 ---
 
@@ -220,16 +227,29 @@ survives a compatible v2 rebuild without mutating v1 evidence. `contx timeline`
 can build, show, and correct explicit snapshots without collecting or invoking
 the model.
 
-Patterns, memory candidates, the local web UI, and the real pilot belong to the
-following v0 increments. OptMem is used from an ignored
-development snapshot; it is not bundled while redistributable rights remain
-undocumented. See
+The completed v0.4 foundation adds immutable pattern snapshots, project
+recurrence and resumption, temporal changes, fused memory candidates,
+transparent acceptance decisions, and side-by-side rule and threshold replay.
+The in-progress v0.5 foundation promotes accepted candidates with transitive
+provenance, performs bounded local-model OptMem compression, exposes direct
+`wake`/`recall`/`zoom`, isolates agent proposals, and supports restart-safe
+append-only corrections. ADR 0013 selects explicit `Correction:` entries with
+SQLite sidecar status and provenance for v0; an active-only projection remains
+the evidence-triggered fallback.
+
+The local web UI and real pilot belong to the following increments. OptMem is
+used from an ignored development snapshot; it is not bundled while
+redistributable rights remain undocumented. See
 [`docs/evaluation/v0.1-preflight.md`](docs/evaluation/v0.1-preflight.md) for the
 current J1 evidence and remaining gates, and
 [`docs/evaluation/v0.2-local-model-preflight.md`](docs/evaluation/v0.2-local-model-preflight.md)
 for the complete J2 model evidence and residual risks, and
 [`docs/evaluation/v0.3-activity-timeline-validation.md`](docs/evaluation/v0.3-activity-timeline-validation.md)
-for the J3 replay and correction proof.
+for the J3 replay and correction proof,
+[`docs/evaluation/v0.4-pattern-candidate-validation.md`](docs/evaluation/v0.4-pattern-candidate-validation.md)
+for the J4 decision replay, and
+[`docs/evaluation/v0.5-memory-correction-validation.md`](docs/evaluation/v0.5-memory-correction-validation.md)
+for the current J5 OptMem correction evidence.
 
 ---
 
