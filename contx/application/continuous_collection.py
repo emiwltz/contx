@@ -97,6 +97,10 @@ class ContinuousCollectionSession:
         self._cycles = 0
         self._observation_count = 0
 
+    @property
+    def is_running(self) -> bool:
+        return self._running_run is not None
+
     def start(self) -> None:
         if self._running_run is not None:
             raise RuntimeError("continuous collection session is already started")
@@ -147,6 +151,11 @@ class ContinuousCollectionSession:
             cycles=self._cycles,
             observations=self._observation_count,
         )
+
+    def abort(self, error: Exception) -> Never:
+        """Flush available records and audit an external lifecycle failure."""
+        self._require_running()
+        self._raise_failure(error)
 
     def _require_running(self) -> ProcessingRun:
         if self._running_run is None:

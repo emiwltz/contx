@@ -142,6 +142,37 @@ def test_session_exposes_non_blocking_ticks_for_a_native_event_loop(
         engine.dispose()
 
 
+def test_external_lifecycle_failure_is_flushed_and_audited(tmp_path: Path) -> None:
+    engine = _engine(tmp_path)
+    clock = MutableClock(START)
+    closing = _observation(2, START + timedelta(seconds=10))
+    session = ContinuousCollectionSession(
+        engine=engine,
+        collector=SequenceCollector(((),), closing=(closing,)),
+        purge=FakePurge(),
+        clock=clock,
+        identifiers=SequenceIdentifiers((RUN_ID,)),
+        purge_interval=timedelta(minutes=1),
+    )
+    try:
+        session.start()
+        session.tick()
+        clock.value = START + timedelta(seconds=10)
+
+        with pytest.raises(RawStoreError, match="synthetic lifecycle failure"):
+            session.abort(RawStoreError("synthetic lifecycle failure"))
+
+        assert not session.is_running
+        with session_scope(engine) as database_session:
+            run = database_session.scalars(select(ProcessingRunModel)).one()
+            observation = database_session.scalars(select(ObservationModel)).one()
+        assert run.status == ProcessingRunStatus.FAILED.value
+        assert run.error_code == "raw_purge_failure"
+        assert observation.id == str(closing.id)
+    finally:
+        engine.dispose()
+
+
 def test_runner_purges_again_on_schedule(tmp_path: Path) -> None:
     engine = _engine(tmp_path)
     clock = MutableClock(START)
