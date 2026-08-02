@@ -34,6 +34,11 @@ def test_defaults_are_safe(tmp_path: Path) -> None:
     assert settings.collection.screenshot_min_interval_seconds == 15
     assert settings.collection.screenshot_max_interval_seconds == 120
     assert settings.collection.raw_disk_budget_mb == 5120
+    assert settings.model.provider == "ollama"
+    assert settings.model.endpoint == "http://127.0.0.1:11434"
+    assert settings.model.model_name == "qwen3-vl:4b-instruct-q4_K_M"
+    assert settings.model.timeout_seconds == 120.0
+    assert settings.model.context_tokens == 8192
 
 
 def test_environment_overrides_config(tmp_path: Path) -> None:
@@ -116,4 +121,43 @@ screenshot_max_interval_seconds = 30
     )
 
     with pytest.raises(ConfigurationError, match="maximum interval"):
+        load_settings(paths, {})
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    (
+        "http://localhost:11434",
+        "http://192.168.1.10:11434",
+        "https://127.0.0.1:11434",
+    ),
+)
+def test_model_endpoint_cannot_leave_literal_loopback(
+    tmp_path: Path,
+    endpoint: str,
+) -> None:
+    paths = _initialized_paths(tmp_path)
+    paths.config_file.write_text(
+        f'''config_version = 1
+[model]
+endpoint = "{endpoint}"
+''',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigurationError, match="literal loopback"):
+        load_settings(paths, {})
+
+
+def test_local_model_resource_limits_are_validated(tmp_path: Path) -> None:
+    paths = _initialized_paths(tmp_path)
+    paths.config_file.write_text(
+        """config_version = 1
+[model]
+context_tokens = 1024
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigurationError, match="greater than or equal to 2048"):
         load_settings(paths, {})

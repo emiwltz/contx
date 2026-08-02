@@ -30,6 +30,9 @@ guaranteed.
   checksum-pinned, bounded OptMem subprocess adapter.
 - Crash-recoverable idempotent memory appends, SQLite provenance links, and
   direct `contx wake` context output.
+- A mandatory local-model boundary with loopback-only Ollama transport,
+  schema-validated multimodal results, content-free execution provenance,
+  safe runtime preflight, and a synthetic benchmark.
 
 ### Changed
 

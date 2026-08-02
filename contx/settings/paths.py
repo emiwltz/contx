@@ -31,6 +31,16 @@ screenshots_enabled = false
 screenshot_min_interval_seconds = 15
 screenshot_max_interval_seconds = 120
 raw_disk_budget_mb = 5120
+
+[model]
+provider = "ollama"
+endpoint = "http://127.0.0.1:11434"
+model_name = "qwen3-vl:4b-instruct-q4_K_M"
+timeout_seconds = 120.0
+keep_alive = "5m"
+context_tokens = 8192
+max_image_mb = 20
+max_response_kb = 1024
 """
 
 

@@ -39,6 +39,7 @@ from contx.memory_store import (
     resolve_optmem_executable,
 )
 from contx.memory_worker import ThresholdMemoryWorker
+from contx.model_provider import OllamaModelProvider
 from contx.models import (
     CollectionControl,
     ExclusionRuleType,
@@ -47,6 +48,7 @@ from contx.models import (
 )
 from contx.raw_store import FilesystemRawStore
 from contx.settings import (
+    ModelSettings,
     initialize_runtime_paths,
     load_settings,
     resolve_runtime_paths,
@@ -58,7 +60,9 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 exclusions_app = typer.Typer(help="Manage pre-capture exclusion rules.")
+model_app = typer.Typer(help="Inspect the mandatory local multimodal model.")
 app.add_typer(exclusions_app, name="exclusions")
+app.add_typer(model_app, name="model")
 
 
 class RunSource(StrEnum):
@@ -202,6 +206,29 @@ def capabilities() -> None:
         typer.echo(f"{capability.name}: {capability.status.value}{detail}")
         if capability.settings_path is not None:
             typer.echo(f"  settings: {capability.settings_path}")
+
+
+@model_app.command("status")
+def local_model_status() -> None:
+    """Preflight the configured loopback runtime without sending user content."""
+    try:
+        paths = resolve_runtime_paths()
+        settings = load_settings(paths)
+        status = _build_local_model_provider(settings.model).status()
+    except ContxError as error:
+        _abort(error)
+    typer.echo(f"provider: {status.provider}")
+    typer.echo(f"endpoint: {status.endpoint}")
+    runtime_state = "available" if status.runtime_available else "unavailable"
+    typer.echo(f"runtime: {runtime_state}")
+    if status.runtime_version is not None:
+        typer.echo(f"runtime version: {status.runtime_version}")
+    model_state = "installed" if status.model_available else "missing"
+    typer.echo(f"model: {model_state} ({status.model})")
+    if status.model_digest is not None:
+        typer.echo(f"model digest: {status.model_digest}")
+    if status.reason_code is not None:
+        typer.echo(f"reason: {status.reason_code}")
 
 
 @app.command("run-once")
@@ -458,6 +485,18 @@ def _build_memory_store(memory_directory: Path) -> MemoryStore:
     return OptMemAdapter(
         executable=resolve_optmem_executable(),
         memory_directory=memory_directory,
+    )
+
+
+def _build_local_model_provider(settings: ModelSettings) -> OllamaModelProvider:
+    return OllamaModelProvider(
+        model=settings.model_name,
+        endpoint=settings.endpoint,
+        timeout_seconds=settings.timeout_seconds,
+        keep_alive=settings.keep_alive,
+        context_tokens=settings.context_tokens,
+        max_image_bytes=settings.max_image_mb * 1024 * 1024,
+        max_response_bytes=settings.max_response_kb * 1024,
     )
 
 

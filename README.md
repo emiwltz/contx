@@ -186,12 +186,21 @@ single-process daemon, graceful shutdown, and a deterministic LaunchAgent
 manifest. The daemon remains disabled by default; no LaunchAgent, live title
 access, live screenshot capture, or real-data pilot has been activated.
 
-Local-model processing, patterns, corrections, the local web UI, and the real
-pilot belong to the following v0 increments. OptMem is used from an ignored
-development snapshot; it is not bundled while redistributable rights remain
-undocumented. See
+The in-progress v0.2 foundation now adds mandatory local-model settings, a
+literal-loopback-only Ollama transport, a strict multimodal interpretation
+schema, model/prompt/schema/source and latency provenance, a content-free
+preflight command, and a synthetic visual benchmark. The selected development
+model is `qwen3-vl:4b-instruct-q4_K_M`; model files live in Ollama's external
+local store and are never committed. Persistence, backlog processing, and the
+event-builder replacement remain to be implemented before J2 is complete.
+
+Patterns, corrections, the local web UI, and the real pilot belong to the
+following v0 increments. OptMem is used from an ignored development snapshot;
+it is not bundled while redistributable rights remain undocumented. See
 [`docs/evaluation/v0.1-preflight.md`](docs/evaluation/v0.1-preflight.md) for the
-current J1 evidence and remaining gates.
+current J1 evidence and remaining gates, and
+[`docs/evaluation/v0.2-local-model-preflight.md`](docs/evaluation/v0.2-local-model-preflight.md)
+for the first real local-model evidence.
 
 ---
 
@@ -210,6 +219,7 @@ uv sync --locked # create the Python 3.12 environment from uv.lock
 uv run pytest -q # run the test suite
 uv run contx --help
 uv run contx init
+uv run contx model status
 uv run contx run-once --source synthetic
 uv run contx wake
 ```

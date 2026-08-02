@@ -1,6 +1,11 @@
 """Typed settings and runtime path resolution."""
 
-from contx.settings.models import AppSettings, CollectionSettings, load_settings
+from contx.settings.models import (
+    AppSettings,
+    CollectionSettings,
+    ModelSettings,
+    load_settings,
+)
 from contx.settings.paths import (
     RUNTIME_ROOT_ENV,
     RuntimePaths,
@@ -12,6 +17,7 @@ __all__ = [
     "RUNTIME_ROOT_ENV",
     "AppSettings",
     "CollectionSettings",
+    "ModelSettings",
     "RuntimePaths",
     "initialize_runtime_paths",
     "load_settings",

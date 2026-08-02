@@ -7,11 +7,19 @@ import stat
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from contx.errors import ConfigurationError
+from contx.model_provider import DEFAULT_ENDPOINT, DEFAULT_MODEL, LoopbackHttpEndpoint
 from contx.settings.paths import RuntimePaths
 
 RAW_RETENTION_ENV = "CONTX_RAW_RETENTION_HOURS"
@@ -45,6 +53,37 @@ class CollectionSettings(BaseModel):
         return self
 
 
+class ModelSettings(BaseModel):
+    """Mandatory local multimodal model configuration."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    provider: Literal["ollama"] = "ollama"
+    endpoint: str = DEFAULT_ENDPOINT
+    model_name: str = Field(default=DEFAULT_MODEL, min_length=1, max_length=255)
+    timeout_seconds: float = Field(default=120.0, ge=0.1, le=600.0)
+    keep_alive: str = Field(default="5m", min_length=1, max_length=32)
+    context_tokens: int = Field(default=8192, ge=2048, le=32768)
+    max_image_mb: int = Field(default=20, ge=1, le=50)
+    max_response_kb: int = Field(default=1024, ge=1, le=10240)
+
+    @field_validator("endpoint")
+    @classmethod
+    def validate_endpoint(cls, value: str) -> str:
+        try:
+            return LoopbackHttpEndpoint.parse(value).url
+        except ValueError as error:
+            raise ValueError("endpoint must be a literal loopback HTTP URL") from error
+
+    @field_validator("model_name", "keep_alive")
+    @classmethod
+    def validate_single_line_value(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized or any(character in normalized for character in "\r\n"):
+            raise ValueError("value must be one non-empty line")
+        return normalized
+
+
 class AppSettings(BaseModel):
     """Versioned CONTX configuration."""
 
@@ -52,6 +91,7 @@ class AppSettings(BaseModel):
 
     config_version: int = Field(default=1, ge=1, le=1)
     collection: CollectionSettings = Field(default_factory=CollectionSettings)
+    model: ModelSettings = Field(default_factory=ModelSettings)
 
 
 def load_settings(

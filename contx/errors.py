@@ -39,3 +39,23 @@ class RawStoreError(ContxError):
 
 class RawStoreFullError(RawStoreError):
     """Raised before a raw artifact would exceed the configured disk budget."""
+
+
+class LocalModelError(ContxError):
+    """Raised when mandatory local semantic processing cannot complete."""
+
+
+class LocalModelUnavailableError(LocalModelError):
+    """Raised when the configured local runtime cannot be reached safely."""
+
+
+class LocalModelNotInstalledError(LocalModelUnavailableError):
+    """Raised when the configured local runtime does not contain the model."""
+
+
+class LocalModelProtocolError(LocalModelError):
+    """Raised when the local runtime violates its bounded transport contract."""
+
+
+class LocalModelResponseError(LocalModelError):
+    """Raised when local model output cannot pass the strict result schema."""

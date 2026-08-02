@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 import contx.cli.app as cli_module
 from contx.cli.app import app
 from contx.memory_store import RecordingMemoryStore
+from contx.model_provider import LocalModelRuntimeStatus
 from contx.settings import RUNTIME_ROOT_ENV, resolve_runtime_paths
 
 runner = CliRunner()
@@ -121,3 +122,36 @@ def test_capabilities_do_not_enable_or_request_sensitive_access(tmp_path: Path) 
     assert "active_application:" in result.stdout
     assert "window_titles: disabled (disabled_by_configuration)" in result.stdout
     assert "screenshots: disabled (disabled_by_configuration)" in result.stdout
+
+
+def test_model_status_preflights_without_sending_user_content(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class AvailableProvider:
+        def status(self) -> LocalModelRuntimeStatus:
+            return LocalModelRuntimeStatus(
+                endpoint="http://127.0.0.1:11434",
+                runtime_available=True,
+                runtime_version="0.32.5",
+                model="qwen3-vl:4b-instruct-q4_K_M",
+                model_available=True,
+                model_digest="a" * 64,
+            )
+
+    monkeypatch.setattr(
+        cli_module,
+        "_build_local_model_provider",
+        lambda _settings: AvailableProvider(),
+    )
+
+    result = runner.invoke(
+        app,
+        ["model", "status"],
+        env={RUNTIME_ROOT_ENV: str(tmp_path)},
+    )
+
+    assert result.exit_code == 0
+    assert "runtime: available" in result.stdout
+    assert "model: installed (qwen3-vl:4b-instruct-q4_K_M)" in result.stdout
+    assert f"model digest: {'a' * 64}" in result.stdout
