@@ -31,6 +31,8 @@ def test_defaults_are_safe(tmp_path: Path) -> None:
     assert settings.collection.segment_max_duration_seconds == 60
     assert settings.collection.purge_interval_seconds == 900
     assert settings.collection.screenshots_enabled is False
+    assert settings.collection.screenshot_min_interval_seconds == 15
+    assert settings.collection.screenshot_max_interval_seconds == 120
     assert settings.collection.raw_disk_budget_mb == 5120
 
 
@@ -97,4 +99,21 @@ def test_broad_config_permissions_are_rejected(tmp_path: Path) -> None:
     paths.config_file.chmod(0o644)
 
     with pytest.raises(ConfigurationError, match="permissions are too broad"):
+        load_settings(paths, {})
+
+
+def test_screenshot_maximum_interval_cannot_be_below_minimum(
+    tmp_path: Path,
+) -> None:
+    paths = _initialized_paths(tmp_path)
+    paths.config_file.write_text(
+        """config_version = 1
+[collection]
+screenshot_min_interval_seconds = 60
+screenshot_max_interval_seconds = 30
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigurationError, match="maximum interval"):
         load_settings(paths, {})

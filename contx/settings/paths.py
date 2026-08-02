@@ -28,6 +28,8 @@ segment_max_duration_seconds = 60
 idle_threshold_seconds = 300
 purge_interval_seconds = 900
 screenshots_enabled = false
+screenshot_min_interval_seconds = 15
+screenshot_max_interval_seconds = 120
 raw_disk_budget_mb = 5120
 """
 

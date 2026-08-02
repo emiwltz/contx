@@ -11,6 +11,11 @@ from contx.collection.policy import (
     CollectionPolicy,
     ExclusionDecision,
 )
+from contx.collection.screenshots import (
+    ScreenshotDecision,
+    ScreenshotTrigger,
+    SelectiveScreenshotPlanner,
+)
 from contx.collection.service import CollectionControlService
 
 __all__ = [
@@ -22,4 +27,7 @@ __all__ = [
     "ControlledMetadataCollector",
     "ContinuousActivityCollector",
     "ExclusionDecision",
+    "ScreenshotDecision",
+    "ScreenshotTrigger",
+    "SelectiveScreenshotPlanner",
 ]

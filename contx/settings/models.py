@@ -7,9 +7,9 @@ import stat
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from contx.errors import ConfigurationError
 from contx.settings.paths import RuntimePaths
@@ -32,7 +32,17 @@ class CollectionSettings(BaseModel):
     idle_threshold_seconds: int = Field(default=300, ge=30, le=3600)
     purge_interval_seconds: int = Field(default=900, ge=60, le=3600)
     screenshots_enabled: bool = False
+    screenshot_min_interval_seconds: int = Field(default=15, ge=5, le=300)
+    screenshot_max_interval_seconds: int = Field(default=120, ge=15, le=1800)
     raw_disk_budget_mb: int = Field(default=5120, ge=64, le=5120)
+
+    @model_validator(mode="after")
+    def validate_screenshot_intervals(self) -> Self:
+        if self.screenshot_max_interval_seconds < self.screenshot_min_interval_seconds:
+            raise ValueError(
+                "screenshot maximum interval must not be below the minimum"
+            )
+        return self
 
 
 class AppSettings(BaseModel):
