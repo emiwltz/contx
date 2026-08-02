@@ -26,6 +26,7 @@ retain_excluded_activity = false
 poll_interval_seconds = 1.0
 idle_threshold_seconds = 300
 screenshots_enabled = false
+raw_disk_budget_mb = 5120
 """
 
 

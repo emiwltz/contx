@@ -55,6 +55,8 @@ class PipelineRepository:
             )
         )
         if existing is not None:
+            if existing.processing_status == ObservationStatus.PURGED.value:
+                return _observation_from_model(existing)
             if existing.id == str(observation.id):
                 _update_observation_state(existing, observation)
                 self._session.flush()
@@ -290,6 +292,43 @@ class CollectionRepository:
             raise DatabaseError("Built-in exclusion rules can be disabled, not deleted")
         self._session.delete(model)
         self._session.flush()
+
+
+class RawObservationRepository:
+    """Find and tombstone expired raw observations without erasing provenance."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def expired(self, *, at: datetime, limit: int = 1000) -> tuple[Observation, ...]:
+        if limit < 1:
+            raise ValueError("raw purge limit must be positive")
+        models = self._session.scalars(
+            select(ObservationModel)
+            .where(
+                ObservationModel.expires_at <= format_utc(at),
+                ObservationModel.processing_status != ObservationStatus.PURGED.value,
+            )
+            .order_by(ObservationModel.expires_at, ObservationModel.id)
+            .limit(limit)
+        )
+        return tuple(_observation_from_model(model) for model in models)
+
+    def tombstone(self, observation_id: UUID) -> Observation:
+        model = self._session.get(ObservationModel, str(observation_id))
+        if model is None:
+            raise DatabaseError("The raw observation does not exist")
+        if model.processing_status == ObservationStatus.PURGED.value:
+            return _observation_from_model(model)
+        model.app_name = None
+        model.app_bundle_id = None
+        model.window_title = None
+        model.artifact_path = None
+        model.content_hash = None
+        model.perceptual_hash = None
+        model.processing_status = ObservationStatus.PURGED.value
+        self._session.flush()
+        return _observation_from_model(model)
 
 
 def _observation_to_model(record: Observation) -> ObservationModel:

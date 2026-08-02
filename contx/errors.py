@@ -27,3 +27,11 @@ class MemoryStoreError(ContxError):
 
 class MemoryStoreUnavailableError(MemoryStoreError):
     """Raised when the configured final-memory backend is unavailable."""
+
+
+class RawStoreError(ContxError):
+    """Raised when temporary raw data cannot be stored or removed safely."""
+
+
+class RawStoreFullError(RawStoreError):
+    """Raised before a raw artifact would exceed the configured disk budget."""

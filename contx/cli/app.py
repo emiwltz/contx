@@ -11,7 +11,7 @@ import typer
 from sqlalchemy import Engine
 
 from contx import __version__
-from contx.application import PipelineService
+from contx.application import PipelineService, RawPurgeService
 from contx.candidates.rules import VerticalSliceCandidateProducer
 from contx.collection import (
     CollectionControlService,
@@ -27,7 +27,7 @@ from contx.db import (
     head_database_revision,
     upgrade_database,
 )
-from contx.errors import ContxError
+from contx.errors import ContxError, RawStoreError
 from contx.events.rules import VerticalSliceEventBuilder
 from contx.memory_store import (
     MemoryStore,
@@ -41,6 +41,7 @@ from contx.models import (
     SystemClock,
     UuidIdentifierSource,
 )
+from contx.raw_store import FilesystemRawStore
 from contx.settings import (
     initialize_runtime_paths,
     load_settings,
@@ -106,6 +107,7 @@ def status() -> None:
     """Show local initialization and safety state."""
     engine: Engine | None = None
     control: CollectionControl | None = None
+    raw_usage: int | None = None
     try:
         paths = resolve_runtime_paths()
         settings = load_settings(paths)
@@ -116,6 +118,10 @@ def status() -> None:
             controls = CollectionControlService(engine=engine, clock=SystemClock())
             controls.initialize()
             control = controls.control()
+        if paths.raw.is_dir():
+            raw_usage = _build_raw_store(
+                paths.raw, budget_mb=settings.collection.raw_disk_budget_mb
+            ).usage_bytes()
     except ContxError as error:
         _abort(error)
     finally:
@@ -146,6 +152,9 @@ def status() -> None:
         "window titles: "
         + ("enabled" if settings.collection.window_titles_enabled else "disabled")
     )
+    typer.echo(f"raw retention: {settings.collection.raw_retention_hours}h")
+    if raw_usage is not None:
+        typer.echo(f"raw usage: {raw_usage} bytes")
     collection_state = (
         "unavailable"
         if control is None
@@ -177,6 +186,20 @@ def run_once(
         controls = CollectionControlService(engine=engine, clock=clock)
         controls.initialize()
         retention = timedelta(hours=settings.collection.raw_retention_hours)
+        if source is RunSource.ACTIVE_APP:
+            purge_result = RawPurgeService(
+                engine=engine,
+                raw_store=_build_raw_store(
+                    paths.raw,
+                    budget_mb=settings.collection.raw_disk_budget_mb,
+                ),
+                clock=clock,
+                identifiers=identifiers,
+            ).run()
+            if not purge_result.succeeded:
+                raise RawStoreError(
+                    "Expired raw data could not be purged; collection did not start"
+                )
         collector: Collector = (
             SyntheticCollector.default(
                 clock=clock,
@@ -271,6 +294,38 @@ def resume() -> None:
     typer.echo("collection: active")
 
 
+@app.command()
+def purge() -> None:
+    """Delete expired raw files and tombstone their source records."""
+    engine: Engine | None = None
+    try:
+        paths = resolve_runtime_paths()
+        initialize_runtime_paths(paths)
+        settings = load_settings(paths)
+        upgrade_database(paths.database_file)
+        engine = create_database_engine(paths.database_file)
+        result = RawPurgeService(
+            engine=engine,
+            raw_store=_build_raw_store(
+                paths.raw,
+                budget_mb=settings.collection.raw_disk_budget_mb,
+            ),
+            clock=SystemClock(),
+            identifiers=UuidIdentifierSource(),
+        ).run()
+        if not result.succeeded:
+            raise RawStoreError(
+                "Some expired raw records could not be purged; retry is safe"
+            )
+    except ContxError as error:
+        _abort(error)
+    finally:
+        if engine is not None:
+            engine.dispose()
+    typer.echo(f"purged observations: {len(result.purged_observation_ids)}")
+    typer.echo(f"reclaimed bytes: {result.bytes_reclaimed}")
+
+
 @exclusions_app.command("list")
 def list_exclusions() -> None:
     """List built-in and user exclusion rules."""
@@ -363,6 +418,13 @@ def _build_memory_store(memory_directory: Path) -> MemoryStore:
     return OptMemAdapter(
         executable=resolve_optmem_executable(),
         memory_directory=memory_directory,
+    )
+
+
+def _build_raw_store(raw_directory: Path, *, budget_mb: int) -> FilesystemRawStore:
+    return FilesystemRawStore(
+        raw_directory,
+        disk_budget_bytes=budget_mb * 1024 * 1024,
     )
 
 

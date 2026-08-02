@@ -34,6 +34,11 @@ def test_event_requires_unique_provenance() -> None:
         _event(source_observation_ids=(ID_1, ID_1))
 
 
+def test_observation_retention_cannot_exceed_48_hours() -> None:
+    with pytest.raises(ValidationError, match="must not exceed 48 hours"):
+        _observation(expires_at=NOW + timedelta(hours=48, microseconds=1))
+
+
 def test_candidate_decision_is_explicit_and_irreversible() -> None:
     candidate = _candidate()
 

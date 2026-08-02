@@ -96,3 +96,15 @@ def test_user_exclusion_can_be_added_and_listed(tmp_path: Path) -> None:
     assert added.exit_code == 0
     assert listed.exit_code == 0
     assert "app_bundle_id enabled user com.example.private" in listed.stdout
+
+
+def test_empty_raw_purge_is_successful_and_audited(tmp_path: Path) -> None:
+    environment = {RUNTIME_ROOT_ENV: str(tmp_path)}
+
+    result = runner.invoke(app, ["purge"], env=environment)
+    status = runner.invoke(app, ["status"], env=environment)
+
+    assert result.exit_code == 0
+    assert "purged observations: 0" in result.stdout
+    assert "reclaimed bytes: 0" in result.stdout
+    assert "raw usage: 0 bytes" in status.stdout
