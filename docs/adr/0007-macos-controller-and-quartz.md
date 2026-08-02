@@ -1,6 +1,6 @@
 # ADR 0007: Keep the v0.1 macOS controller in Python and add Quartz
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-08-02
 - **Decision owner:** Emi
 
@@ -52,9 +52,9 @@ risks of running native UI callbacks inside Python.
 3. Keep the PyObjC menu-bar but call CoreGraphics through custom `ctypes`
    declarations instead of adding the official Quartz bindings.
 
-## Proposed decision
+## Decision
 
-Use option 1 for v0.1.
+Use option 1 for v0.1, as approved by Emi on 2026-08-02.
 
 Add the narrow `pyobjc-framework-Quartz>=12.2,<13` dependency. Keep one Python
 process responsible for the collector run loop and menu-bar control, with the

@@ -30,4 +30,4 @@ Every ADR records:
 - [0004 — Use native macOS runtime data locations](0004-macos-runtime-data-layout.md)
 - [0005 — Start collection on demand before introducing a daemon](0005-initial-process-model.md)
 - [0006 — Integrate OptMem behind MemoryStore](0006-optmem-integration.md)
-- [0007 — Keep the v0.1 macOS controller in Python and add Quartz](0007-macos-controller-and-quartz.md) *(Proposed)*
+- [0007 — Keep the v0.1 macOS controller in Python and add Quartz](0007-macos-controller-and-quartz.md)
