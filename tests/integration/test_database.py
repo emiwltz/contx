@@ -221,6 +221,54 @@ def test_existing_events_gain_stable_lineage_and_validity_on_upgrade(
         engine.dispose()
 
 
+def test_existing_candidates_gain_explicit_scoring_components_on_upgrade(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "contx.db"
+    upgrade_database(database_path, revision="20260802_0005")
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            """INSERT INTO memory_candidates (
+                id, idempotency_key, text, source_type, source_ids,
+                importance, durability, novelty, confidence, sensitivity,
+                score, status, rejection_reason, created_at, processed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "00000000-0000-0000-0000-000000000031",
+                "c" * 64,
+                "Existing synthetic candidate.",
+                "event",
+                '["00000000-0000-0000-0000-000000000032"]',
+                0.8,
+                0.7,
+                0.6,
+                0.75,
+                "personal",
+                0.72,
+                "pending",
+                None,
+                "2026-08-02T10:00:00.000000Z",
+                None,
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    upgrade_database(database_path)
+
+    connection = sqlite3.connect(database_path)
+    try:
+        row = connection.execute(
+            """SELECT utility, recurrence, ambiguity, redundancy, scoring_version
+            FROM memory_candidates"""
+        ).fetchone()
+    finally:
+        connection.close()
+    assert row == (0.8, 0.0, 0.25, 0.0, "legacy-candidate-v1")
+
+
 def test_empty_file_recovers_like_interrupted_initialization(tmp_path: Path) -> None:
     database_path = tmp_path / "contx.db"
     database_path.touch(mode=0o600)

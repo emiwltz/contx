@@ -20,6 +20,14 @@ from contx.application.local_model_processing import (
     LocalModelProcessingResult,
     LocalModelProcessingService,
 )
+from contx.application.pattern_analysis import (
+    CandidateEvaluationResult,
+    CandidateEvaluationService,
+    PatternAnalysisResult,
+    PatternAnalysisService,
+    PatternCandidateResult,
+    PatternCandidateService,
+)
 from contx.application.pipeline import PipelineResult, PipelineService
 from contx.application.raw_purge import RawPurgeResult, RawPurgeService
 
@@ -29,6 +37,8 @@ __all__ = [
     "ContinuousCollectionResult",
     "ContinuousCollectionRunner",
     "ContinuousCollectionSession",
+    "CandidateEvaluationResult",
+    "CandidateEvaluationService",
     "EventCorrectionService",
     "LocalModelProcessingResult",
     "LocalModelProcessingService",
@@ -36,6 +46,10 @@ __all__ = [
     "LocalModelEventService",
     "PipelineResult",
     "PipelineService",
+    "PatternAnalysisResult",
+    "PatternAnalysisService",
+    "PatternCandidateResult",
+    "PatternCandidateService",
     "RawPurgeResult",
     "RawPurgeService",
     "ThreadStopSignal",
