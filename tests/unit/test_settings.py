@@ -42,6 +42,8 @@ def test_defaults_are_safe(tmp_path: Path) -> None:
     assert settings.model.max_output_tokens == 512
     assert settings.events.session_gap_seconds == 600
     assert settings.events.max_session_duration_seconds == 7200
+    assert settings.memory.wake_budget_bytes == 20000
+    assert settings.memory.max_compressions_per_cycle == 4
 
 
 def test_environment_overrides_config(tmp_path: Path) -> None:
@@ -163,4 +165,18 @@ context_tokens = 1024
     )
 
     with pytest.raises(ConfigurationError, match="greater than or equal to 2048"):
+        load_settings(paths, {})
+
+
+def test_memory_wake_budget_is_bounded(tmp_path: Path) -> None:
+    paths = _initialized_paths(tmp_path)
+    paths.config_file.write_text(
+        """config_version = 1
+[memory]
+wake_budget_bytes = 1024
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigurationError, match="greater than or equal to 4096"):
         load_settings(paths, {})

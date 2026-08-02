@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import re
 
-from contx.memory_store.base import MemoryAppendResult, MemoryWake
+from contx.memory_store.base import (
+    MemoryAppendResult,
+    MemoryCompressor,
+    MemoryMaintenance,
+    MemoryWake,
+)
 
 
 class RecordingMemoryStore:
@@ -14,6 +19,7 @@ class RecordingMemoryStore:
         self._initialized = False
         self._entries: list[str] = []
         self._ids_by_key: dict[str, str] = {}
+        self.invalidated_blocks: list[str] = []
 
     @property
     def entries(self) -> tuple[str, ...]:
@@ -64,6 +70,21 @@ class RecordingMemoryStore:
         self._require_initialized()
         index = int(block.split("-", maxsplit=1)[0])
         return f"#{index} 2026-08-02 {self._entries[index]}\n"
+
+    def maintain(
+        self,
+        compressor: MemoryCompressor,
+        *,
+        max_compressions: int,
+    ) -> MemoryMaintenance:
+        self._require_initialized()
+        if max_compressions < 1:
+            raise ValueError("maximum compressions must be positive")
+        return MemoryMaintenance(completed_compressions=0, complete=True)
+
+    def invalidate_summary(self, block: str) -> None:
+        self._require_initialized()
+        self.invalidated_blocks.append(block)
 
     def _require_initialized(self) -> None:
         if not self._initialized:

@@ -100,6 +100,15 @@ class EventSettings(BaseModel):
         return self
 
 
+class MemorySettings(BaseModel):
+    """Final-memory context and bounded local maintenance policy."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    wake_budget_bytes: int = Field(default=20000, ge=4096, le=32768)
+    max_compressions_per_cycle: int = Field(default=4, ge=1, le=32)
+
+
 class AppSettings(BaseModel):
     """Versioned CONTX configuration."""
 
@@ -109,6 +118,7 @@ class AppSettings(BaseModel):
     collection: CollectionSettings = Field(default_factory=CollectionSettings)
     model: ModelSettings = Field(default_factory=ModelSettings)
     events: EventSettings = Field(default_factory=EventSettings)
+    memory: MemorySettings = Field(default_factory=MemorySettings)
 
 
 def load_settings(

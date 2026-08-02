@@ -46,6 +46,10 @@ max_response_kb = 1024
 [events]
 session_gap_seconds = 600
 max_session_duration_seconds = 7200
+
+[memory]
+wake_budget_bytes = 20000
+max_compressions_per_cycle = 4
 """
 
 

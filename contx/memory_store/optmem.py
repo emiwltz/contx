@@ -18,7 +18,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from contx.errors import MemoryStoreError, MemoryStoreUnavailableError
-from contx.memory_store.base import MemoryAppendResult, MemoryWake
+from contx.memory_store.base import (
+    MemoryAppendResult,
+    MemoryCompressionRequest,
+    MemoryCompressor,
+    MemoryMaintenance,
+    MemoryWake,
+)
 
 OPTMEM_EXECUTABLE_ENV = "CONTX_OPTMEM_EXECUTABLE"
 OPTMEM_SNAPSHOT_SHA256 = (
@@ -27,6 +33,7 @@ OPTMEM_SNAPSHOT_SHA256 = (
 OPTMEM_ENTRY_BYTES = 280
 DEFAULT_TIMEOUT_SECONDS = 5.0
 DEFAULT_OUTPUT_BYTES = 32_768
+DEFAULT_WAKE_BUDGET_BYTES = 20_000
 IDEMPOTENCY_FILE = ".contx-idempotency.json"
 LOCK_FILE = ".contx-adapter.lock"
 _SAVED_PATTERN = re.compile(r"^Saved as #(\d+)\.$", re.MULTILINE)
@@ -38,6 +45,11 @@ _PAGE_PATTERN = re.compile(
 _NEXT_PAGE_PATTERN = re.compile(
     r"^Not awake yet\. Run: .* wake (\d+) (\d+)$", re.MULTILINE
 )
+_NAP_COMMAND_PATTERN = re.compile(
+    r'^Run: .* nap (\d+-\d+) "<your line>"$',
+    re.MULTILINE,
+)
+_NAP_BYTES_PATTERN = re.compile(r"into one line of at most (\d+) bytes\.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +70,7 @@ class OptMemAdapter:
         expected_sha256: str = OPTMEM_SNAPSHOT_SHA256,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         output_bytes: int = DEFAULT_OUTPUT_BYTES,
+        wake_budget_bytes: int = DEFAULT_WAKE_BUDGET_BYTES,
         environ: Mapping[str, str] | None = None,
     ) -> None:
         if not executable.is_absolute():
@@ -70,11 +83,16 @@ class OptMemAdapter:
             raise ValueError("OptMem timeout must be positive")
         if output_bytes < 1:
             raise ValueError("OptMem output limit must be positive")
+        if not 4096 <= wake_budget_bytes <= 64 * 1024:
+            raise ValueError("OptMem wake budget must be between 4096 and 65536 bytes")
+        if output_bytes < wake_budget_bytes:
+            raise ValueError("OptMem output limit must cover the wake budget")
         self._executable = executable
         self._memory_directory = memory_directory
         self._expected_sha256 = expected_sha256
         self._timeout_seconds = timeout_seconds
         self._output_bytes = output_bytes
+        self._wake_budget_bytes = wake_budget_bytes
         source_environment = os.environ if environ is None else environ
         self._path = source_environment.get("PATH", "/usr/bin:/bin")
         self._home = source_environment.get("HOME", str(Path.home()))
@@ -88,6 +106,7 @@ class OptMemAdapter:
         result = self._run(("init",), allow_uninitialized=True)
         if result.returncode != 0:
             raise MemoryStoreError("OptMem could not initialize final memory")
+        self._configure_wake_budget()
         self._protect_store()
 
     def append(self, text: str, *, idempotency_key: str) -> MemoryAppendResult:
@@ -139,10 +158,18 @@ class OptMemAdapter:
             resolved_snapshot = int(page.group(3))
         elif continuation is not None:
             resolved_snapshot = int(continuation.group(2))
+        content, technical_status = _split_wake_output(
+            result.stdout,
+            complete="You are awake." in result.stdout,
+            continuation=continuation,
+        )
+        if len(content.encode("utf-8")) > self._wake_budget_bytes:
+            raise MemoryStoreError("OptMem context exceeded the configured wake budget")
         return MemoryWake(
-            content=result.stdout,
+            content=content,
             complete="You are awake." in result.stdout,
             maintenance_required=maintenance_required,
+            technical_status=technical_status,
             snapshot=resolved_snapshot,
             next_part=None if continuation is None else int(continuation.group(1)),
         )
@@ -162,6 +189,71 @@ class OptMemAdapter:
         if result.returncode != 0:
             raise MemoryStoreError("OptMem could not navigate final memory")
         return result.stdout
+
+    def maintain(
+        self,
+        compressor: MemoryCompressor,
+        *,
+        max_compressions: int,
+    ) -> MemoryMaintenance:
+        if not 1 <= max_compressions <= 100:
+            raise ValueError("maximum compressions must be between 1 and 100")
+        completed = 0
+        request = self._next_compression()
+        while request is not None and completed < max_compressions:
+            summary = _validate_compression_summary(
+                compressor.compress(request),
+                max_bytes=request.max_bytes,
+            )
+            result = self._run(("nap", request.block, summary))
+            if result.returncode != 0:
+                raise MemoryStoreError("OptMem could not persist a compression")
+            completed += 1
+            request = self._next_compression()
+        self._protect_store()
+        return MemoryMaintenance(
+            completed_compressions=completed,
+            complete=request is None,
+            next_request=request,
+        )
+
+    def invalidate_summary(self, block: str) -> None:
+        if re.fullmatch(r"\d+-\d+", block) is None:
+            raise ValueError("summary block must use the form <lo>-<hi>")
+        result = self._run(("forget", block))
+        if result.returncode != 0:
+            raise MemoryStoreError("OptMem could not invalidate the summary")
+        self._protect_store()
+
+    def _next_compression(self) -> MemoryCompressionRequest | None:
+        result = self._run(("nap",))
+        if result.returncode != 0:
+            raise MemoryStoreError("OptMem could not inspect pending compression")
+        if "Nothing left to compress." in result.stdout:
+            return None
+        command = _NAP_COMMAND_PATTERN.search(result.stdout)
+        byte_limit = _NAP_BYTES_PATTERN.search(result.stdout)
+        if command is None or byte_limit is None:
+            raise MemoryStoreError("OptMem returned an invalid compression request")
+        return MemoryCompressionRequest(
+            block=command.group(1),
+            prompt=result.stdout,
+            max_bytes=int(byte_limit.group(1)),
+        )
+
+    def _configure_wake_budget(self) -> None:
+        semantic_budget = self._wake_budget_bytes - 1024
+        wake_lines = max(1, semantic_budget // 320)
+        result = self._run(
+            (
+                "config",
+                f"WAKE_LINES={wake_lines}",
+                f"PART_CHARS={semantic_budget}",
+                f"PART_LINES={wake_lines}",
+            )
+        )
+        if result.returncode != 0:
+            raise MemoryStoreError("OptMem could not configure the wake budget")
 
     def _find_exact_memory(self, text: str) -> str | None:
         exact_pattern = rf"^#\d+ \d{{4}}-\d{{2}}-\d{{2}} {re.escape(text)}$"
@@ -446,3 +538,36 @@ def _maintenance_required(output: str) -> bool:
     return "Cannot wake:" in output or bool(
         re.search(r"^Run: .* nap(?: |$)", output, re.MULTILINE)
     )
+
+
+def _split_wake_output(
+    output: str,
+    *,
+    complete: bool,
+    continuation: re.Match[str] | None,
+) -> tuple[str, str | None]:
+    if output.startswith("Cannot wake:"):
+        return "", output
+    if output.startswith("No memories yet."):
+        return "", output
+    boundary: int | None = None
+    if continuation is not None:
+        boundary = continuation.start()
+    elif complete:
+        marker = output.find("You are awake.")
+        if marker >= 0:
+            boundary = marker
+    if boundary is None:
+        return output, None
+    content = output[:boundary].rstrip("\n")
+    technical = output[boundary:].lstrip("\n")
+    return ("" if not content else content + "\n"), technical or None
+
+
+def _validate_compression_summary(text: str, *, max_bytes: int) -> str:
+    normalized = text.strip()
+    if not normalized or "\n" in normalized or "\r" in normalized:
+        raise MemoryStoreError("Memory compression must be one non-empty line")
+    if len(normalized.encode("utf-8")) > max_bytes:
+        raise MemoryStoreError("Memory compression exceeded the backend byte limit")
+    return normalized

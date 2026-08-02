@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 
@@ -16,13 +16,39 @@ class MemoryAppendResult:
 
 @dataclass(frozen=True, slots=True)
 class MemoryWake:
-    """One unmodified semantic context page from the memory backend."""
+    """One semantic context page plus separately transported backend status."""
 
     content: str
     complete: bool
     maintenance_required: bool = False
+    technical_status: str | None = None
     snapshot: int | None = None
     next_part: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryCompressionRequest:
+    """One backend-generated, local-only summary request."""
+
+    block: str
+    prompt: str = field(repr=False)
+    max_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryMaintenance:
+    """Bounded compression progress without hiding unfinished work."""
+
+    completed_compressions: int
+    complete: bool
+    next_request: MemoryCompressionRequest | None = None
+
+
+class MemoryCompressor(Protocol):
+    """Generate one bounded summary without owning memory persistence."""
+
+    def compress(self, request: MemoryCompressionRequest) -> str:
+        """Return one evidence-backed summary line for the requested block."""
 
 
 class MemoryStore(Protocol):
@@ -47,3 +73,14 @@ class MemoryStore(Protocol):
 
     def zoom(self, block: str) -> str:
         """Return the backend's direct tree-navigation output."""
+
+    def maintain(
+        self,
+        compressor: MemoryCompressor,
+        *,
+        max_compressions: int,
+    ) -> MemoryMaintenance:
+        """Perform a bounded number of pending local compression steps."""
+
+    def invalidate_summary(self, block: str) -> None:
+        """Invalidate one incorrect summary while retaining raw memories."""
