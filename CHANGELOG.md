@@ -20,6 +20,8 @@ guaranteed.
   initialization.
 - Initial SQLite WAL schema with Alembic migrations, foreign-key-backed
   provenance, and explicit transaction boundaries.
+- Strict domain records, deterministic idempotency, replaceable pipeline
+  contracts, and transaction-scoped repositories.
 
 ### Changed
 
