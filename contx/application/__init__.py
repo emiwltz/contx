@@ -6,7 +6,12 @@ from contx.application.activity_timeline import (
     EventCorrectionService,
     correction_content,
 )
-from contx.application.agent_proposals import AgentProposalService
+from contx.application.agent_proposals import (
+    AGENT_PROPOSAL_ADOPTION_VERSION,
+    AgentProposalAdoptionResult,
+    AgentProposalAdoptionService,
+    AgentProposalService,
+)
 from contx.application.continuous_collection import (
     ContinuousCollectionResult,
     ContinuousCollectionRunner,
@@ -51,6 +56,9 @@ __all__ = [
     "ActivityTimelineBuildResult",
     "ActivityTimelineService",
     "AgentProposalService",
+    "AgentProposalAdoptionResult",
+    "AgentProposalAdoptionService",
+    "AGENT_PROPOSAL_ADOPTION_VERSION",
     "ContinuousCollectionResult",
     "ContinuousCollectionRunner",
     "ContinuousCollectionSession",

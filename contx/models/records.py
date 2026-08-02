@@ -110,6 +110,20 @@ class AgentProposalStatus(StrEnum):
     ADOPTED = "adopted"
 
 
+class AgentProposalDecision(StrEnum):
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    DEFERRED = "deferred"
+
+
+class AgentProposalReasonCode(StrEnum):
+    SUPPORTED_NOVEL = "supported_novel"
+    UNSUPPORTED_BY_REFERENCE = "unsupported_by_reference"
+    DUPLICATE_ACTIVE_MEMORY = "duplicate_active_memory"
+    CONFLICTS_WITH_ACTIVE_MEMORY = "conflicts_with_active_memory"
+    AMBIGUOUS_REFERENCE = "ambiguous_reference"
+
+
 class ProposalReferenceType(StrEnum):
     EVENT = "event"
     PATTERN = "pattern"
@@ -711,6 +725,101 @@ class AgentProposal(DomainRecord):
         }
         if needs_reason != (self.reason is not None):
             raise ValueError("rejected or deferred proposals require one reason")
+        return self
+
+    def decide(
+        self,
+        status: AgentProposalStatus,
+        *,
+        processed_at: datetime,
+        reason: str | None = None,
+    ) -> Self:
+        """Apply one irreversible user or local-validator decision."""
+        if self.status is not AgentProposalStatus.PENDING:
+            raise ValueError("only pending agent proposals can be decided")
+        if status not in {
+            AgentProposalStatus.ADOPTED,
+            AgentProposalStatus.REJECTED,
+            AgentProposalStatus.DEFERRED,
+        }:
+            raise ValueError("invalid agent proposal decision status")
+        return type(self).model_validate(
+            self.model_dump()
+            | {
+                "status": status,
+                "reason": reason,
+                "processed_at": processed_at,
+            }
+        )
+
+
+class AgentProposalAdoptionBuild(DomainRecord):
+    """Content-free local-model audit for one explicit proposal adoption."""
+
+    proposal_id: UUID
+    candidate_id: UUID | None = None
+    provider: Literal["ollama"] = "ollama"
+    endpoint: str = Field(min_length=1, max_length=255)
+    model: str = Field(min_length=1, max_length=255)
+    model_digest: str = Field(min_length=1, max_length=128)
+    prompt_version: str = Field(min_length=1, max_length=64)
+    output_schema_version: str = Field(min_length=1, max_length=64)
+    decision: AgentProposalDecision
+    reason_code: AgentProposalReasonCode
+    confidence: float = Field(ge=0.0, le=1.0)
+    reference_sha256: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]+$",
+    )
+    active_memory_sha256: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]+$",
+    )
+    active_memory_count: int = Field(ge=0)
+    started_at: datetime
+    ended_at: datetime
+    wall_duration_ms: int = Field(ge=0)
+
+    _utc_timestamps = field_validator("started_at", "ended_at")(require_aware_utc)
+
+    @field_validator(
+        "endpoint",
+        "model",
+        "model_digest",
+        "prompt_version",
+        "output_schema_version",
+    )
+    @classmethod
+    def validate_single_line_metadata(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized or any(character in normalized for character in "\r\n"):
+            raise ValueError("proposal adoption metadata must be one non-empty line")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_build(self) -> Self:
+        if self.started_at > self.ended_at:
+            raise ValueError("proposal adoption start must not follow its end")
+        accepted = self.decision is AgentProposalDecision.ACCEPTED
+        if accepted != (self.candidate_id is not None):
+            raise ValueError("only accepted proposal adoptions have a candidate")
+        expected_reasons = {
+            AgentProposalDecision.ACCEPTED: {
+                AgentProposalReasonCode.SUPPORTED_NOVEL,
+            },
+            AgentProposalDecision.REJECTED: {
+                AgentProposalReasonCode.UNSUPPORTED_BY_REFERENCE,
+                AgentProposalReasonCode.DUPLICATE_ACTIVE_MEMORY,
+                AgentProposalReasonCode.CONFLICTS_WITH_ACTIVE_MEMORY,
+            },
+            AgentProposalDecision.DEFERRED: {
+                AgentProposalReasonCode.AMBIGUOUS_REFERENCE,
+            },
+        }
+        if self.reason_code not in expected_reasons[self.decision]:
+            raise ValueError("proposal adoption decision and reason conflict")
         return self
 
 

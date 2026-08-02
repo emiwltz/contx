@@ -55,6 +55,7 @@ def test_empty_database_upgrades_to_packaged_head(tmp_path: Path) -> None:
         "candidate_events",
         "memory_links",
         "memory_correction_builds",
+        "agent_proposal_adoption_builds",
         "processing_runs",
         "collection_control",
         "exclusion_rules",

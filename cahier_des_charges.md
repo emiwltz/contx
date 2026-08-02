@@ -1152,6 +1152,10 @@ contx wake
 contx recall <requête>
 contx zoom <nœud>
 contx propose "<souvenir proposé>"
+contx proposals list
+contx proposals show <id>
+contx proposals adopt <id>
+contx proposals reject <id>
 contx correct <id> "<correction>"
 contx status
 contx pause
@@ -1190,6 +1194,32 @@ Déduplication et provenance
     ↓
 MemoryStore
 ```
+
+**[DÉCISION v0]** `contx propose` crée uniquement une proposition en attente.
+Le passage vers la mémoire finale exige une action utilisateur explicite via
+`contx proposals adopt <id>`. CONTX revalide alors la référence et sa
+sensibilité, puis le LLM local obligatoire vérifie que la proposition est
+entièrement étayée, non ambiguë, nouvelle et non contradictoire avec la mémoire
+active pertinente. La proposition n'est pas réécrite : si elle est acceptée,
+sa ligne exacte est ajoutée à OptMem avec une clé idempotente.
+
+La décision du modèle, sa confiance, son identité et ses versions de prompt et
+de schéma sont auditées dans SQLite sans dupliquer le contenu privé dans la
+table d'audit. La provenance du souvenir adopté hérite transitivement des
+patterns, événements et observations de la référence. L'adoption est préparée
+dans SQLite avant l'ajout OptMem puis finalisée atomiquement ; une reprise après
+interruption ne rappelle pas le modèle et ne duplique pas la ligne. Un rejet ou
+un report du modèle n'écrit rien dans la mémoire finale.
+
+Après l'appel obligatoire au modèle, CONTX impose également une barrière
+structurelle limitée aux doublons exactement égaux après normalisation de la
+casse et des espaces. Ce contrôle ne remplace pas la décision sémantique du LLM
+pour les paraphrases ou les contradictions et ne constitue pas une voie sans
+modèle.
+
+`contx proposals reject <id>` enregistre un rejet utilisateur sans appeler le
+modèle. Un agent ne peut exécuter ni `proposals adopt`, ni `proposals reject`, ni
+`correct` sans instruction utilisateur explicite.
 
 ## 19.5 Sous-agents
 

@@ -799,6 +799,19 @@ surface cannot safely use historical views. A native OptMem evolution remains
 deferred until a projection has demonstrated correctness or operational
 limits.
 
+Agent proposal adoption follows ADR 0014. `contx propose` remains an inbox-only
+operation. The user selects a pending record through `contx proposals adopt`;
+the mandatory loopback Gemma validator checks the unchanged line against its
+current evidence and a bounded active-memory selection. Accepted proposals use
+the same stage, idempotent append, and finalize protocol as other cross-store
+writes, with transitive provenance and content-free model audit. Rejected and
+deferred decisions write no final memory, and `proposals reject` is an explicit
+model-free user decision. Agents cannot run either decision command without an
+explicit user instruction.
+
+The deterministic lifecycle suite and the installed-model synthetic matrix are
+recorded in `docs/evaluation/v0.5-agent-proposal-validation.md`.
+
 ### 13.3 Exit gate
 
 - Codex can start a real session with `contx wake`;
@@ -807,6 +820,8 @@ limits.
 - the memory remains usable without network access;
 - pending compression cannot silently block or corrupt wake;
 - proposals and corrections are validated by CONTX;
+- proposal decisions survive replay and interruption without duplicate model
+  calls or OptMem lines;
 - superseded content is not presented as an equal current truth;
 - another shell-capable agent can use the same stable command contract.
 

@@ -4,6 +4,7 @@ import re
 import stat
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Literal
 from uuid import UUID
 
 import pytest
@@ -13,9 +14,9 @@ from typer.testing import CliRunner
 import contx.cli.app as cli_module
 from contx.cli.app import app
 from contx.db import create_database_engine, session_scope
-from contx.db.models import MemoryLinkModel
+from contx.db.models import EventModel, MemoryLinkModel
 from contx.db.repositories import EventCorrectionRepository, PipelineRepository
-from contx.memory_store import RecordingMemoryStore
+from contx.memory_store import AgentProposalEvaluation, RecordingMemoryStore
 from contx.model_provider import (
     DEFAULT_MODEL,
     LocalModelExecution,
@@ -59,6 +60,33 @@ class RecordingCorrectionComposer:
     ) -> str:
         self.calls.append((original, replacement, max_bytes))
         return self._correction
+
+
+class RecordingProposalEvaluator:
+    provider: Literal["ollama"] = "ollama"
+    endpoint = "http://127.0.0.1:11434"
+    model = "synthetic-local-model"
+    model_digest = "synthetic-digest"
+    prompt_version = "agent-proposal-adoption-v2"
+    output_schema_version = "agent-proposal-adoption-output-v2"
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def evaluate(
+        self,
+        *,
+        proposal: str,
+        reference: str,
+        active_memories: tuple[str, ...],
+        minimum_confidence: float,
+    ) -> AgentProposalEvaluation:
+        self.calls.append(proposal)
+        return AgentProposalEvaluation(
+            decision="accepted",
+            reason_code="supported_novel",
+            confidence=0.9,
+        )
 
 
 def test_init_is_idempotent_and_status_is_truthful(tmp_path: Path) -> None:
@@ -313,6 +341,114 @@ def test_agent_proposal_without_provenance_is_deferred_without_memory_write(
     assert "final memory writes: 0" in result.stdout
     paths = resolve_runtime_paths(environment)
     assert not (paths.memory / "LOG.txt").exists()
+
+
+def test_proposal_review_commands_require_explicit_adoption_and_are_replayable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    environment = {RUNTIME_ROOT_ENV: str(tmp_path)}
+    memory = RecordingMemoryStore()
+    evaluator = RecordingProposalEvaluator()
+    monkeypatch.setattr(
+        cli_module,
+        "_build_memory_store",
+        lambda _path, **_kwargs: memory,
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "_build_agent_proposal_evaluator",
+        lambda _settings: evaluator,
+    )
+    seeded = runner.invoke(
+        app,
+        ["run-once", "--source", "synthetic"],
+        env=environment,
+    )
+    assert seeded.exit_code == 0
+    paths = resolve_runtime_paths(environment)
+    engine = create_database_engine(paths.database_file)
+    try:
+        with session_scope(engine) as database_session:
+            event_id = UUID(database_session.scalars(select(EventModel.id)).first())
+    finally:
+        engine.dispose()
+
+    submitted = runner.invoke(
+        app,
+        [
+            "propose",
+            "CONTX work should resume from its verified local state.",
+            "--reference-type",
+            "event",
+            "--reference",
+            str(event_id),
+        ],
+        env=environment,
+    )
+    assert submitted.exit_code == 0
+    proposal_match = re.search(r"proposal: ([0-9a-f-]{36})", submitted.stdout)
+    assert proposal_match is not None
+    proposal_id = proposal_match.group(1)
+
+    listed = runner.invoke(app, ["proposals", "list"], env=environment)
+    shown = runner.invoke(
+        app,
+        ["proposals", "show", proposal_id],
+        env=environment,
+    )
+    adopted = runner.invoke(
+        app,
+        ["proposals", "adopt", proposal_id],
+        env=environment,
+    )
+    replay = runner.invoke(
+        app,
+        ["proposals", "adopt", proposal_id],
+        env=environment,
+    )
+
+    assert listed.exit_code == 0
+    assert f"{proposal_id}\tpending\tevent:{event_id}" in listed.stdout
+    assert shown.exit_code == 0
+    assert "status: pending" in shown.stdout
+    assert adopted.exit_code == 0
+    assert "status: adopted" in adopted.stdout
+    assert "decision: accepted" in adopted.stdout
+    assert "reason: supported_novel" in adopted.stdout
+    assert "replayed: no" in adopted.stdout
+    assert replay.exit_code == 0
+    assert "replayed: yes" in replay.stdout
+    assert evaluator.calls == [
+        "CONTX work should resume from its verified local state."
+    ]
+    assert memory.entries[-1] == (
+        "CONTX work should resume from its verified local state."
+    )
+
+    second = runner.invoke(
+        app,
+        [
+            "propose",
+            "This second proposal should remain outside final memory.",
+            "--reference-type",
+            "event",
+            "--reference",
+            str(event_id),
+        ],
+        env=environment,
+    )
+    second_match = re.search(r"proposal: ([0-9a-f-]{36})", second.stdout)
+    assert second_match is not None
+    rejected = runner.invoke(
+        app,
+        ["proposals", "reject", second_match.group(1)],
+        env=environment,
+    )
+    assert rejected.exit_code == 0
+    assert "status: rejected" in rejected.stdout
+    assert "reason: user_rejected" in rejected.stdout
+    assert "final memory writes: 0" in rejected.stdout
 
 
 def test_timeline_cli_rejects_naive_boundaries_without_creating_a_run(

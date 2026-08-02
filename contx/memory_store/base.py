@@ -82,6 +82,53 @@ class MemoryCorrectionComposer(Protocol):
         """Return the corrected current fact without owning persistence."""
 
 
+@dataclass(frozen=True, slots=True)
+class AgentProposalEvaluation:
+    """One bounded semantic decision returned by the local validator."""
+
+    decision: Literal["accepted", "rejected", "deferred"]
+    reason_code: Literal[
+        "supported_novel",
+        "unsupported_by_reference",
+        "duplicate_active_memory",
+        "conflicts_with_active_memory",
+        "ambiguous_reference",
+    ]
+    confidence: float
+
+
+class AgentProposalEvaluator(Protocol):
+    """Validate a proposed memory against evidence and active memory."""
+
+    @property
+    def provider(self) -> Literal["ollama"]: ...
+
+    @property
+    def endpoint(self) -> str: ...
+
+    @property
+    def model(self) -> str: ...
+
+    @property
+    def model_digest(self) -> str | None: ...
+
+    @property
+    def prompt_version(self) -> str: ...
+
+    @property
+    def output_schema_version(self) -> str: ...
+
+    def evaluate(
+        self,
+        *,
+        proposal: str,
+        reference: str,
+        active_memories: tuple[str, ...],
+        minimum_confidence: float,
+    ) -> AgentProposalEvaluation:
+        """Return a semantic decision without owning persistence."""
+
+
 class MemoryStore(Protocol):
     """Replaceable final-memory boundary.
 

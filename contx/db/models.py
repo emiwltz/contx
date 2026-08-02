@@ -402,6 +402,38 @@ class AgentProposalModel(Base):
     processed_at: Mapped[UtcTimestamp | None] = mapped_column(String(32))
 
 
+class AgentProposalAdoptionBuildModel(Base):
+    """Content-free local-model audit for explicit proposal adoption."""
+
+    __tablename__ = "agent_proposal_adoption_builds"
+
+    proposal_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("agent_proposals.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    candidate_id: Mapped[Identifier | None] = mapped_column(
+        String(36),
+        ForeignKey("memory_candidates.id", ondelete="RESTRICT"),
+        unique=True,
+    )
+    provider: Mapped[str] = mapped_column(String(32))
+    endpoint: Mapped[str] = mapped_column(String(255))
+    model: Mapped[str] = mapped_column(String(255))
+    model_digest: Mapped[str] = mapped_column(String(128), index=True)
+    prompt_version: Mapped[str] = mapped_column(String(64), index=True)
+    output_schema_version: Mapped[str] = mapped_column(String(64))
+    decision: Mapped[str] = mapped_column(String(32), index=True)
+    reason_code: Mapped[str] = mapped_column(String(64), index=True)
+    confidence: Mapped[float] = mapped_column(Float)
+    reference_sha256: Mapped[str] = mapped_column(String(64))
+    active_memory_sha256: Mapped[str] = mapped_column(String(64))
+    active_memory_count: Mapped[int] = mapped_column(Integer)
+    started_at: Mapped[UtcTimestamp] = mapped_column(String(32))
+    ended_at: Mapped[UtcTimestamp] = mapped_column(String(32))
+    wall_duration_ms: Mapped[int] = mapped_column(Integer)
+
+
 class MemoryLinkModel(Base):
     """Link durable memory identity to its accepted candidate."""
 

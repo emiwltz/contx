@@ -32,6 +32,7 @@ def test_agent_instructions_protect_the_memory_write_boundary() -> None:
     assert result.exit_code == 0
     assert "run `contx wake`" in normalized_output
     assert "Never call OptMem directly" in normalized_output
+    assert "`contx proposals adopt|reject`" in normalized_output
     assert "Subagents must not run CONTX" in normalized_output
     assert "memory commands or submit proposals" in normalized_output
 

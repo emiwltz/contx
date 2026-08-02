@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from contx.db.models import (
+    AgentProposalAdoptionBuildModel,
     AgentProposalModel,
     CandidateBuildModel,
     CandidateDecisionModel,
@@ -49,6 +50,9 @@ from contx.model_provider import (
 from contx.models import (
     ActivityState,
     AgentProposal,
+    AgentProposalAdoptionBuild,
+    AgentProposalDecision,
+    AgentProposalReasonCode,
     AgentProposalStatus,
     AgentProposalType,
     AgentRole,
@@ -147,13 +151,21 @@ class PipelineRepository:
                 self._session.flush()
                 return candidate
             return _candidate_from_model(existing)
-        source_model: type[EventModel] | type[PatternModel] | type[MemoryLinkModel]
+        source_model: (
+            type[EventModel]
+            | type[PatternModel]
+            | type[MemoryLinkModel]
+            | type[AgentProposalModel]
+        )
         if candidate.source_type == "pattern":
             source_model = PatternModel
             source_label = "pattern"
         elif candidate.source_type == "memory_correction":
             source_model = MemoryLinkModel
             source_label = "memory"
+        elif candidate.source_type == "agent_proposal":
+            source_model = AgentProposalModel
+            source_label = "agent proposal"
         else:
             source_model = EventModel
             source_label = "event"
@@ -172,7 +184,7 @@ class PipelineRepository:
                 )
                 for pattern_id in candidate.source_ids
             )
-        elif candidate.source_type != "memory_correction":
+        elif candidate.source_type not in {"memory_correction", "agent_proposal"}:
             self._session.add_all(
                 CandidateEventModel(
                     candidate_id=str(candidate.id),
@@ -251,6 +263,19 @@ class PipelineRepository:
         model = self._session.get(MemoryCandidateModel, str(candidate_id))
         return None if model is None else _candidate_from_model(model)
 
+    def active_memory_candidates(self) -> tuple[MemoryCandidate, ...]:
+        """Load active final-memory text for proposal duplicate checks."""
+        models = self._session.scalars(
+            select(MemoryCandidateModel)
+            .join(
+                MemoryLinkModel,
+                MemoryLinkModel.candidate_id == MemoryCandidateModel.id,
+            )
+            .where(MemoryLinkModel.status == MemoryLinkStatus.ACTIVE.value)
+            .order_by(MemoryLinkModel.created_at.desc(), MemoryLinkModel.id.desc())
+        )
+        return tuple(_candidate_from_model(model) for model in models)
+
     def count(
         self,
         model: type[ObservationModel]
@@ -270,6 +295,7 @@ class PipelineRepository:
             | type[EventModel]
             | type[PatternModel]
             | type[MemoryLinkModel]
+            | type[AgentProposalModel]
         ),
         identifiers: tuple[UUID, ...],
         label: str,
@@ -310,6 +336,11 @@ class PipelineRepository:
         expected_patterns = {str(item) for item in link.provenance.pattern_ids}
         if candidate.source_type == "memory_correction":
             event_ids = self._validate_correction_provenance(
+                link,
+                candidate=candidate,
+            )
+        elif candidate.source_type == "agent_proposal":
+            event_ids = self._validate_agent_proposal_provenance(
                 link,
                 candidate=candidate,
             )
@@ -393,6 +424,83 @@ class PipelineRepository:
             ):
                 raise DatabaseError("Memory correction provenance is incomplete")
         return {str(item) for item in target_provenance["event_ids"]}
+
+    def _validate_agent_proposal_provenance(
+        self,
+        link: MemoryLink,
+        *,
+        candidate: MemoryCandidateModel,
+    ) -> set[str]:
+        if (
+            link.candidate_decision_id is not None
+            or link.supersedes_memory_id is not None
+            or len(candidate.source_ids) != 1
+        ):
+            raise DatabaseError("Agent proposal memory identity is inconsistent")
+        proposal_id = candidate.source_ids[0]
+        proposal = self._session.get(AgentProposalModel, proposal_id)
+        build = self._session.get(AgentProposalAdoptionBuildModel, proposal_id)
+        if (
+            proposal is None
+            or proposal.status != AgentProposalStatus.PENDING.value
+            or proposal.agent_role != AgentRole.PRIMARY.value
+            or proposal.text != candidate.text
+            or proposal.reference_type is None
+            or proposal.reference_id is None
+            or build is None
+            or build.candidate_id != candidate.id
+            or build.decision != AgentProposalDecision.ACCEPTED.value
+        ):
+            raise DatabaseError("Agent proposal adoption audit is missing or invalid")
+        expected_patterns = {str(item) for item in link.provenance.pattern_ids}
+        if proposal.reference_type == ProposalReferenceType.EVENT.value:
+            if expected_patterns:
+                raise DatabaseError("Event proposal cannot cite pattern provenance")
+            event = self._session.get(EventModel, proposal.reference_id)
+            if event is None or event.sensitivity != candidate.sensitivity:
+                raise DatabaseError("Agent proposal event sensitivity is inconsistent")
+            event_ids = {proposal.reference_id}
+        elif proposal.reference_type == ProposalReferenceType.PATTERN.value:
+            if expected_patterns != {proposal.reference_id}:
+                raise DatabaseError(
+                    "Agent proposal provenance does not match its pattern"
+                )
+            pattern = self._session.get(PatternModel, proposal.reference_id)
+            if pattern is None or pattern.sensitivity != candidate.sensitivity:
+                raise DatabaseError(
+                    "Agent proposal pattern sensitivity is inconsistent"
+                )
+            event_ids = set(
+                self._session.scalars(
+                    select(PatternEventModel.event_id).where(
+                        PatternEventModel.pattern_id == proposal.reference_id
+                    )
+                )
+            )
+        elif proposal.reference_type == ProposalReferenceType.MEMORY.value:
+            reference = self._session.get(MemoryLinkModel, proposal.reference_id)
+            if reference is None or reference.status != MemoryLinkStatus.ACTIVE.value:
+                raise DatabaseError("Agent proposal memory reference is not active")
+            reference_candidate = self._session.get(
+                MemoryCandidateModel,
+                reference.candidate_id,
+            )
+            if (
+                reference_candidate is None
+                or reference_candidate.sensitivity != candidate.sensitivity
+            ):
+                raise DatabaseError(
+                    "Agent proposal memory sensitivity is inconsistent"
+                )
+            reference_provenance = reference.provenance
+            if expected_patterns != set(reference_provenance["pattern_ids"]):
+                raise DatabaseError(
+                    "Agent proposal provenance does not match referenced memory"
+                )
+            event_ids = set(reference_provenance["event_ids"])
+        else:
+            raise DatabaseError("Agent proposal reference type is invalid")
+        return {str(item) for item in event_ids}
 
 
 class ModelTransformationRepository:
@@ -1656,6 +1764,232 @@ class AgentProposalRepository:
         return tuple(_agent_proposal_from_model(model) for model in models)
 
 
+class AgentProposalAdoptionRepository:
+    """Persist and resume explicit, locally validated proposal adoption."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def build_by_proposal(
+        self,
+        proposal_id: UUID,
+    ) -> AgentProposalAdoptionBuild | None:
+        model = self._session.get(
+            AgentProposalAdoptionBuildModel,
+            str(proposal_id),
+        )
+        return (
+            None
+            if model is None
+            else _agent_proposal_adoption_build_from_model(model)
+        )
+
+    def build_by_candidate(
+        self,
+        candidate_id: UUID,
+    ) -> AgentProposalAdoptionBuild | None:
+        model = self._session.scalar(
+            select(AgentProposalAdoptionBuildModel).where(
+                AgentProposalAdoptionBuildModel.candidate_id == str(candidate_id)
+            )
+        )
+        return (
+            None
+            if model is None
+            else _agent_proposal_adoption_build_from_model(model)
+        )
+
+    def stage_acceptance(
+        self,
+        *,
+        candidate: MemoryCandidate,
+        link: MemoryLink,
+        build: AgentProposalAdoptionBuild,
+    ) -> tuple[MemoryCandidate, MemoryLink, AgentProposalAdoptionBuild]:
+        if (
+            candidate.status is not CandidateStatus.ACCEPTED
+            or candidate.source_type != "agent_proposal"
+            or len(candidate.source_ids) != 1
+            or link.status is not MemoryLinkStatus.PENDING
+            or link.supersedes_memory_id is not None
+            or build.decision is not AgentProposalDecision.ACCEPTED
+            or build.proposal_id != candidate.source_ids[0]
+            or build.candidate_id != candidate.id
+        ):
+            raise DatabaseError("Agent proposal adoption staging state is invalid")
+        pipeline = PipelineRepository(self._session)
+        existing_build = self.build_by_proposal(build.proposal_id)
+        existing_candidate = pipeline.candidate_by_id(candidate.id)
+        existing_link = pipeline.memory_link_by_candidate_id(candidate.id)
+        if existing_build is not None:
+            if (
+                existing_build != build
+                or existing_candidate is None
+                or existing_link is None
+                or existing_link.id != link.id
+            ):
+                raise DatabaseError("Agent proposal adoption identity conflicts")
+            return existing_candidate, existing_link, existing_build
+        if existing_candidate is not None or existing_link is not None:
+            raise DatabaseError("Agent proposal adoption staging is incomplete")
+        proposal = AgentProposalRepository(self._session).by_id(build.proposal_id)
+        if proposal is None or proposal.status is not AgentProposalStatus.PENDING:
+            raise DatabaseError("Agent proposal is unavailable for adoption")
+        persisted_candidate = pipeline.save_candidate(candidate)
+        self._session.add(_agent_proposal_adoption_build_to_model(build))
+        self._session.flush()
+        persisted_link = pipeline.save_memory_link(link)
+        return persisted_candidate, persisted_link, build
+
+    def record_decision(
+        self,
+        *,
+        build: AgentProposalAdoptionBuild,
+        processed_at: datetime,
+    ) -> AgentProposal:
+        if (
+            build.decision is AgentProposalDecision.ACCEPTED
+            or build.candidate_id is not None
+        ):
+            raise DatabaseError("Agent proposal terminal decision is invalid")
+        existing_build = self.build_by_proposal(build.proposal_id)
+        proposal_model = self._session.get(AgentProposalModel, str(build.proposal_id))
+        if proposal_model is None:
+            raise DatabaseError("Agent proposal was not found")
+        proposal = _agent_proposal_from_model(proposal_model)
+        status = AgentProposalStatus(build.decision.value)
+        if existing_build is not None:
+            if (
+                existing_build != build
+                or proposal.status is not status
+                or proposal.reason != build.reason_code.value
+            ):
+                raise DatabaseError("Agent proposal decision identity conflicts")
+            return proposal
+        if proposal.status is not AgentProposalStatus.PENDING:
+            raise DatabaseError("Only pending agent proposals can be evaluated")
+        decided = proposal.decide(
+            status,
+            processed_at=processed_at,
+            reason=build.reason_code.value,
+        )
+        self._session.add(_agent_proposal_adoption_build_to_model(build))
+        proposal_model.status = decided.status.value
+        proposal_model.reason = decided.reason
+        proposal_model.processed_at = format_utc(processed_at)
+        self._session.flush()
+        return decided
+
+    def finalize(
+        self,
+        *,
+        proposal_id: UUID,
+        candidate_id: UUID,
+        memory_link_id: UUID,
+        backend_id: str,
+        processed_at: datetime,
+    ) -> tuple[AgentProposal, MemoryCandidate, MemoryLink]:
+        normalized_backend_id = backend_id.strip()
+        if (
+            not normalized_backend_id
+            or len(normalized_backend_id) > 255
+            or any(character in normalized_backend_id for character in "\r\n")
+        ):
+            raise DatabaseError("Agent proposal backend identity is invalid")
+        proposal_model = self._session.get(AgentProposalModel, str(proposal_id))
+        candidate_model = self._session.get(MemoryCandidateModel, str(candidate_id))
+        link_model = self._session.get(MemoryLinkModel, str(memory_link_id))
+        build_model = self._session.get(
+            AgentProposalAdoptionBuildModel,
+            str(proposal_id),
+        )
+        if (
+            proposal_model is None
+            or candidate_model is None
+            or link_model is None
+            or link_model.candidate_id != str(candidate_id)
+            or build_model is None
+            or build_model.candidate_id != str(candidate_id)
+            or build_model.decision != AgentProposalDecision.ACCEPTED.value
+        ):
+            raise DatabaseError("Staged agent proposal adoption is unavailable")
+        if proposal_model.status == AgentProposalStatus.ADOPTED.value:
+            if (
+                candidate_model.status != CandidateStatus.STORED.value
+                or link_model.status != MemoryLinkStatus.ACTIVE.value
+            ):
+                raise DatabaseError("Finalized agent proposal adoption is inconsistent")
+            return (
+                _agent_proposal_from_model(proposal_model),
+                _candidate_from_model(candidate_model),
+                _memory_link_from_model(link_model),
+            )
+        if (
+            proposal_model.status != AgentProposalStatus.PENDING.value
+            or candidate_model.status != CandidateStatus.ACCEPTED.value
+            or link_model.status != MemoryLinkStatus.PENDING.value
+        ):
+            raise DatabaseError("Agent proposal adoption cannot be finalized")
+        backend_owner = self._session.scalar(
+            select(MemoryLinkModel).where(
+                MemoryLinkModel.memory_backend_id == normalized_backend_id,
+                MemoryLinkModel.id != link_model.id,
+            )
+        )
+        if backend_owner is not None:
+            raise DatabaseError("Agent proposal backend identity conflicts")
+        stored = _candidate_from_model(candidate_model).mark_stored(
+            processed_at=processed_at
+        )
+        _update_candidate_state(candidate_model, stored)
+        link_model.memory_backend_id = normalized_backend_id
+        link_model.status = MemoryLinkStatus.ACTIVE.value
+        proposal_model.status = AgentProposalStatus.ADOPTED.value
+        proposal_model.reason = None
+        proposal_model.processed_at = format_utc(processed_at)
+        self._session.flush()
+        return (
+            _agent_proposal_from_model(proposal_model),
+            stored,
+            _memory_link_from_model(link_model),
+        )
+
+    def reject(
+        self,
+        *,
+        proposal_id: UUID,
+        processed_at: datetime,
+        reason: str,
+    ) -> AgentProposal:
+        normalized_reason = reason.strip()
+        if (
+            not normalized_reason
+            or len(normalized_reason) > 255
+            or any(character in normalized_reason for character in "\r\n")
+        ):
+            raise DatabaseError("Agent proposal rejection reason is invalid")
+        proposal_model = self._session.get(AgentProposalModel, str(proposal_id))
+        if proposal_model is None:
+            raise DatabaseError("Agent proposal was not found")
+        proposal = _agent_proposal_from_model(proposal_model)
+        if proposal.status is AgentProposalStatus.REJECTED:
+            return proposal
+        if proposal.status is not AgentProposalStatus.PENDING:
+            raise DatabaseError("Only pending agent proposals can be rejected")
+        if self.build_by_proposal(proposal_id) is not None:
+            raise DatabaseError("Agent proposal adoption is already staged")
+        decided = proposal.decide(
+            AgentProposalStatus.REJECTED,
+            processed_at=processed_at,
+            reason=normalized_reason,
+        )
+        proposal_model.status = decided.status.value
+        proposal_model.reason = decided.reason
+        proposal_model.processed_at = format_utc(processed_at)
+        self._session.flush()
+        return decided
+
+
 class CollectionRepository:
     """Persist collection control and pre-capture exclusion policy."""
 
@@ -2246,6 +2580,60 @@ def _memory_correction_build_from_model(
         prompt_version=model.prompt_version,
         output_schema_version=model.output_schema_version,
         replacement_sha256=model.replacement_sha256,
+        started_at=parse_utc(model.started_at),
+        ended_at=parse_utc(model.ended_at),
+        wall_duration_ms=model.wall_duration_ms,
+    )
+
+
+def _agent_proposal_adoption_build_to_model(
+    record: AgentProposalAdoptionBuild,
+) -> AgentProposalAdoptionBuildModel:
+    return AgentProposalAdoptionBuildModel(
+        proposal_id=str(record.proposal_id),
+        candidate_id=(
+            None if record.candidate_id is None else str(record.candidate_id)
+        ),
+        provider=record.provider,
+        endpoint=record.endpoint,
+        model=record.model,
+        model_digest=record.model_digest,
+        prompt_version=record.prompt_version,
+        output_schema_version=record.output_schema_version,
+        decision=record.decision.value,
+        reason_code=record.reason_code.value,
+        confidence=record.confidence,
+        reference_sha256=record.reference_sha256,
+        active_memory_sha256=record.active_memory_sha256,
+        active_memory_count=record.active_memory_count,
+        started_at=format_utc(record.started_at),
+        ended_at=format_utc(record.ended_at),
+        wall_duration_ms=record.wall_duration_ms,
+    )
+
+
+def _agent_proposal_adoption_build_from_model(
+    model: AgentProposalAdoptionBuildModel,
+) -> AgentProposalAdoptionBuild:
+    if model.provider != "ollama":
+        raise DatabaseError("Agent proposal adoption provider is invalid")
+    return AgentProposalAdoptionBuild(
+        proposal_id=UUID(model.proposal_id),
+        candidate_id=(
+            None if model.candidate_id is None else UUID(model.candidate_id)
+        ),
+        provider="ollama",
+        endpoint=model.endpoint,
+        model=model.model,
+        model_digest=model.model_digest,
+        prompt_version=model.prompt_version,
+        output_schema_version=model.output_schema_version,
+        decision=AgentProposalDecision(model.decision),
+        reason_code=AgentProposalReasonCode(model.reason_code),
+        confidence=model.confidence,
+        reference_sha256=model.reference_sha256,
+        active_memory_sha256=model.active_memory_sha256,
+        active_memory_count=model.active_memory_count,
         started_at=parse_utc(model.started_at),
         ended_at=parse_utc(model.ended_at),
         wall_duration_ms=model.wall_duration_ms,

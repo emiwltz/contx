@@ -144,14 +144,20 @@ contx recall '<regex>'                  # historical raw-memory search
 contx zoom <node>                       # historical tree navigation
 contx memory maintain                   # bounded local-model compression
 contx propose '<memory>' --reference-type <type> --reference <uuid>
+contx proposals list                    # inspect the proposal inbox
+contx proposals show <proposal-uuid>    # review text, evidence reference, state
+contx proposals adopt <proposal-uuid>   # explicit user action + local validation
+contx proposals reject <proposal-uuid>  # explicit rejection, no memory write
 contx correct <memory-uuid> '<replacement>'
 ```
 
 Installed continuous collection is not activated. `wake` is chronological: a
 newer `Correction:` line is authoritative over the older claim it contradicts.
 `recall` and `zoom` deliberately retain historical behavior. Agent proposals
-remain outside final memory, and `correct` requires an explicit user
-instruction.
+remain outside final memory until an explicit user adoption; Gemma validates
+support, novelty, and consistency, then CONTX appends the reviewed proposal
+unchanged. `proposals adopt`, `proposals reject`, and `correct` require an
+explicit user instruction.
 
 ---
 
@@ -234,8 +240,10 @@ The in-progress v0.5 foundation promotes accepted candidates with transitive
 provenance, performs bounded local-model OptMem compression, exposes direct
 `wake`/`recall`/`zoom`, isolates agent proposals, and supports restart-safe
 append-only corrections. ADR 0013 selects explicit `Correction:` entries with
-SQLite sidecar status and provenance for v0; an active-only projection remains
-the evidence-triggered fallback.
+SQLite sidecar status and provenance for v0. ADR 0014 adds explicit user
+proposal adoption, mandatory local semantic verification, unchanged OptMem
+append, transitive provenance, and restart-safe finalization. An active-only
+projection remains the evidence-triggered fallback.
 
 The local web UI and real pilot belong to the following increments. OptMem is
 used from an ignored development snapshot; it is not bundled while
@@ -249,7 +257,9 @@ for the J3 replay and correction proof,
 [`docs/evaluation/v0.4-pattern-candidate-validation.md`](docs/evaluation/v0.4-pattern-candidate-validation.md)
 for the J4 decision replay, and
 [`docs/evaluation/v0.5-memory-correction-validation.md`](docs/evaluation/v0.5-memory-correction-validation.md)
-for the current J5 OptMem correction evidence.
+for the current J5 OptMem correction evidence, and
+[`docs/evaluation/v0.5-agent-proposal-validation.md`](docs/evaluation/v0.5-agent-proposal-validation.md)
+for the explicit proposal-adoption and real-Gemma proof.
 
 ---
 

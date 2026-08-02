@@ -13,6 +13,7 @@ from sqlalchemy import Engine
 from contx import __version__
 from contx.application import (
     ActivityTimelineService,
+    AgentProposalAdoptionService,
     AgentProposalService,
     EventCorrectionService,
     LocalModelEventService,
@@ -44,6 +45,7 @@ from contx.db import (
     upgrade_database,
 )
 from contx.db.repositories import (
+    AgentProposalRepository,
     EventCorrectionRepository,
     ModelEventRepository,
     ModelTransformationRepository,
@@ -58,8 +60,10 @@ from contx.events import (
 )
 from contx.events.rules import VerticalSliceEventBuilder
 from contx.memory_store import (
+    AgentProposalEvaluator,
     MemoryCorrectionComposer,
     MemoryStore,
+    OllamaAgentProposalEvaluator,
     OllamaMemoryCompressor,
     OllamaMemoryCorrectionComposer,
     OptMemAdapter,
@@ -72,6 +76,7 @@ from contx.model_provider import (
     OllamaModelProvider,
 )
 from contx.models import (
+    AgentProposalStatus,
     AgentRole,
     CollectionControl,
     EventCorrectionContent,
@@ -98,10 +103,12 @@ exclusions_app = typer.Typer(help="Manage pre-capture exclusion rules.")
 model_app = typer.Typer(help="Inspect the mandatory local multimodal model.")
 timeline_app = typer.Typer(help="Build, inspect, and correct activity timelines.")
 memory_app = typer.Typer(help="Inspect and maintain final semantic memory.")
+proposals_app = typer.Typer(help="Review and explicitly decide agent proposals.")
 app.add_typer(exclusions_app, name="exclusions")
 app.add_typer(model_app, name="model")
 app.add_typer(timeline_app, name="timeline")
 app.add_typer(memory_app, name="memory")
+app.add_typer(proposals_app, name="proposals")
 
 
 class RunSource(StrEnum):
@@ -881,6 +888,158 @@ def propose(
     typer.echo("final memory writes: 0")
 
 
+@proposals_app.command("list")
+def list_proposals(
+    status: Annotated[
+        AgentProposalStatus | None,
+        typer.Option("--status", help="Only show proposals in this state."),
+    ] = None,
+) -> None:
+    """List proposals without invoking the model or final-memory backend."""
+    engine: Engine | None = None
+    try:
+        paths = resolve_runtime_paths()
+        initialize_runtime_paths(paths)
+        upgrade_database(paths.database_file)
+        engine = create_database_engine(paths.database_file)
+        with session_scope(engine) as database_session:
+            proposals = AgentProposalRepository(database_session).list(status=status)
+    except ContxError as error:
+        _abort(error)
+    finally:
+        if engine is not None:
+            engine.dispose()
+    if not proposals:
+        typer.echo("No proposals.")
+        return
+    for proposal in proposals:
+        reference = (
+            "none"
+            if proposal.reference_type is None or proposal.reference_id is None
+            else f"{proposal.reference_type.value}:{proposal.reference_id}"
+        )
+        typer.echo(
+            f"{proposal.id}\t{proposal.status.value}\t{reference}\t{proposal.text}"
+        )
+
+
+@proposals_app.command("show")
+def show_proposal(
+    proposal_id: Annotated[UUID, typer.Argument(help="Proposal UUID to inspect.")],
+) -> None:
+    """Show one proposal and its current decision state."""
+    engine: Engine | None = None
+    try:
+        paths = resolve_runtime_paths()
+        initialize_runtime_paths(paths)
+        upgrade_database(paths.database_file)
+        engine = create_database_engine(paths.database_file)
+        with session_scope(engine) as database_session:
+            proposal = AgentProposalRepository(database_session).by_id(proposal_id)
+        if proposal is None:
+            raise PipelineError("Agent proposal was not found")
+    except ContxError as error:
+        _abort(error)
+    finally:
+        if engine is not None:
+            engine.dispose()
+    typer.echo(f"proposal: {proposal.id}")
+    typer.echo(f"status: {proposal.status.value}")
+    typer.echo(f"agent: {proposal.agent_id} ({proposal.agent_role.value})")
+    typer.echo(f"text: {proposal.text}")
+    if proposal.reference_type is not None and proposal.reference_id is not None:
+        typer.echo(
+            f"reference: {proposal.reference_type.value}:{proposal.reference_id}"
+        )
+    else:
+        typer.echo("reference: none")
+    if proposal.reason is not None:
+        typer.echo(f"reason: {proposal.reason}")
+
+
+@proposals_app.command("adopt")
+def adopt_proposal(
+    proposal_id: Annotated[
+        UUID,
+        typer.Argument(help="Pending proposal UUID explicitly selected by the user."),
+    ],
+) -> None:
+    """Validate locally and append one explicitly selected proposal."""
+    engine: Engine | None = None
+    try:
+        paths = resolve_runtime_paths()
+        initialize_runtime_paths(paths)
+        settings = load_settings(paths)
+        upgrade_database(paths.database_file)
+        engine = create_database_engine(paths.database_file)
+        result = AgentProposalAdoptionService(
+            engine=engine,
+            memory_store=_build_memory_store(
+                paths.memory,
+                wake_budget_bytes=settings.memory.wake_budget_bytes,
+            ),
+            evaluator=_build_agent_proposal_evaluator(settings.model),
+            clock=SystemClock(),
+        ).adopt(proposal_id=proposal_id)
+    except ContxError as error:
+        _abort(error)
+    finally:
+        if engine is not None:
+            engine.dispose()
+    typer.echo(f"proposal: {result.proposal.id}")
+    typer.echo(f"status: {result.proposal.status.value}")
+    typer.echo(f"decision: {result.build.decision.value}")
+    typer.echo(f"reason: {result.build.reason_code.value}")
+    typer.echo(f"replayed: {'yes' if result.replayed else 'no'}")
+    if result.memory_link is not None:
+        typer.echo(f"memory: {result.memory_link.id}")
+        typer.echo(
+            "memory maintenance: "
+            + ("required" if result.maintenance_required else "not required")
+        )
+    else:
+        typer.echo("final memory writes: 0")
+
+
+@proposals_app.command("reject")
+def reject_proposal(
+    proposal_id: Annotated[
+        UUID,
+        typer.Argument(help="Pending proposal UUID explicitly rejected by the user."),
+    ],
+    reason: Annotated[
+        str,
+        typer.Option("--reason", help="Short content-free rejection reason."),
+    ] = "user_rejected",
+) -> None:
+    """Reject one pending proposal without invoking Gemma or final memory."""
+    engine: Engine | None = None
+    try:
+        paths = resolve_runtime_paths()
+        initialize_runtime_paths(paths)
+        settings = load_settings(paths)
+        upgrade_database(paths.database_file)
+        engine = create_database_engine(paths.database_file)
+        proposal = AgentProposalAdoptionService(
+            engine=engine,
+            memory_store=_build_memory_store(
+                paths.memory,
+                wake_budget_bytes=settings.memory.wake_budget_bytes,
+            ),
+            evaluator=_build_agent_proposal_evaluator(settings.model),
+            clock=SystemClock(),
+        ).reject(proposal_id=proposal_id, reason=reason)
+    except ContxError as error:
+        _abort(error)
+    finally:
+        if engine is not None:
+            engine.dispose()
+    typer.echo(f"proposal: {proposal.id}")
+    typer.echo(f"status: {proposal.status.value}")
+    typer.echo(f"reason: {proposal.reason}")
+    typer.echo("final memory writes: 0")
+
+
 @memory_app.command("maintain")
 def maintain_memory() -> None:
     """Run a bounded local-LLM compression cycle without network access."""
@@ -952,9 +1111,10 @@ call OptMem directly and never write to its files. A primary agent may use
 `contx propose '<one line>'
 --reference-type <event|pattern|memory> --reference <uuid>`; this records a
 proposal for CONTX validation and does not append final memory. Agents must not
-append final memory themselves or run `contx correct` without an explicit user
-instruction. Subagents must not run CONTX memory commands or submit proposals;
-the primary agent must adopt and submit a supported conclusion itself."""
+append final memory themselves, run `contx correct`, or run `contx proposals
+adopt|reject` without an explicit user instruction. Subagents must not run CONTX
+memory commands or submit proposals; the primary agent must submit a supported
+conclusion itself."""
     )
 
 
@@ -996,6 +1156,18 @@ def _build_memory_correction_composer(
     settings: ModelSettings,
 ) -> MemoryCorrectionComposer:
     return OllamaMemoryCorrectionComposer(
+        model=settings.model_name,
+        endpoint=settings.endpoint,
+        timeout_seconds=settings.timeout_seconds,
+        keep_alive=settings.keep_alive,
+        context_tokens=settings.context_tokens,
+    )
+
+
+def _build_agent_proposal_evaluator(
+    settings: ModelSettings,
+) -> AgentProposalEvaluator:
+    return OllamaAgentProposalEvaluator(
         model=settings.model_name,
         endpoint=settings.endpoint,
         timeout_seconds=settings.timeout_seconds,

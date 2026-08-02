@@ -56,6 +56,9 @@ guaranteed.
 - Restart-safe append-only memory corrections composed by the mandatory local
   model, with explicit `Correction:` semantics, linear supersession, inherited
   provenance, idempotent OptMem recovery, and content-free model audit.
+- Explicit agent-proposal review commands, mandatory local semantic adoption,
+  unchanged OptMem append, transitive provenance, audited negative decisions,
+  and restart-safe idempotent recovery.
 
 ### Changed
 

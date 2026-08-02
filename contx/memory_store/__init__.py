@@ -1,6 +1,8 @@
 """Final-memory contracts and implementations."""
 
 from contx.memory_store.base import (
+    AgentProposalEvaluation,
+    AgentProposalEvaluator,
     MemoryAppendResult,
     MemoryCompressionRequest,
     MemoryCompressor,
@@ -19,9 +21,18 @@ from contx.memory_store.corrections import (
     OllamaMemoryCorrectionComposer,
 )
 from contx.memory_store.optmem import OptMemAdapter, resolve_optmem_executable
+from contx.memory_store.proposals import (
+    AGENT_PROPOSAL_OUTPUT_SCHEMA_VERSION,
+    AGENT_PROPOSAL_PROMPT_VERSION,
+    OllamaAgentProposalEvaluator,
+)
 from contx.memory_store.recording import RecordingMemoryStore
 
 __all__ = [
+    "AgentProposalEvaluation",
+    "AgentProposalEvaluator",
+    "AGENT_PROPOSAL_OUTPUT_SCHEMA_VERSION",
+    "AGENT_PROPOSAL_PROMPT_VERSION",
     "MemoryAppendResult",
     "MemoryCompressionRequest",
     "MemoryCompressor",
@@ -33,6 +44,7 @@ __all__ = [
     "MEMORY_CORRECTION_PROMPT_VERSION",
     "MEMORY_CORRECTION_OUTPUT_SCHEMA_VERSION",
     "OllamaMemoryCorrectionComposer",
+    "OllamaAgentProposalEvaluator",
     "OllamaMemoryCompressor",
     "OptMemAdapter",
     "RecordingMemoryStore",
