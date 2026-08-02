@@ -1,0 +1,40 @@
+{
+  "fixture_version": 1,
+  "observations": [
+    {
+      "captured_at": "2026-07-29T09:30:00Z",
+      "started_at": "2026-07-29T09:00:00Z",
+      "ended_at": "2026-07-29T09:30:00Z",
+      "app_name": "Synthetic Editor",
+      "app_bundle_id": "dev.contx.synthetic-editor"
+    },
+    {
+      "captured_at": "2026-08-02T09:20:00Z",
+      "started_at": "2026-08-02T09:00:00Z",
+      "ended_at": "2026-08-02T09:20:00Z",
+      "app_name": "Synthetic Editor",
+      "app_bundle_id": "dev.contx.synthetic-editor"
+    },
+    {
+      "captured_at": "2026-08-02T09:45:00Z",
+      "started_at": "2026-08-02T09:20:00Z",
+      "ended_at": "2026-08-02T09:45:00Z",
+      "app_name": "Synthetic Editor",
+      "app_bundle_id": "dev.contx.synthetic-editor"
+    },
+    {
+      "captured_at": "2026-08-02T10:05:00Z",
+      "started_at": "2026-08-02T09:45:00Z",
+      "ended_at": "2026-08-02T10:05:00Z",
+      "app_name": "Synthetic Editor",
+      "app_bundle_id": "dev.contx.synthetic-editor"
+    },
+    {
+      "captured_at": "2026-08-02T10:10:15Z",
+      "started_at": "2026-08-02T10:10:00Z",
+      "ended_at": "2026-08-02T10:10:15Z",
+      "app_name": "Synthetic Settings",
+      "app_bundle_id": "dev.contx.synthetic-settings"
+    }
+  ]
+}

@@ -11,3 +11,7 @@ class ConfigurationError(ContxError):
 
 class DatabaseError(ContxError):
     """Raised when persisted CONTX state is unavailable or incompatible."""
+
+
+class PipelineError(ContxError):
+    """Raised when one observable pipeline run cannot complete."""

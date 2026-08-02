@@ -22,6 +22,8 @@ guaranteed.
   provenance, and explicit transaction boundaries.
 - Strict domain records, deterministic idempotency, replaceable pipeline
   contracts, and transaction-scoped repositories.
+- A replayable synthetic CONTX project-resumption pipeline with an explicit
+  positive memory decision and a justified trivial-activity rejection.
 
 ### Changed
 
