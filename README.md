@@ -163,11 +163,21 @@ v0.0.1 is implemented and verified. It includes:
   recovery, and direct `contx wake` output.
 
 The active-app collector may report that no frontmost application is available
-in a headless or restricted host session. Continuous collection, exclusions,
-bounded raw artifacts, OCR/privacy processing, patterns, corrections, local UI,
-and the real pilot belong to the following v0 increments. OptMem is used from
-an ignored development snapshot; it is not bundled while redistributable rights
-remain undocumented.
+in a headless or restricted host session. The in-progress v0.1 foundation now
+adds database-backed pause and exclusions, bounded raw artifacts and
+restart-safe purge, duration and system-state segmentation, non-prompting
+permission preflights, optional privacy-gated window titles, selective and
+exactly deduplicated screenshots, a minimal AppKit menu, an audited
+single-process daemon, graceful shutdown, and a deterministic LaunchAgent
+manifest. The daemon remains disabled by default; no LaunchAgent, live title
+access, live screenshot capture, or real-data pilot has been activated.
+
+OCR/privacy processing, patterns, corrections, the local web UI, and the real
+pilot belong to the following v0 increments. OptMem is used from an ignored
+development snapshot; it is not bundled while redistributable rights remain
+undocumented. See
+[`docs/evaluation/v0.1-preflight.md`](docs/evaluation/v0.1-preflight.md) for the
+current J1 evidence and remaining gates.
 
 ---
 

@@ -17,7 +17,7 @@
 | Phase 0 decision baseline | Complete | ADRs 0001–0006, aligned specification and architecture, Apache-2.0 baseline, OptMem provenance gate |
 | J0 engineering foundation | Complete | Locked Python 3.12 package, private runtime paths, Alembic/SQLite WAL, strict schemas and repositories |
 | v0.0.1 vertical slice | Complete | Synthetic and live one-shot collectors, candidate decision, OptMem persistence, provenance, direct `contx wake`, replay/failure tests |
-| v0.1 / J1 | Next | Controlled collection, exclusions, bounded raw storage, purge, and visible daemon control |
+| v0.1 / J1 | In progress | Controlled metadata and screenshot policy, exclusions, bounded raw storage, restart-safe purge, gated AppKit daemon, menu control, permission preflights, and launchd manifest are implemented; real activation, installation, one-day collection, and measured target-Mac baselines remain gated |
 
 The completed vertical-slice evidence and residual limitations are recorded in
 `docs/evaluation/v0.0.1-validation.md`. Completion here does not imply that the
