@@ -3,9 +3,9 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from contx.candidates.rules import SyntheticCandidateProducer
+from contx.candidates.rules import VerticalSliceCandidateProducer
 from contx.collectors.synthetic import SyntheticCollector
-from contx.events.rules import SyntheticEventBuilder
+from contx.events.rules import VerticalSliceEventBuilder
 from contx.memory_worker import ThresholdMemoryWorker
 from contx.models import CandidateStatus, Observation
 from tests.helpers import FixedClock, SequenceIdentifiers
@@ -28,10 +28,10 @@ def test_rules_reject_trivial_activity_without_lowering_threshold() -> None:
     observations = SyntheticCollector.default(
         clock=clock, identifiers=identifiers
     ).collect()
-    events = SyntheticEventBuilder(clock=clock, identifiers=identifiers).build(
+    events = VerticalSliceEventBuilder(clock=clock, identifiers=identifiers).build(
         observations
     )
-    candidates = SyntheticCandidateProducer(
+    candidates = VerticalSliceCandidateProducer(
         clock=clock, identifiers=identifiers
     ).produce(events)
 

@@ -10,7 +10,12 @@ from contx.candidates import CandidateProducer
 from contx.collectors import Collector
 from contx.db import session_scope
 from contx.db.repositories import PipelineRepository
-from contx.errors import PipelineError
+from contx.errors import (
+    CollectorUnavailableError,
+    ContxError,
+    DatabaseError,
+    PipelineError,
+)
 from contx.events import EventBuilder
 from contx.memory_worker import MemoryWorker
 from contx.models import (
@@ -98,7 +103,7 @@ class PipelineService:
             )
             self._save_run(run)
         except Exception as error:
-            code = type(error).__name__.lower()[:64]
+            code = _safe_error_code(error)
             failed = run.fail(ended_at=self._clock.now(), error_code=code)
             try:
                 self._save_run(failed)
@@ -106,6 +111,8 @@ class PipelineService:
                 raise PipelineError(
                     f"Pipeline failed ({code}) and its status could not be recorded"
                 ) from error
+            if isinstance(error, ContxError):
+                raise
             raise PipelineError(f"Pipeline failed ({code})") from error
         return PipelineResult(
             run=run,
@@ -147,3 +154,13 @@ class PipelineService:
     def _save_run(self, run: ProcessingRun) -> None:
         with session_scope(self._engine) as session:
             PipelineRepository(session).save_processing_run(run)
+
+
+def _safe_error_code(error: Exception) -> str:
+    if isinstance(error, CollectorUnavailableError):
+        return "collector_unavailable"
+    if isinstance(error, DatabaseError):
+        return "database_error"
+    if isinstance(error, PipelineError):
+        return "pipeline_error"
+    return "unexpected_pipeline_failure"

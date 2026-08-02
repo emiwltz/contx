@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import Engine, select
 
 from contx.application import PipelineResult, PipelineService
-from contx.candidates.rules import SyntheticCandidateProducer
+from contx.candidates.rules import VerticalSliceCandidateProducer
 from contx.collectors.synthetic import SyntheticCollector
 from contx.db import create_database_engine, session_scope, upgrade_database
 from contx.db.models import (
@@ -18,7 +18,7 @@ from contx.db.models import (
 )
 from contx.db.repositories import PipelineRepository
 from contx.errors import PipelineError
-from contx.events.rules import SyntheticEventBuilder
+from contx.events.rules import VerticalSliceEventBuilder
 from contx.memory_worker import ThresholdMemoryWorker
 from contx.models import Observation, ProcessingRunStatus
 from contx.models.sources import UuidIdentifierSource
@@ -90,6 +90,7 @@ def test_pipeline_failure_records_no_private_exception_message(tmp_path: Path) -
         with session_scope(engine) as session:
             run = session.scalars(select(ProcessingRunModel)).one()
             assert run.status == ProcessingRunStatus.FAILED.value
+            assert run.error_code == "unexpected_pipeline_failure"
             assert run.error_summary is None
     finally:
         engine.dispose()
@@ -115,8 +116,8 @@ def _service(
 ) -> PipelineService:
     return PipelineService(
         engine=engine,
-        event_builder=SyntheticEventBuilder(clock=clock, identifiers=identifiers),
-        candidate_producer=SyntheticCandidateProducer(
+        event_builder=VerticalSliceEventBuilder(clock=clock, identifiers=identifiers),
+        candidate_producer=VerticalSliceCandidateProducer(
             clock=clock, identifiers=identifiers
         ),
         memory_worker=ThresholdMemoryWorker(),

@@ -6,7 +6,7 @@ from contx.models.common import build_idempotency_key
 CANDIDATE_PROCESSING_VERSION = "synthetic-candidates-v1"
 
 
-class SyntheticCandidateProducer:
+class VerticalSliceCandidateProducer:
     """Produce one useful and one intentionally weak candidate."""
 
     def __init__(self, *, clock: Clock, identifiers: IdentifierSource) -> None:
@@ -24,7 +24,7 @@ class SyntheticCandidateProducer:
             )
             importance, durability, novelty = 0.95, 0.9, 0.85
         else:
-            text = "A brief synthetic settings interaction occurred."
+            text = "A brief active-application metadata sample occurred."
             importance, durability, novelty = 0.1, 0.05, 0.1
         score = round(
             importance * 0.35

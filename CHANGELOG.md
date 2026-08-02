@@ -24,6 +24,8 @@ guaranteed.
   contracts, and transaction-scoped repositories.
 - A replayable synthetic CONTX project-resumption pipeline with an explicit
   positive memory decision and a justified trivial-activity rejection.
+- An explicit one-shot macOS frontmost-application collector that stores no
+  window title, screenshot, or artifact.
 
 ### Changed
 

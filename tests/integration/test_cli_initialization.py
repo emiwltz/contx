@@ -29,3 +29,16 @@ def test_init_is_idempotent_and_status_is_truthful(tmp_path: Path) -> None:
     paths = resolve_runtime_paths(environment)
     assert stat.S_IMODE(paths.config_file.stat().st_mode) == 0o600
     assert stat.S_IMODE(paths.database_file.stat().st_mode) == 0o600
+
+
+def test_run_once_synthetic_uses_the_initialized_runtime(tmp_path: Path) -> None:
+    environment = {RUNTIME_ROOT_ENV: str(tmp_path)}
+
+    result = runner.invoke(app, ["run-once", "--source", "synthetic"], env=environment)
+
+    assert result.exit_code == 0
+    assert "run: succeeded" in result.stdout
+    assert "observations: 5" in result.stdout
+    assert "events: 2" in result.stdout
+    assert "accepted candidates: 1" in result.stdout
+    assert "rejected candidates: 1" in result.stdout

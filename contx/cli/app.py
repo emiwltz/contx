@@ -1,16 +1,26 @@
 """Top-level CONTX command-line application."""
 
-from typing import Annotated
+from enum import StrEnum
+from typing import Annotated, Never
 
 import typer
+from sqlalchemy import Engine
 
 from contx import __version__
+from contx.application import PipelineService
+from contx.candidates.rules import VerticalSliceCandidateProducer
+from contx.collectors.macos import ActiveApplicationCollector
+from contx.collectors.synthetic import SyntheticCollector
 from contx.db import (
+    create_database_engine,
     current_database_revision,
     head_database_revision,
     upgrade_database,
 )
 from contx.errors import ContxError
+from contx.events.rules import VerticalSliceEventBuilder
+from contx.memory_worker import ThresholdMemoryWorker
+from contx.models import SystemClock, UuidIdentifierSource
 from contx.settings import (
     initialize_runtime_paths,
     load_settings,
@@ -22,6 +32,13 @@ app = typer.Typer(
     help="Local-first personal context memory for AI agents.",
     no_args_is_help=True,
 )
+
+
+class RunSource(StrEnum):
+    """Explicit one-shot sources available before any daemon exists."""
+
+    SYNTHETIC = "synthetic"
+    ACTIVE_APP = "active-app"
 
 
 def _version_callback(value: bool) -> None:
@@ -87,7 +104,54 @@ def status() -> None:
     )
 
 
-def _abort(error: ContxError) -> None:
+@app.command("run-once")
+def run_once(
+    source: Annotated[
+        RunSource,
+        typer.Option("--source", help="Bounded source to collect explicitly."),
+    ] = RunSource.SYNTHETIC,
+) -> None:
+    """Run one foreground collection and processing cycle."""
+    engine: Engine | None = None
+    try:
+        paths = resolve_runtime_paths()
+        initialize_runtime_paths(paths)
+        load_settings(paths)
+        upgrade_database(paths.database_file)
+        engine = create_database_engine(paths.database_file)
+        clock = SystemClock()
+        identifiers = UuidIdentifierSource()
+        collector = (
+            SyntheticCollector.default(clock=clock, identifiers=identifiers)
+            if source is RunSource.SYNTHETIC
+            else ActiveApplicationCollector(clock=clock, identifiers=identifiers)
+        )
+        result = PipelineService(
+            engine=engine,
+            event_builder=VerticalSliceEventBuilder(
+                clock=clock, identifiers=identifiers
+            ),
+            candidate_producer=VerticalSliceCandidateProducer(
+                clock=clock, identifiers=identifiers
+            ),
+            memory_worker=ThresholdMemoryWorker(),
+            clock=clock,
+            identifiers=identifiers,
+        ).run_once(collector)
+    except ContxError as error:
+        _abort(error)
+    finally:
+        if engine is not None:
+            engine.dispose()
+
+    typer.echo(f"run: {result.run.status.value}")
+    typer.echo(f"observations: {len(result.observations)}")
+    typer.echo(f"events: {len(result.events)}")
+    typer.echo(f"accepted candidates: {len(result.accepted_candidates)}")
+    typer.echo(f"rejected candidates: {len(result.rejected_candidates)}")
+
+
+def _abort(error: ContxError) -> Never:
     typer.echo(f"Error: {error}", err=True)
     raise typer.Exit(code=2)
 

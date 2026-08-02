@@ -15,3 +15,7 @@ class DatabaseError(ContxError):
 
 class PipelineError(ContxError):
     """Raised when one observable pipeline run cannot complete."""
+
+
+class CollectorUnavailableError(ContxError):
+    """Raised when a requested local collection capability is unavailable."""

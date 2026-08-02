@@ -21,7 +21,7 @@ RESUMPTION_GAP = timedelta(hours=24)
 MINIMUM_RESUMPTION_ACTIVITY_SECONDS = 30 * 60
 
 
-class SyntheticEventBuilder:
+class VerticalSliceEventBuilder:
     """Detect one evidenced project resumption and bounded trivial activity."""
 
     def __init__(self, *, clock: Clock, identifiers: IdentifierSource) -> None:
@@ -114,7 +114,7 @@ class SyntheticEventBuilder:
                 tuple(item.idempotency_key for item in observations),
             ),
             type="brief_activity",
-            summary="Observed a brief synthetic settings interaction.",
+            summary="Observed one brief active-application metadata sample.",
             facts={
                 "app_bundle_id": first.app_bundle_id,
                 "active_seconds": active_seconds,
