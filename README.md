@@ -136,10 +136,13 @@ contx run-once --source synthetic       # deterministic end-to-end proof
 contx run-once --source active-app      # one explicit macOS metadata sample
 contx model status                      # content-free local runtime/model preflight
 contx process                           # process one bounded local-model backlog batch
+contx timeline build --from <iso> --until <iso> # replay a frozen activity window
+contx timeline show <processing-run-id> # inspect one selected timeline snapshot
+contx timeline correct <event-id> --summary <text> --reason <text>
 contx wake                              # direct final-memory context
 ```
 
-`recall`, `zoom`, agent proposals, corrections, and installed continuous
+`recall`, `zoom`, agent proposals, memory corrections, and installed continuous
 collection are planned milestone capabilities and are not advertised as
 implemented commands yet.
 
@@ -159,10 +162,10 @@ implemented commands yet.
 | **v0.9** | **J7 real pilot** | 7–14 day pilot, ground truth, with/without CONTX comparison, error analysis, OptMem decision. |
 | **v1.0** | **J8 hardening** | Fixes, optimization, install/upgrade/uninstall, recovery, distribution, licensing, and documentation. |
 
-**Active goal:** build v0.3 replayable events, corrections, and an intelligible
-activity timeline while keeping the real v0.1 collector activation separately
-gated, then continue through the complete v0 pilot (§37 and the
-[implementation plan](./docs/implementation-plan.md)).
+**Active goal:** build v0.4 multi-event patterns, change detection, memory
+candidates, and transparent worker decisions while keeping the real v0.1
+collector activation separately gated, then continue through the complete v0
+pilot (§37 and the [implementation plan](./docs/implementation-plan.md)).
 
 ---
 
@@ -209,14 +212,24 @@ durable-memory gate rejects `sensitive` and `forbidden` content. Protected-value
 reproduction is measured locally but is not a masking gate; v0 has no
 deterministic extraction or redaction path and no remote user-content path.
 
-Robust sessionization, corrections, patterns, the local web UI, and the real
-pilot belong to the following v0 increments. OptMem is used from an ignored
+The completed v0.3 foundation adds a bounded event vocabulary, configurable
+sessionization, explicit validity, evidence lineage, processing-run timeline
+snapshots, same- and changed-version replay, and append-only event corrections.
+A frozen synthetic day produces an intelligible two-event timeline; a correction
+survives a compatible v2 rebuild without mutating v1 evidence. `contx timeline`
+can build, show, and correct explicit snapshots without collecting or invoking
+the model.
+
+Patterns, memory candidates, the local web UI, and the real pilot belong to the
+following v0 increments. OptMem is used from an ignored
 development snapshot; it is not bundled while redistributable rights remain
 undocumented. See
 [`docs/evaluation/v0.1-preflight.md`](docs/evaluation/v0.1-preflight.md) for the
 current J1 evidence and remaining gates, and
 [`docs/evaluation/v0.2-local-model-preflight.md`](docs/evaluation/v0.2-local-model-preflight.md)
-for the complete J2 model evidence and residual risks.
+for the complete J2 model evidence and residual risks, and
+[`docs/evaluation/v0.3-activity-timeline-validation.md`](docs/evaluation/v0.3-activity-timeline-validation.md)
+for the J3 replay and correction proof.
 
 ---
 

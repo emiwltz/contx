@@ -39,6 +39,14 @@ guaranteed.
 - A fixed 16-screen synthetic privacy and quality matrix, configurable image
   profiles, conservative category-to-sensitivity normalization, and a hard
   final gate preventing sensitive or forbidden durable-memory writes.
+- Stable event lineage and validity fields, a bounded event vocabulary, and a
+  migration that preserves existing events.
+- Configurable deterministic sessionization and processing-run-selected
+  activity timelines with explicit frozen-window replay parameters.
+- Append-only event correction chains that survive compatible cross-version
+  rebuilds without changing source evidence or sensitivity.
+- `contx timeline build`, `timeline show`, and `timeline correct` commands for
+  explicit replay, inspection, and correction.
 
 ### Changed
 
