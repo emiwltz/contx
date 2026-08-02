@@ -94,6 +94,28 @@ class CandidateDecisionStatus(StrEnum):
     DEFERRED = "deferred"
 
 
+class AgentRole(StrEnum):
+    PRIMARY = "primary"
+    SUBAGENT = "subagent"
+
+
+class AgentProposalType(StrEnum):
+    MEMORY = "memory"
+
+
+class AgentProposalStatus(StrEnum):
+    PENDING = "pending"
+    REJECTED = "rejected"
+    DEFERRED = "deferred"
+    ADOPTED = "adopted"
+
+
+class ProposalReferenceType(StrEnum):
+    EVENT = "event"
+    PATTERN = "pattern"
+    MEMORY = "memory"
+
+
 class PatternType(StrEnum):
     PROJECT_RECURRENCE = "project_recurrence"
     PROJECT_RESUMPTION = "project_resumption"
@@ -645,6 +667,50 @@ class CandidateEvaluationBuild(DomainRecord):
     minimum_confidence: float = Field(ge=0.0, le=1.0)
     maximum_ambiguity: float = Field(ge=0.0, le=1.0)
     maximum_redundancy: float = Field(ge=0.0, le=1.0)
+
+
+class AgentProposal(DomainRecord):
+    """An agent-authored proposal that cannot write final memory directly."""
+
+    id: UUID
+    idempotency_key: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]+$")
+    agent_id: str = Field(min_length=1, max_length=120)
+    agent_role: AgentRole
+    text: str = Field(min_length=1, max_length=4000, repr=False)
+    proposal_type: AgentProposalType = AgentProposalType.MEMORY
+    reference_type: ProposalReferenceType | None = None
+    reference_id: UUID | None = None
+    status: AgentProposalStatus = AgentProposalStatus.PENDING
+    reason: str | None = Field(default=None, max_length=255)
+    created_at: datetime
+    processed_at: datetime | None = None
+
+    _utc_timestamps = field_validator("created_at", "processed_at")(
+        lambda value: None if value is None else require_aware_utc(value)
+    )
+
+    @field_validator("agent_id", "text")
+    @classmethod
+    def validate_single_line(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized or any(character in normalized for character in "\r\n"):
+            raise ValueError("agent proposal fields must be one non-empty line")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_proposal(self) -> Self:
+        if (self.reference_type is None) != (self.reference_id is None):
+            raise ValueError("proposal reference type and identifier must coexist")
+        decided = self.status is not AgentProposalStatus.PENDING
+        if decided != (self.processed_at is not None):
+            raise ValueError("processed_at is required exactly for decided proposals")
+        needs_reason = self.status in {
+            AgentProposalStatus.REJECTED,
+            AgentProposalStatus.DEFERRED,
+        }
+        if needs_reason != (self.reason is not None):
+            raise ValueError("rejected or deferred proposals require one reason")
+        return self
 
 
 class MemoryProvenance(DomainRecord):

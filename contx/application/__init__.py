@@ -6,6 +6,7 @@ from contx.application.activity_timeline import (
     EventCorrectionService,
     correction_content,
 )
+from contx.application.agent_proposals import AgentProposalService
 from contx.application.continuous_collection import (
     ContinuousCollectionResult,
     ContinuousCollectionRunner,
@@ -44,6 +45,7 @@ from contx.application.raw_purge import RawPurgeResult, RawPurgeService
 __all__ = [
     "ActivityTimelineBuildResult",
     "ActivityTimelineService",
+    "AgentProposalService",
     "ContinuousCollectionResult",
     "ContinuousCollectionRunner",
     "ContinuousCollectionSession",

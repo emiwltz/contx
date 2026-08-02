@@ -27,12 +27,13 @@ def test_version_is_available() -> None:
 
 def test_agent_instructions_protect_the_memory_write_boundary() -> None:
     result = runner.invoke(app, ["instructions"])
+    normalized_output = " ".join(result.stdout.split())
 
     assert result.exit_code == 0
-    assert "run `contx wake`" in result.stdout
-    assert "Never call OptMem directly" in result.stdout
-    assert "Subagents must not run CONTX" in result.stdout
-    assert "memory commands or submit proposals" in result.stdout
+    assert "run `contx wake`" in normalized_output
+    assert "Never call OptMem directly" in normalized_output
+    assert "Subagents must not run CONTX" in normalized_output
+    assert "memory commands or submit proposals" in normalized_output
 
 
 def test_recall_and_zoom_use_the_same_memory_store(

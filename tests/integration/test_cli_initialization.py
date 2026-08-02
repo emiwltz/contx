@@ -220,6 +220,25 @@ def test_timeline_cli_builds_and_reads_an_empty_frozen_window(tmp_path: Path) ->
     assert "events: 0" in shown.stdout
 
 
+def test_agent_proposal_without_provenance_is_deferred_without_memory_write(
+    tmp_path: Path,
+) -> None:
+    environment = {RUNTIME_ROOT_ENV: str(tmp_path)}
+
+    result = runner.invoke(
+        app,
+        ["propose", "Synthetic unsupported memory proposal."],
+        env=environment,
+    )
+
+    assert result.exit_code == 0
+    assert "status: deferred" in result.stdout
+    assert "reason: provenance_reference_required" in result.stdout
+    assert "final memory writes: 0" in result.stdout
+    paths = resolve_runtime_paths(environment)
+    assert not (paths.memory / "LOG.txt").exists()
+
+
 def test_timeline_cli_rejects_naive_boundaries_without_creating_a_run(
     tmp_path: Path,
 ) -> None:

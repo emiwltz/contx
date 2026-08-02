@@ -13,6 +13,7 @@ from sqlalchemy import Engine
 from contx import __version__
 from contx.application import (
     ActivityTimelineService,
+    AgentProposalService,
     EventCorrectionService,
     LocalModelEventService,
     LocalModelProcessingService,
@@ -68,9 +69,11 @@ from contx.model_provider import (
     OllamaModelProvider,
 )
 from contx.models import (
+    AgentRole,
     CollectionControl,
     EventCorrectionContent,
     ExclusionRuleType,
+    ProposalReferenceType,
     SystemClock,
     UuidIdentifierSource,
 )
@@ -782,6 +785,57 @@ def zoom(block: str) -> None:
     typer.echo(result, nl=False)
 
 
+@app.command()
+def propose(
+    text: Annotated[str, typer.Argument(help="One proposed memory line.")],
+    agent_id: Annotated[
+        str,
+        typer.Option("--agent-id", help="Stable identifier of the submitting agent."),
+    ] = "codex",
+    agent_role: Annotated[
+        AgentRole,
+        typer.Option("--agent-role", help="Primary agents submit; subagents do not."),
+    ] = AgentRole.PRIMARY,
+    reference_type: Annotated[
+        ProposalReferenceType | None,
+        typer.Option("--reference-type", help="Type of supporting CONTX record."),
+    ] = None,
+    reference_id: Annotated[
+        UUID | None,
+        typer.Option("--reference", help="UUID of the supporting CONTX record."),
+    ] = None,
+) -> None:
+    """Submit a validated proposal without writing final memory directly."""
+    engine: Engine | None = None
+    try:
+        paths = resolve_runtime_paths()
+        initialize_runtime_paths(paths)
+        load_settings(paths)
+        upgrade_database(paths.database_file)
+        engine = create_database_engine(paths.database_file)
+        proposal = AgentProposalService(
+            engine=engine,
+            clock=SystemClock(),
+            identifiers=UuidIdentifierSource(),
+        ).submit(
+            agent_id=agent_id,
+            agent_role=agent_role,
+            text=text,
+            reference_type=reference_type,
+            reference_id=reference_id,
+        )
+    except ContxError as error:
+        _abort(error)
+    finally:
+        if engine is not None:
+            engine.dispose()
+    typer.echo(f"proposal: {proposal.id}")
+    typer.echo(f"status: {proposal.status.value}")
+    if proposal.reason is not None:
+        typer.echo(f"reason: {proposal.reason}")
+    typer.echo("final memory writes: 0")
+
+
 @memory_app.command("maintain")
 def maintain_memory() -> None:
     """Run a bounded local-LLM compression cycle without network access."""
@@ -847,10 +901,12 @@ stderr, then retry until the command completes.
 
 Use `contx recall '<regex>'` to search exact memory text and `contx zoom
 <lo>-<hi>` to navigate a summary node. Never call OptMem directly and never
-write to its files. Agents may only submit proposals through CONTX validation;
-they must not append final memory themselves. Subagents must not run CONTX
-memory commands or submit proposals; the primary agent must adopt and submit a
-supported conclusion itself."""
+write to its files. A primary agent may use `contx propose '<one line>'
+--reference-type <event|pattern|memory> --reference <uuid>`; this records a
+proposal for CONTX validation and does not append final memory. Agents must not
+append final memory themselves. Subagents must not run CONTX memory commands or
+submit proposals; the primary agent must adopt and submit a supported
+conclusion itself."""
     )
 
 

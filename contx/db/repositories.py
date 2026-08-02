@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from contx.db.models import (
+    AgentProposalModel,
     CandidateBuildModel,
     CandidateDecisionModel,
     CandidateEvaluationBuildModel,
@@ -46,6 +47,10 @@ from contx.model_provider import (
 )
 from contx.models import (
     ActivityState,
+    AgentProposal,
+    AgentProposalStatus,
+    AgentProposalType,
+    AgentRole,
     CandidateBuild,
     CandidateDecision,
     CandidateDecisionStatus,
@@ -73,6 +78,7 @@ from contx.models import (
     PatternType,
     ProcessingRun,
     ProcessingRunStatus,
+    ProposalReferenceType,
     Sensitivity,
     SourceType,
     TimelineBuild,
@@ -195,6 +201,10 @@ class PipelineRepository:
                 MemoryLinkModel.candidate_id == str(candidate_id)
             )
         )
+        return None if model is None else _memory_link_from_model(model)
+
+    def memory_link_by_id(self, memory_link_id: UUID) -> MemoryLink | None:
+        model = self._session.get(MemoryLinkModel, str(memory_link_id))
         return None if model is None else _memory_link_from_model(model)
 
     def save_processing_run(self, run: ProcessingRun) -> ProcessingRun:
@@ -1411,6 +1421,61 @@ class MemoryPromotionRepository:
         return tuple(_memory_link_from_model(model) for model in models)
 
 
+class AgentProposalRepository:
+    """Persist agent submissions outside the final-memory write path."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def save(self, proposal: AgentProposal) -> AgentProposal:
+        existing = self._session.scalar(
+            select(AgentProposalModel).where(
+                AgentProposalModel.idempotency_key == proposal.idempotency_key
+            )
+        )
+        if existing is not None:
+            persisted = _agent_proposal_from_model(existing)
+            identity = (
+                persisted.agent_id,
+                persisted.agent_role,
+                persisted.text,
+                persisted.proposal_type,
+                persisted.reference_type,
+                persisted.reference_id,
+            )
+            proposed_identity = (
+                proposal.agent_id,
+                proposal.agent_role,
+                proposal.text,
+                proposal.proposal_type,
+                proposal.reference_type,
+                proposal.reference_id,
+            )
+            if identity != proposed_identity:
+                raise DatabaseError("Agent proposal identity conflicts")
+            return persisted
+        self._session.add(_agent_proposal_to_model(proposal))
+        self._session.flush()
+        return proposal
+
+    def by_id(self, proposal_id: UUID) -> AgentProposal | None:
+        model = self._session.get(AgentProposalModel, str(proposal_id))
+        return None if model is None else _agent_proposal_from_model(model)
+
+    def list(
+        self,
+        *,
+        status: AgentProposalStatus | None = None,
+    ) -> tuple[AgentProposal, ...]:
+        statement = select(AgentProposalModel)
+        if status is not None:
+            statement = statement.where(AgentProposalModel.status == status.value)
+        models = self._session.scalars(
+            statement.order_by(AgentProposalModel.created_at, AgentProposalModel.id)
+        )
+        return tuple(_agent_proposal_from_model(model) for model in models)
+
+
 class CollectionRepository:
     """Persist collection control and pre-capture exclusion policy."""
 
@@ -1984,6 +2049,52 @@ def _memory_promotion_build_from_model(
         processing_run_id=UUID(model.processing_run_id),
         source_evaluation_run_id=UUID(model.source_evaluation_run_id),
         processing_version=model.processing_version,
+    )
+
+
+def _agent_proposal_to_model(record: AgentProposal) -> AgentProposalModel:
+    return AgentProposalModel(
+        id=str(record.id),
+        idempotency_key=record.idempotency_key,
+        agent_id=record.agent_id,
+        agent_role=record.agent_role.value,
+        text=record.text,
+        proposal_type=record.proposal_type.value,
+        reference_type=(
+            None if record.reference_type is None else record.reference_type.value
+        ),
+        reference_id=(
+            None if record.reference_id is None else str(record.reference_id)
+        ),
+        status=record.status.value,
+        reason=record.reason,
+        created_at=format_utc(record.created_at),
+        processed_at=(
+            None if record.processed_at is None else format_utc(record.processed_at)
+        ),
+    )
+
+
+def _agent_proposal_from_model(model: AgentProposalModel) -> AgentProposal:
+    return AgentProposal(
+        id=UUID(model.id),
+        idempotency_key=model.idempotency_key,
+        agent_id=model.agent_id,
+        agent_role=AgentRole(model.agent_role),
+        text=model.text,
+        proposal_type=AgentProposalType(model.proposal_type),
+        reference_type=(
+            None
+            if model.reference_type is None
+            else ProposalReferenceType(model.reference_type)
+        ),
+        reference_id=(None if model.reference_id is None else UUID(model.reference_id)),
+        status=AgentProposalStatus(model.status),
+        reason=model.reason,
+        created_at=parse_utc(model.created_at),
+        processed_at=(
+            None if model.processed_at is None else parse_utc(model.processed_at)
+        ),
     )
 
 

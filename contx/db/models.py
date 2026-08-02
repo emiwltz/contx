@@ -383,6 +383,25 @@ class CandidateEvaluationBuildModel(Base):
     maximum_redundancy: Mapped[float] = mapped_column(Float)
 
 
+class AgentProposalModel(Base):
+    """An agent submission held outside final memory until adoption."""
+
+    __tablename__ = "agent_proposals"
+
+    id: Mapped[Identifier] = mapped_column(String(36), primary_key=True)
+    idempotency_key: Mapped[str] = mapped_column(String(64), unique=True)
+    agent_id: Mapped[str] = mapped_column(String(120), index=True)
+    agent_role: Mapped[str] = mapped_column(String(32), index=True)
+    text: Mapped[str] = mapped_column(Text)
+    proposal_type: Mapped[str] = mapped_column(String(32), index=True)
+    reference_type: Mapped[str | None] = mapped_column(String(32), index=True)
+    reference_id: Mapped[Identifier | None] = mapped_column(String(36), index=True)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    reason: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[UtcTimestamp] = mapped_column(String(32), index=True)
+    processed_at: Mapped[UtcTimestamp | None] = mapped_column(String(32))
+
+
 class MemoryLinkModel(Base):
     """Link durable memory identity to its accepted candidate."""
 
