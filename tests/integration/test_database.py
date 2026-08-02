@@ -269,6 +269,77 @@ def test_existing_candidates_gain_explicit_scoring_components_on_upgrade(
     assert row == (0.8, 0.0, 0.25, 0.0, "legacy-candidate-v1")
 
 
+def test_existing_memory_links_remain_legacy_compatible_on_upgrade(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "contx.db"
+    upgrade_database(database_path, revision="20260802_0006")
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            """INSERT INTO memory_candidates (
+                id, idempotency_key, text, source_type, source_ids, utility,
+                importance, durability, novelty, recurrence, confidence,
+                ambiguity, redundancy, sensitivity, score, scoring_version,
+                status, rejection_reason, created_at, processed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "00000000-0000-0000-0000-000000000041",
+                "d" * 64,
+                "Existing stored memory.",
+                "event",
+                '["00000000-0000-0000-0000-000000000042"]',
+                0.8,
+                0.8,
+                0.8,
+                0.8,
+                0.0,
+                0.8,
+                0.2,
+                0.0,
+                "personal",
+                0.8,
+                "legacy-candidate-v1",
+                "stored",
+                None,
+                "2026-08-02T10:00:00.000000Z",
+                "2026-08-02T10:01:00.000000Z",
+            ),
+        )
+        connection.execute(
+            """INSERT INTO memory_links (
+                id, memory_backend_id, candidate_id, provenance, confidence,
+                status, supersedes_memory_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "00000000-0000-0000-0000-000000000043",
+                "0",
+                "00000000-0000-0000-0000-000000000041",
+                '{"candidate_id":"00000000-0000-0000-0000-000000000041",'
+                '"event_ids":["00000000-0000-0000-0000-000000000042"],'
+                '"observation_ids":["00000000-0000-0000-0000-000000000044"]}',
+                0.8,
+                "active",
+                None,
+                "2026-08-02T10:01:00.000000Z",
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    upgrade_database(database_path)
+
+    connection = sqlite3.connect(database_path)
+    try:
+        row = connection.execute(
+            "SELECT id, candidate_decision_id FROM memory_links"
+        ).fetchone()
+    finally:
+        connection.close()
+    assert row == ("00000000-0000-0000-0000-000000000043", None)
+
+
 def test_empty_file_recovers_like_interrupted_initialization(tmp_path: Path) -> None:
     database_path = tmp_path / "contx.db"
     database_path.touch(mode=0o600)

@@ -395,6 +395,11 @@ class MemoryLinkModel(Base):
         ForeignKey("memory_candidates.id", ondelete="RESTRICT"),
         unique=True,
     )
+    candidate_decision_id: Mapped[Identifier | None] = mapped_column(
+        String(36),
+        ForeignKey("candidate_decisions.id", ondelete="RESTRICT"),
+        unique=True,
+    )
     provenance: Mapped[dict[str, Any]] = mapped_column(JSON)
     confidence: Mapped[float] = mapped_column(Float)
     status: Mapped[str] = mapped_column(String(32), index=True)
@@ -402,6 +407,41 @@ class MemoryLinkModel(Base):
         String(36), ForeignKey("memory_links.id", ondelete="RESTRICT")
     )
     created_at: Mapped[UtcTimestamp] = mapped_column(String(32))
+
+
+class MemoryLinkProcessingRunModel(Base):
+    """Link a durable memory to each promotion run that selected it."""
+
+    __tablename__ = "memory_link_processing_runs"
+
+    memory_link_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("memory_links.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    processing_run_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("processing_runs.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+
+
+class MemoryPromotionBuildModel(Base):
+    """Content-free source selection for one promotion replay."""
+
+    __tablename__ = "memory_promotion_builds"
+
+    processing_run_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("processing_runs.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    source_evaluation_run_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("processing_runs.id", ondelete="RESTRICT"),
+        index=True,
+    )
+    processing_version: Mapped[str] = mapped_column(String(64), index=True)
 
 
 class ProcessingRunModel(Base):

@@ -649,15 +649,19 @@ class CandidateEvaluationBuild(DomainRecord):
 
 class MemoryProvenance(DomainRecord):
     candidate_id: UUID
+    pattern_ids: tuple[UUID, ...] = ()
     event_ids: tuple[UUID, ...] = Field(min_length=1)
     observation_ids: tuple[UUID, ...] = Field(min_length=1)
 
     @model_validator(mode="after")
     def validate_unique_ids(self) -> Self:
-        if len(set(self.event_ids)) != len(self.event_ids):
-            raise ValueError("provenance event identifiers must be unique")
-        if len(set(self.observation_ids)) != len(self.observation_ids):
-            raise ValueError("provenance observation identifiers must be unique")
+        for label, values in (
+            ("pattern", self.pattern_ids),
+            ("event", self.event_ids),
+            ("observation", self.observation_ids),
+        ):
+            if len(set(values)) != len(values):
+                raise ValueError(f"provenance {label} identifiers must be unique")
         return self
 
 
@@ -665,6 +669,7 @@ class MemoryLink(DomainRecord):
     id: UUID
     memory_backend_id: str = Field(min_length=1, max_length=255)
     candidate_id: UUID
+    candidate_decision_id: UUID | None = None
     provenance: MemoryProvenance
     confidence: float = Field(ge=0.0, le=1.0)
     status: MemoryLinkStatus = MemoryLinkStatus.ACTIVE
@@ -678,6 +683,14 @@ class MemoryLink(DomainRecord):
         if self.candidate_id != self.provenance.candidate_id:
             raise ValueError("memory provenance must reference the linked candidate")
         return self
+
+
+class MemoryPromotionBuild(DomainRecord):
+    """Content-free source selection for one memory promotion run."""
+
+    processing_run_id: UUID
+    source_evaluation_run_id: UUID
+    processing_version: str = Field(min_length=1, max_length=64)
 
 
 class ProcessingRun(DomainRecord):

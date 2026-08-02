@@ -25,6 +25,8 @@ from contx.db.models import (
     ExclusionRuleModel,
     MemoryCandidateModel,
     MemoryLinkModel,
+    MemoryLinkProcessingRunModel,
+    MemoryPromotionBuildModel,
     ModelTransformationModel,
     ModelTransformationObservationModel,
     ModelTransformationRunModel,
@@ -61,6 +63,7 @@ from contx.models import (
     MemoryCandidate,
     MemoryLink,
     MemoryLinkStatus,
+    MemoryPromotionBuild,
     MemoryProvenance,
     Observation,
     ObservationStatus,
@@ -250,21 +253,56 @@ class PipelineRepository:
 
     def _validate_memory_provenance(self, link: MemoryLink) -> None:
         candidate = self._session.get(MemoryCandidateModel, str(link.candidate_id))
-        if candidate is None or candidate.status not in {
-            CandidateStatus.ACCEPTED.value,
-            CandidateStatus.STORED.value,
-        }:
-            raise DatabaseError(
-                "Cannot link memory to a missing or unaccepted candidate"
+        if candidate is None:
+            raise DatabaseError("Cannot link memory to a missing candidate")
+        if link.candidate_decision_id is None:
+            if candidate.status not in {
+                CandidateStatus.ACCEPTED.value,
+                CandidateStatus.STORED.value,
+            }:
+                raise DatabaseError("Cannot link memory to an unaccepted candidate")
+        else:
+            decision = self._session.get(
+                CandidateDecisionModel,
+                str(link.candidate_decision_id),
             )
+            if (
+                decision is None
+                or decision.candidate_id != str(link.candidate_id)
+                or decision.status != CandidateDecisionStatus.ACCEPTED.value
+            ):
+                raise DatabaseError("Memory promotion decision is missing or invalid")
 
-        event_ids = set(
-            self._session.scalars(
-                select(CandidateEventModel.event_id).where(
-                    CandidateEventModel.candidate_id == str(link.candidate_id)
+        expected_patterns = {str(item) for item in link.provenance.pattern_ids}
+        if candidate.source_type == "pattern":
+            pattern_ids = set(
+                self._session.scalars(
+                    select(CandidatePatternModel.pattern_id).where(
+                        CandidatePatternModel.candidate_id == str(link.candidate_id)
+                    )
                 )
             )
-        )
+            if pattern_ids != expected_patterns:
+                raise DatabaseError(
+                    "Memory provenance does not match candidate patterns"
+                )
+            event_ids = set(
+                self._session.scalars(
+                    select(PatternEventModel.event_id).where(
+                        PatternEventModel.pattern_id.in_(pattern_ids)
+                    )
+                )
+            )
+        else:
+            if expected_patterns:
+                raise DatabaseError("Event memory cannot cite pattern provenance")
+            event_ids = set(
+                self._session.scalars(
+                    select(CandidateEventModel.event_id).where(
+                        CandidateEventModel.candidate_id == str(link.candidate_id)
+                    )
+                )
+            )
         expected_events = {str(item) for item in link.provenance.event_ids}
         if event_ids != expected_events:
             raise DatabaseError("Memory provenance does not match candidate events")
@@ -1290,6 +1328,89 @@ class CandidateEvaluationBuildRepository:
         return None if model is None else _candidate_evaluation_build_from_model(model)
 
 
+class MemoryPromotionBuildRepository:
+    """Persist the selected candidate-evaluation snapshot for promotion."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def save(self, build: MemoryPromotionBuild) -> MemoryPromotionBuild:
+        existing = self._session.get(
+            MemoryPromotionBuildModel,
+            str(build.processing_run_id),
+        )
+        if existing is not None:
+            persisted = _memory_promotion_build_from_model(existing)
+            if persisted != build:
+                raise DatabaseError("Memory promotion build identity conflicts")
+            return persisted
+        run = self._session.get(ProcessingRunModel, str(build.processing_run_id))
+        source = self._session.get(
+            ProcessingRunModel,
+            str(build.source_evaluation_run_id),
+        )
+        if (
+            run is None
+            or run.pipeline != "memory_promotion"
+            or run.version != build.processing_version
+            or source is None
+            or source.pipeline != "candidate_evaluation"
+            or source.status != ProcessingRunStatus.SUCCEEDED.value
+        ):
+            raise DatabaseError("Memory promotion build identity is invalid")
+        self._session.add(_memory_promotion_build_to_model(build))
+        self._session.flush()
+        return build
+
+    def by_processing_run(
+        self,
+        processing_run_id: UUID,
+    ) -> MemoryPromotionBuild | None:
+        model = self._session.get(
+            MemoryPromotionBuildModel,
+            str(processing_run_id),
+        )
+        return None if model is None else _memory_promotion_build_from_model(model)
+
+
+class MemoryPromotionRepository:
+    """Persist durable links selected by replayable promotion runs."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def save(self, link: MemoryLink, *, processing_run_id: UUID) -> MemoryLink:
+        run = self._session.get(ProcessingRunModel, str(processing_run_id))
+        if run is None or run.pipeline != "memory_promotion":
+            raise DatabaseError("Memory promotion run is missing or invalid")
+        persisted = PipelineRepository(self._session).save_memory_link(link)
+        identity = {
+            "memory_link_id": str(persisted.id),
+            "processing_run_id": str(processing_run_id),
+        }
+        if self._session.get(MemoryLinkProcessingRunModel, identity) is None:
+            self._session.add(MemoryLinkProcessingRunModel(**identity))
+        self._session.flush()
+        return persisted
+
+    def links_for_processing_run(
+        self,
+        processing_run_id: UUID,
+    ) -> tuple[MemoryLink, ...]:
+        models = self._session.scalars(
+            select(MemoryLinkModel)
+            .join(
+                MemoryLinkProcessingRunModel,
+                MemoryLinkProcessingRunModel.memory_link_id == MemoryLinkModel.id,
+            )
+            .where(
+                MemoryLinkProcessingRunModel.processing_run_id == str(processing_run_id)
+            )
+            .order_by(MemoryLinkModel.id)
+        )
+        return tuple(_memory_link_from_model(model) for model in models)
+
+
 class CollectionRepository:
     """Persist collection control and pre-capture exclusion policy."""
 
@@ -1846,6 +1967,26 @@ def _candidate_evaluation_build_from_model(
     )
 
 
+def _memory_promotion_build_to_model(
+    record: MemoryPromotionBuild,
+) -> MemoryPromotionBuildModel:
+    return MemoryPromotionBuildModel(
+        processing_run_id=str(record.processing_run_id),
+        source_evaluation_run_id=str(record.source_evaluation_run_id),
+        processing_version=record.processing_version,
+    )
+
+
+def _memory_promotion_build_from_model(
+    model: MemoryPromotionBuildModel,
+) -> MemoryPromotionBuild:
+    return MemoryPromotionBuild(
+        processing_run_id=UUID(model.processing_run_id),
+        source_evaluation_run_id=UUID(model.source_evaluation_run_id),
+        processing_version=model.processing_version,
+    )
+
+
 def _update_candidate_state(
     model: MemoryCandidateModel, record: MemoryCandidate
 ) -> None:
@@ -1877,6 +2018,11 @@ def _memory_link_to_model(record: MemoryLink) -> MemoryLinkModel:
         id=str(record.id),
         memory_backend_id=record.memory_backend_id,
         candidate_id=str(record.candidate_id),
+        candidate_decision_id=(
+            None
+            if record.candidate_decision_id is None
+            else str(record.candidate_decision_id)
+        ),
         provenance=record.provenance.model_dump(mode="json"),
         confidence=record.confidence,
         status=record.status.value,
@@ -1893,8 +2039,16 @@ def _memory_link_from_model(model: MemoryLinkModel) -> MemoryLink:
         id=UUID(model.id),
         memory_backend_id=model.memory_backend_id,
         candidate_id=UUID(model.candidate_id),
+        candidate_decision_id=(
+            None
+            if model.candidate_decision_id is None
+            else UUID(model.candidate_decision_id)
+        ),
         provenance=MemoryProvenance(
             candidate_id=UUID(str(provenance_data["candidate_id"])),
+            pattern_ids=tuple(
+                UUID(item) for item in provenance_data.get("pattern_ids", ())
+            ),
             event_ids=tuple(UUID(item) for item in provenance_data["event_ids"]),
             observation_ids=tuple(
                 UUID(item) for item in provenance_data["observation_ids"]

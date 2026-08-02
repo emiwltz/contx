@@ -9,6 +9,7 @@ from sqlalchemy import Engine
 from contx.application import (
     ActivityTimelineService,
     CandidateEvaluationService,
+    MemoryPromotionService,
     PatternAnalysisService,
     PatternCandidateService,
 )
@@ -24,6 +25,7 @@ from contx.db.repositories import (
     TimelineBuildRepository,
 )
 from contx.events import ModelActivitySessionizer, SessionizedModelEventBuilder
+from contx.memory_store import RecordingMemoryStore
 from contx.memory_worker import TransparentCandidateWorker
 from contx.models import (
     CandidateDecisionStatus,
@@ -52,6 +54,9 @@ CANDIDATE_REPLAY_RUN_ID = UUID("60000000-0000-0000-0000-000000000006")
 CANDIDATE_V2_RUN_ID = UUID("60000000-0000-0000-0000-000000000007")
 LOW_EVALUATION_RUN_ID = UUID("60000000-0000-0000-0000-000000000008")
 HIGH_EVALUATION_RUN_ID = UUID("60000000-0000-0000-0000-000000000009")
+PROMOTION_RUN_ID = UUID("60000000-0000-0000-0000-000000000010")
+PROMOTION_REPLAY_RUN_ID = UUID("60000000-0000-0000-0000-000000000011")
+REJECTED_PROMOTION_RUN_ID = UUID("60000000-0000-0000-0000-000000000012")
 
 
 def test_pattern_candidate_and_threshold_replays_coexist(tmp_path: Path) -> None:
@@ -110,6 +115,22 @@ def test_pattern_candidate_and_threshold_replays_coexist(tmp_path: Path) -> None
             run_id=HIGH_EVALUATION_RUN_ID,
             threshold=0.95,
         ).evaluate(source_candidate_run_id=CANDIDATE_RUN_ID)
+        memory = RecordingMemoryStore()
+        promoted = _promotion_service(
+            engine,
+            memory,
+            run_id=PROMOTION_RUN_ID,
+        ).promote(source_evaluation_run_id=LOW_EVALUATION_RUN_ID)
+        replayed_promotion = _promotion_service(
+            engine,
+            memory,
+            run_id=PROMOTION_REPLAY_RUN_ID,
+        ).promote(source_evaluation_run_id=LOW_EVALUATION_RUN_ID)
+        rejected_promotion = _promotion_service(
+            engine,
+            memory,
+            run_id=REJECTED_PROMOTION_RUN_ID,
+        ).promote(source_evaluation_run_id=HIGH_EVALUATION_RUN_ID)
 
         assert len(first_patterns.patterns) == 3
         assert all(pattern.evidence_count >= 2 for pattern in first_patterns.patterns)
@@ -133,6 +154,15 @@ def test_pattern_candidate_and_threshold_replays_coexist(tmp_path: Path) -> None
         assert high.decisions[0].candidate_id == candidate.id
         assert high.decisions[0].status is CandidateDecisionStatus.REJECTED
         assert high.decisions[0].reason == "below_memory_threshold"
+        assert len(promoted.memory_links) == 1
+        memory_link = promoted.memory_links[0]
+        assert memory_link.candidate_decision_id == low.decisions[0].id
+        assert set(memory_link.provenance.pattern_ids) == set(candidate.source_ids)
+        assert len(memory_link.provenance.event_ids) == 3
+        assert len(memory_link.provenance.observation_ids) == 3
+        assert replayed_promotion.memory_links == promoted.memory_links
+        assert rejected_promotion.memory_links == ()
+        assert memory.entries == (candidate.text,)
 
         with session_scope(engine) as database_session:
             assert PatternRepository(database_session).patterns_for_processing_run(
@@ -200,6 +230,20 @@ def _evaluation_service(
             clock=FixedClock(NOW),
             acceptance_threshold=threshold,
         ),
+        clock=FixedClock(NOW),
+        identifiers=SequenceIdentifiers((run_id,)),
+    )
+
+
+def _promotion_service(
+    engine: Engine,
+    memory: RecordingMemoryStore,
+    *,
+    run_id: UUID,
+) -> MemoryPromotionService:
+    return MemoryPromotionService(
+        engine=engine,
+        memory_store=memory,
         clock=FixedClock(NOW),
         identifiers=SequenceIdentifiers((run_id,)),
     )
