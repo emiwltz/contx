@@ -259,9 +259,11 @@ def test_process_command_runs_synthetic_screenshot_backlog_without_collection(
     assert "run: succeeded" in processed.stdout
     assert "queued transformations: 1" in processed.stdout
     assert "succeeded transformations: 1" in processed.stdout
+    assert "events built: 1" in processed.stdout
     assert "model backlog: 0" in processed.stdout
     assert "model backlog: 0" in status.stdout
     assert "model abandoned: 0" in status.stdout
+    assert "model event backlog: 0" in status.stdout
 
 
 def test_process_command_reports_required_model_unavailable(

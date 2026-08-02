@@ -13,7 +13,9 @@ from contx.db.models import (
     CandidateEventModel,
     CollectionControlModel,
     EventModel,
+    EventModelTransformationModel,
     EventObservationModel,
+    EventProcessingRunModel,
     ExclusionRuleModel,
     MemoryCandidateModel,
     MemoryLinkModel,
@@ -617,6 +619,160 @@ class ModelTransformationRepository:
         }
         if self._session.get(ModelTransformationRunModel, identity) is None:
             self._session.add(ModelTransformationRunModel(**identity))
+
+
+class ModelEventRepository:
+    """Persist model-derived events with transformation and run provenance."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def pending_transformations(
+        self,
+        *,
+        processing_version: str,
+        limit: int = 100,
+    ) -> tuple[ModelTransformation, ...]:
+        if limit < 1:
+            raise ValueError("model event batch size must be positive")
+        linked = (
+            select(EventModelTransformationModel.transformation_id)
+            .join(EventModel, EventModel.id == EventModelTransformationModel.event_id)
+            .where(
+                EventModelTransformationModel.transformation_id
+                == ModelTransformationModel.id,
+                EventModel.processing_version == processing_version,
+            )
+            .exists()
+        )
+        models = self._session.scalars(
+            select(ModelTransformationModel)
+            .where(
+                ModelTransformationModel.status
+                == ModelTransformationStatus.SUCCEEDED.value,
+                ~linked,
+            )
+            .order_by(
+                ModelTransformationModel.ended_at,
+                ModelTransformationModel.id,
+            )
+            .limit(limit)
+        )
+        return tuple(_model_transformation_from_model(model) for model in models)
+
+    def pending_count(self, *, processing_version: str) -> int:
+        linked = (
+            select(EventModelTransformationModel.transformation_id)
+            .join(EventModel, EventModel.id == EventModelTransformationModel.event_id)
+            .where(
+                EventModelTransformationModel.transformation_id
+                == ModelTransformationModel.id,
+                EventModel.processing_version == processing_version,
+            )
+            .exists()
+        )
+        return int(
+            self._session.scalar(
+                select(func.count())
+                .select_from(ModelTransformationModel)
+                .where(
+                    ModelTransformationModel.status
+                    == ModelTransformationStatus.SUCCEEDED.value,
+                    ~linked,
+                )
+            )
+            or 0
+        )
+
+    def save(
+        self,
+        event: Event,
+        *,
+        transformation_ids: tuple[UUID, ...],
+        processing_run_id: UUID,
+    ) -> Event:
+        if not transformation_ids or len(set(transformation_ids)) != len(
+            transformation_ids
+        ):
+            raise DatabaseError(
+                "A model event requires unique transformation provenance"
+            )
+        expected = {str(value) for value in transformation_ids}
+        models = tuple(
+            self._session.scalars(
+                select(ModelTransformationModel).where(
+                    ModelTransformationModel.id.in_(expected)
+                )
+            )
+        )
+        if {model.id for model in models} != expected:
+            raise DatabaseError("A model event transformation is missing")
+        transformations = tuple(
+            _model_transformation_from_model(model) for model in models
+        )
+        if any(
+            transformation.status is not ModelTransformationStatus.SUCCEEDED
+            for transformation in transformations
+        ):
+            raise DatabaseError("A model event requires successful transformations")
+        source_ids = {
+            observation_id
+            for transformation in transformations
+            for observation_id in transformation.source_observation_ids
+        }
+        if source_ids != set(event.source_observation_ids):
+            raise DatabaseError(
+                "Model event observations do not match transformation provenance"
+            )
+        if self._session.get(ProcessingRunModel, str(processing_run_id)) is None:
+            raise DatabaseError("A model event processing run is missing")
+
+        persisted = PipelineRepository(self._session).save_event(event)
+        if persisted.id != event.id:
+            raise DatabaseError("Model event idempotency identity conflicts")
+        self._session.add_all(
+            EventModelTransformationModel(
+                event_id=str(event.id),
+                transformation_id=str(transformation_id),
+            )
+            for transformation_id in transformation_ids
+            if self._session.get(
+                EventModelTransformationModel,
+                {
+                    "event_id": str(event.id),
+                    "transformation_id": str(transformation_id),
+                },
+            )
+            is None
+        )
+        run_identity = {
+            "event_id": str(event.id),
+            "processing_run_id": str(processing_run_id),
+        }
+        if self._session.get(EventProcessingRunModel, run_identity) is None:
+            self._session.add(EventProcessingRunModel(**run_identity))
+        self._session.flush()
+        return persisted
+
+    def transformation_ids(self, event_id: UUID) -> tuple[UUID, ...]:
+        return tuple(
+            UUID(value)
+            for value in self._session.scalars(
+                select(EventModelTransformationModel.transformation_id)
+                .where(EventModelTransformationModel.event_id == str(event_id))
+                .order_by(EventModelTransformationModel.transformation_id)
+            )
+        )
+
+    def processing_run_ids(self, event_id: UUID) -> tuple[UUID, ...]:
+        return tuple(
+            UUID(value)
+            for value in self._session.scalars(
+                select(EventProcessingRunModel.processing_run_id)
+                .where(EventProcessingRunModel.event_id == str(event_id))
+                .order_by(EventProcessingRunModel.processing_run_id)
+            )
+        )
 
 
 class CollectionRepository:

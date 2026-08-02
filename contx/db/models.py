@@ -84,6 +84,40 @@ class EventObservationModel(Base):
     )
 
 
+class EventModelTransformationModel(Base):
+    """Link an enriched event to the local-model evidence that produced it."""
+
+    __tablename__ = "event_model_transformations"
+
+    event_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("events.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    transformation_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("model_transformations.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+
+
+class EventProcessingRunModel(Base):
+    """Link an enriched event to its deterministic builder execution."""
+
+    __tablename__ = "event_processing_runs"
+
+    event_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("events.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    processing_run_id: Mapped[Identifier] = mapped_column(
+        String(36),
+        ForeignKey("processing_runs.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+
+
 class MemoryCandidateModel(Base):
     """A memory proposal with an explicit worker state."""
 

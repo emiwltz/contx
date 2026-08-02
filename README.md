@@ -194,9 +194,10 @@ transformation/run provenance, bounded retry and interruption recovery,
 content-free backlog status, and synthetic visual and full-pipeline validators.
 The selected development model is `qwen3-vl:4b-instruct-q4_K_M`; model files
 live in Ollama's external local store and are never committed. `contx process`
-processes one bounded backlog batch without collecting new data. The
-model-driven event builder, comprehensive sensitive-fixture evaluation, and
-resource gates remain before J2 is complete.
+processes one bounded backlog batch without collecting new data, then builds
+deterministic events with foreign-key-backed transformation and processing-run
+provenance. Comprehensive sensitive-fixture evaluation, quality thresholds,
+and resource gates remain before J2 is complete.
 
 Patterns, corrections, the local web UI, and the real pilot belong to the
 following v0 increments. OptMem is used from an ignored development snapshot;

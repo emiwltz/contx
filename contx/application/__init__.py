@@ -6,6 +6,10 @@ from contx.application.continuous_collection import (
     ContinuousCollectionSession,
     ThreadStopSignal,
 )
+from contx.application.local_model_events import (
+    LocalModelEventResult,
+    LocalModelEventService,
+)
 from contx.application.local_model_processing import (
     LocalModelProcessingResult,
     LocalModelProcessingService,
@@ -19,6 +23,8 @@ __all__ = [
     "ContinuousCollectionSession",
     "LocalModelProcessingResult",
     "LocalModelProcessingService",
+    "LocalModelEventResult",
+    "LocalModelEventService",
     "PipelineResult",
     "PipelineService",
     "RawPurgeResult",

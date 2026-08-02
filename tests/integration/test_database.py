@@ -44,6 +44,8 @@ def test_empty_database_upgrades_to_packaged_head(tmp_path: Path) -> None:
         "observations",
         "events",
         "event_observations",
+        "event_model_transformations",
+        "event_processing_runs",
         "memory_candidates",
         "candidate_events",
         "memory_links",

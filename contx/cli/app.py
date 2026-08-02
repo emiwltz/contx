@@ -12,6 +12,7 @@ from sqlalchemy import Engine
 
 from contx import __version__
 from contx.application import (
+    LocalModelEventService,
     LocalModelProcessingService,
     PipelineService,
     RawPurgeService,
@@ -36,8 +37,9 @@ from contx.db import (
     session_scope,
     upgrade_database,
 )
-from contx.db.repositories import ModelTransformationRepository
+from contx.db.repositories import ModelEventRepository, ModelTransformationRepository
 from contx.errors import ContxError, RawStoreError
+from contx.events import MODEL_EVENT_PROCESSING_VERSION, ModelTransformationEventBuilder
 from contx.events.rules import VerticalSliceEventBuilder
 from contx.memory_store import (
     MemoryStore,
@@ -128,6 +130,7 @@ def status() -> None:
     raw_usage: int | None = None
     model_backlog: int | None = None
     abandoned_transformations: int | None = None
+    model_event_backlog: int | None = None
     try:
         paths = resolve_runtime_paths()
         settings = load_settings(paths)
@@ -155,6 +158,9 @@ def status() -> None:
                     output_schema_version=OUTPUT_SCHEMA_VERSION,
                 )
                 abandoned_transformations = model_repository.abandoned_count()
+                model_event_backlog = ModelEventRepository(session).pending_count(
+                    processing_version=MODEL_EVENT_PROCESSING_VERSION
+                )
         if paths.raw.is_dir():
             raw_usage = _build_raw_store(
                 paths.raw, budget_mb=settings.collection.raw_disk_budget_mb
@@ -213,6 +219,8 @@ def status() -> None:
         typer.echo(f"model backlog: {model_backlog}")
     if abandoned_transformations is not None:
         typer.echo(f"model abandoned: {abandoned_transformations}")
+    if model_event_backlog is not None:
+        typer.echo(f"model event backlog: {model_event_backlog}")
     collection_state = (
         "unavailable"
         if control is None
@@ -275,7 +283,8 @@ def process() -> None:
         upgrade_database(paths.database_file)
         engine = create_database_engine(paths.database_file)
         clock = SystemClock()
-        result = LocalModelProcessingService(
+        identifiers = UuidIdentifierSource()
+        model_result = LocalModelProcessingService(
             engine=engine,
             raw_store=_build_raw_store(
                 paths.raw,
@@ -286,7 +295,13 @@ def process() -> None:
             configured_model=settings.model.model_name,
             max_image_bytes=settings.model.max_image_mb * 1024 * 1024,
             clock=clock,
-            identifiers=UuidIdentifierSource(),
+            identifiers=identifiers,
+        ).run_once()
+        event_result = LocalModelEventService(
+            engine=engine,
+            builder=ModelTransformationEventBuilder(clock=clock),
+            clock=clock,
+            identifiers=identifiers,
         ).run_once()
     except ContxError as error:
         _abort(error)
@@ -294,19 +309,29 @@ def process() -> None:
         if engine is not None:
             engine.dispose()
 
-    runtime_state = "available" if result.runtime.runtime_available else "unavailable"
-    model_state = "installed" if result.runtime.model_available else "missing"
-    typer.echo(f"run: {result.run.status.value}")
+    runtime_state = (
+        "available" if model_result.runtime.runtime_available else "unavailable"
+    )
+    model_state = "installed" if model_result.runtime.model_available else "missing"
+    typer.echo(f"run: {model_result.run.status.value}")
     typer.echo(f"runtime: {runtime_state}")
-    typer.echo(f"model: {model_state} ({result.runtime.model})")
-    typer.echo(f"queued transformations: {len(result.queued_transformation_ids)}")
-    typer.echo(f"succeeded transformations: {len(result.succeeded_transformation_ids)}")
-    typer.echo(f"failed transformations: {len(result.failed_transformation_ids)}")
-    typer.echo(f"abandoned transformations: {len(result.abandoned_transformation_ids)}")
-    typer.echo(f"recovered transformations: {len(result.recovered_transformation_ids)}")
-    typer.echo(f"model backlog: {result.backlog_count}")
-    typer.echo(f"model abandoned total: {result.total_abandoned_count}")
-    if not result.succeeded:
+    typer.echo(f"model: {model_state} ({model_result.runtime.model})")
+    typer.echo(f"queued transformations: {len(model_result.queued_transformation_ids)}")
+    typer.echo(
+        f"succeeded transformations: {len(model_result.succeeded_transformation_ids)}"
+    )
+    typer.echo(f"failed transformations: {len(model_result.failed_transformation_ids)}")
+    typer.echo(
+        f"abandoned transformations: {len(model_result.abandoned_transformation_ids)}"
+    )
+    typer.echo(
+        f"recovered transformations: {len(model_result.recovered_transformation_ids)}"
+    )
+    typer.echo(f"model backlog: {model_result.backlog_count}")
+    typer.echo(f"model abandoned total: {model_result.total_abandoned_count}")
+    typer.echo(f"events built: {len(event_result.events)}")
+    typer.echo(f"model event backlog: {event_result.backlog_count}")
+    if not model_result.succeeded or not event_result.succeeded:
         raise typer.Exit(code=2)
 
 

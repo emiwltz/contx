@@ -9,9 +9,14 @@ from collections.abc import Sequence
 from datetime import timedelta
 from pathlib import Path
 
-from contx.application import LocalModelProcessingService
+from contx.application import LocalModelEventService, LocalModelProcessingService
 from contx.db import create_database_engine, session_scope, upgrade_database
-from contx.db.repositories import ModelTransformationRepository, PipelineRepository
+from contx.db.repositories import (
+    ModelEventRepository,
+    ModelTransformationRepository,
+    PipelineRepository,
+)
+from contx.events import ModelTransformationEventBuilder
 from contx.model_provider import DEFAULT_ENDPOINT, DEFAULT_MODEL, OllamaModelProvider
 from contx.models import Observation, SourceType, SystemClock, UuidIdentifierSource
 from contx.raw_store import FilesystemRawStore
@@ -81,9 +86,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                 identifiers=identifiers,
                 batch_size=1,
             ).run_once()
+            event_result = LocalModelEventService(
+                engine=engine,
+                builder=ModelTransformationEventBuilder(clock=clock),
+                clock=clock,
+                identifiers=identifiers,
+                batch_size=1,
+            ).run_once()
             transformation = None
             persisted_observation = None
             processing_run_ids: tuple[object, ...] = ()
+            event_transformation_ids: tuple[object, ...] = ()
+            event_processing_run_ids: tuple[object, ...] = ()
             if result.queued_transformation_ids:
                 with session_scope(engine) as session:
                     model_repository = ModelTransformationRepository(session)
@@ -96,6 +110,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                     persisted_observation = PipelineRepository(
                         session
                     ).observation_by_id(observation_id)
+                    if event_result.events:
+                        event_repository = ModelEventRepository(session)
+                        event_transformation_ids = event_repository.transformation_ids(
+                            event_result.events[0].id
+                        )
+                        event_processing_run_ids = event_repository.processing_run_ids(
+                            event_result.events[0].id
+                        )
             print(
                 json.dumps(
                     {
@@ -112,6 +134,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                             else persisted_observation.processing_status.value
                         ),
                         "processing_run_count": len(processing_run_ids),
+                        "event_count": len(event_result.events),
+                        "event_transformation_count": len(event_transformation_ids),
+                        "event_processing_run_count": len(event_processing_run_ids),
+                        "event_backlog_count": event_result.backlog_count,
                         "model_digest": (
                             None
                             if transformation is None
@@ -159,6 +185,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 and persisted_observation is not None
                 and persisted_observation.processing_status.value == "processed"
                 and len(processing_run_ids) == 1
+                and event_result.succeeded
+                and len(event_result.events) == 1
+                and len(event_transformation_ids) == 1
+                and len(event_processing_run_ids) == 1
             )
             return 0 if valid else 1
         finally:

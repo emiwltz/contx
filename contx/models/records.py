@@ -205,15 +205,15 @@ class Event(DomainRecord):
     id: UUID
     idempotency_key: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]+$")
     type: str = Field(min_length=1, max_length=64)
-    summary: str = Field(min_length=1, max_length=2000)
-    facts: dict[str, Any]
+    summary: str = Field(min_length=1, max_length=2000, repr=False)
+    facts: dict[str, Any] = Field(repr=False)
     started_at: datetime
     ended_at: datetime
     epistemic_status: EpistemicStatus
     confidence: float = Field(ge=0.0, le=1.0)
     sensitivity: Sensitivity
-    projects: tuple[str, ...] = ()
-    entities: tuple[str, ...] = ()
+    projects: tuple[str, ...] = Field(default=(), repr=False)
+    entities: tuple[str, ...] = Field(default=(), repr=False)
     source_observation_ids: tuple[UUID, ...] = Field(min_length=1)
     processing_version: str = Field(min_length=1, max_length=64)
     created_at: datetime
@@ -235,7 +235,7 @@ class Event(DomainRecord):
 class MemoryCandidate(DomainRecord):
     id: UUID
     idempotency_key: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]+$")
-    text: str = Field(min_length=1, max_length=4000)
+    text: str = Field(min_length=1, max_length=4000, repr=False)
     source_type: str = Field(min_length=1, max_length=64)
     source_ids: tuple[UUID, ...] = Field(min_length=1)
     importance: float = Field(ge=0.0, le=1.0)
