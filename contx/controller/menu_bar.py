@@ -95,6 +95,8 @@ class NativeMenuBarController:
         if self._status_item is not None:
             return
         appkit = self._appkit or _load_appkit()
+        status_bar: Any | None = None
+        status_item: Any | None = None
         try:
             application = appkit.NSApplication.sharedApplication()
             application.setActivationPolicy_(
@@ -105,7 +107,6 @@ class NativeMenuBarController:
                 appkit.NSVariableStatusItemLength
             )
             if status_item.button() is None:
-                status_bar.removeStatusItem_(status_item)
                 raise CollectorUnavailableError(
                     "macOS did not provide a menu-bar status button"
                 )
@@ -137,12 +138,18 @@ class NativeMenuBarController:
             menu.addItem_(pause_indefinitely)
             menu.addItem_(resume)
             status_item.setMenu_(menu)
-        except CollectorUnavailableError:
-            raise
         except Exception as error:
-            raise CollectorUnavailableError(
+            cleanup_failed = _remove_partial_status_item(status_bar, status_item)
+            if isinstance(error, CollectorUnavailableError):
+                if cleanup_failed:
+                    error.add_note("Partial macOS menu-bar cleanup failed")
+                raise
+            wrapped = CollectorUnavailableError(
                 "Cannot create the CONTX macOS menu-bar control"
-            ) from error
+            )
+            if cleanup_failed:
+                wrapped.add_note("Partial macOS menu-bar cleanup failed")
+            raise wrapped from error
         self._appkit = appkit
         self._status_item = status_item
         self._status_line = status_line
@@ -205,6 +212,16 @@ def _menu_item(
     )
     item.setTarget_(target)
     return item
+
+
+def _remove_partial_status_item(status_bar: Any, status_item: Any) -> bool:
+    if status_bar is None or status_item is None:
+        return False
+    try:
+        status_bar.removeStatusItem_(status_item)
+    except Exception:
+        return True
+    return False
 
 
 def _build_action_target(owner: NativeMenuBarController) -> Any:
