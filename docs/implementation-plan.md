@@ -1,6 +1,6 @@
 # CONTX Implementation Plan
 
-**Status:** Draft for review
+**Status:** Accepted for execution
 
 **Date:** 2026-08-02
 
@@ -1064,9 +1064,9 @@ evidence to support them:
 
 Each consequential choice is recorded in an ADR before implementation.
 
-## 23. Immediate next action after approval
+## 23. Immediate execution sequence
 
-Once this plan is accepted, implementation begins with Phase 0 only:
+Implementation begins with Phase 0 only:
 
 1. create the ADR structure and decision records;
 2. update the specification, README, changelog, and architecture diagram;
