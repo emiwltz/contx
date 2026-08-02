@@ -35,3 +35,4 @@ Every ADR records:
 - [0009 — Require a local multimodal model in v0](0009-mandatory-local-model.md)
 - [0010 — Select Gemma 4 E4B QAT as the v0 default local model](0010-gemma4-e4b-default.md)
 - [0011 — Rebuild activity timelines as versioned session snapshots](0011-sessionized-event-replay.md)
+- [0012 — Preserve pattern, candidate, and decision replays as snapshots](0012-replayable-pattern-candidate-decisions.md)

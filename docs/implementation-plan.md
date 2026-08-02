@@ -20,6 +20,7 @@
 | v0.1 / J1 | In progress | Controlled metadata and screenshot policy, exclusions, bounded raw storage, restart-safe purge, gated AppKit daemon, menu control, permission preflights, and launchd manifest are implemented; real activation, installation, one-day collection, and measured target-Mac baselines remain gated |
 | v0.2 / J2 | Complete | Gemma 4 E4B QAT with prompt v9 passed the fixed 16/16 privacy and quality matrix, bounded cold/warm resource measurements were recorded, the persistent local model-to-event proof passed, and sensitive or forbidden output is blocked from durable memory |
 | v0.3 / J3 | Complete | Frozen-day sessionization produces a deterministic readable timeline; same-version replay is idempotent, changed versions coexist, and append-only corrections survive compatible evidence-lineage rebuilds |
+| v0.4 / J4 | Complete | Multi-day pattern detection, fused candidates, explicit scoring, rejection/deferral reasons, validity, and side-by-side rule and threshold replays passed the synthetic exit gate |
 
 The completed vertical-slice evidence and residual limitations are recorded in
 `docs/evaluation/v0.0.1-validation.md`. Completion here does not imply that the
