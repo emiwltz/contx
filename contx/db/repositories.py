@@ -314,6 +314,19 @@ class RawObservationRepository:
         )
         return tuple(_observation_from_model(model) for model in models)
 
+    def artifact_paths(self) -> frozenset[str]:
+        return frozenset(
+            path
+            for path in self._session.scalars(
+                select(ObservationModel.artifact_path).where(
+                    ObservationModel.artifact_path.is_not(None),
+                    ObservationModel.processing_status
+                    != ObservationStatus.PURGED.value,
+                )
+            )
+            if path is not None
+        )
+
     def tombstone(self, observation_id: UUID) -> Observation:
         model = self._session.get(ObservationModel, str(observation_id))
         if model is None:

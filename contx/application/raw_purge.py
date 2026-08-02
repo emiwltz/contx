@@ -23,6 +23,7 @@ class RawPurgeResult:
     purged_observation_ids: tuple[UUID, ...]
     failed_observation_ids: tuple[UUID, ...]
     bytes_reclaimed: int
+    orphan_artifacts_deleted: int
 
     @property
     def succeeded(self) -> bool:
@@ -62,12 +63,20 @@ class RawPurgeService:
         purged: list[UUID] = []
         failed: list[UUID] = []
         reclaimed = 0
+        orphan_artifacts_deleted = 0
         try:
             self._raw_store.initialize()
             with session_scope(self._engine) as session:
-                expired = RawObservationRepository(session).expired(
-                    at=started_at, limit=self._batch_size
-                )
+                repository = RawObservationRepository(session)
+                referenced_paths = repository.artifact_paths()
+                expired = repository.expired(at=started_at, limit=self._batch_size)
+            for artifact in self._raw_store.list_paths():
+                if str(artifact) in referenced_paths:
+                    continue
+                artifact_size = self._raw_store.size(artifact)
+                self._raw_store.delete(artifact)
+                reclaimed += artifact_size
+                orphan_artifacts_deleted += 1
             for observation in expired:
                 try:
                     artifact_size = 0
@@ -118,6 +127,7 @@ class RawPurgeService:
             purged_observation_ids=tuple(purged),
             failed_observation_ids=tuple(failed),
             bytes_reclaimed=reclaimed,
+            orphan_artifacts_deleted=orphan_artifacts_deleted,
         )
 
     def _save_run(self, run: ProcessingRun) -> None:

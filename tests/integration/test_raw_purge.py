@@ -84,6 +84,29 @@ def test_missing_file_after_interruption_is_safe_to_retry(tmp_path: Path) -> Non
         engine.dispose()
 
 
+def test_unreferenced_artifact_after_crash_is_removed_on_next_purge(
+    tmp_path: Path,
+) -> None:
+    engine = _engine(tmp_path)
+    store = FilesystemRawStore(tmp_path / "raw", disk_budget_bytes=1024)
+    orphan = store.write(
+        b"synthetic-orphaned-pixels",
+        artifact_id=OBSERVATION_ID,
+        suffix=".png",
+        captured_at=CAPTURED,
+        retention=timedelta(hours=48),
+    )
+    try:
+        result = _purge(engine, store)
+
+        assert result.succeeded
+        assert result.orphan_artifacts_deleted == 1
+        assert result.bytes_reclaimed == len(b"synthetic-orphaned-pixels")
+        assert not orphan.path.exists()
+    finally:
+        engine.dispose()
+
+
 def test_unsafe_artifact_path_fails_closed_and_is_audited(tmp_path: Path) -> None:
     engine = _engine(tmp_path)
     store = FilesystemRawStore(tmp_path / "raw", disk_budget_bytes=1024)

@@ -363,6 +363,7 @@ def purge() -> None:
             engine.dispose()
     typer.echo(f"purged observations: {len(result.purged_observation_ids)}")
     typer.echo(f"reclaimed bytes: {result.bytes_reclaimed}")
+    typer.echo(f"orphan artifacts deleted: {result.orphan_artifacts_deleted}")
 
 
 @exclusions_app.command("list")

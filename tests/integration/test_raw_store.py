@@ -35,6 +35,7 @@ def test_write_is_private_atomic_and_idempotent(tmp_path: Path) -> None:
     assert first == replay
     assert first.path.read_bytes() == b"synthetic-pixels"
     assert first.expires_at == NOW + timedelta(hours=48)
+    assert store.list_paths() == (first.path,)
     assert stat.S_IMODE(store.root.stat().st_mode) == 0o700
     assert stat.S_IMODE(first.path.stat().st_mode) == 0o600
     assert not tuple(store.root.glob(".contx-raw-*.tmp"))

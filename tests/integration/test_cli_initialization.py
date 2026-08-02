@@ -108,6 +108,7 @@ def test_empty_raw_purge_is_successful_and_audited(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert "purged observations: 0" in result.stdout
     assert "reclaimed bytes: 0" in result.stdout
+    assert "orphan artifacts deleted: 0" in result.stdout
     assert "raw usage: 0 bytes" in status.stdout
 
 

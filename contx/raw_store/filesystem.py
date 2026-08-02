@@ -176,6 +176,27 @@ class FilesystemRawStore:
         with self._locked():
             return self._usage_bytes_unlocked()
 
+    def list_paths(self) -> tuple[Path, ...]:
+        """List validated managed artifacts without exposing their contents."""
+        self.initialize()
+        with self._locked():
+            paths: list[Path] = []
+            try:
+                with os.scandir(self._root) as entries:
+                    for entry in entries:
+                        if entry.name == LOCK_FILE:
+                            continue
+                        if entry.is_symlink() or not entry.is_file(
+                            follow_symlinks=False
+                        ):
+                            raise RawStoreError("Raw storage contains an unsafe entry")
+                        paths.append(Path(entry.path))
+            except RawStoreError:
+                raise
+            except OSError as error:
+                raise RawStoreError("Cannot list raw artifacts") from error
+            return tuple(sorted(paths))
+
     def _usage_bytes_unlocked(self) -> int:
         total = 0
         try:
