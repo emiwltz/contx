@@ -65,6 +65,10 @@ class RuntimePaths:
         return self.caches / "processing"
 
     @property
+    def daemon_lock(self) -> Path:
+        return self.processing / "collector.lock"
+
+    @property
     def owned_directories(self) -> tuple[Path, ...]:
         return (
             self.application_support,

@@ -29,6 +29,7 @@ def test_init_is_idempotent_and_status_is_truthful(tmp_path: Path) -> None:
     assert "memory: not initialized" in status.stdout
     assert "schema: current" in status.stdout
     assert "background collection: disabled" in status.stdout
+    assert "collector daemon: stopped" in status.stdout
 
     paths = resolve_runtime_paths(environment)
     assert stat.S_IMODE(paths.config_file.stat().st_mode) == 0o600

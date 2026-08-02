@@ -21,6 +21,10 @@ class CollectorUnavailableError(ContxError):
     """Raised when a requested local collection capability is unavailable."""
 
 
+class DaemonAlreadyRunningError(ContxError):
+    """Raised when a second continuous collector cannot acquire its lease."""
+
+
 class MemoryStoreError(ContxError):
     """Raised when final memory cannot be read or updated safely."""
 

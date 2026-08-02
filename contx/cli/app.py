@@ -24,6 +24,7 @@ from contx.collectors.macos import (
     detect_collection_capabilities,
 )
 from contx.collectors.synthetic import SyntheticCollector
+from contx.daemon import probe_daemon_lease
 from contx.db import (
     create_database_engine,
     current_database_revision,
@@ -151,6 +152,23 @@ def status() -> None:
             else "disabled"
         )
     )
+    daemon_state = (
+        probe_daemon_lease(paths.daemon_lock) if paths.processing.is_dir() else None
+    )
+    typer.echo(
+        "collector daemon: "
+        + (
+            "running"
+            if daemon_state is not None and daemon_state.running
+            else "stopped"
+        )
+    )
+    if (
+        daemon_state is not None
+        and daemon_state.running
+        and daemon_state.pid is not None
+    ):
+        typer.echo(f"collector daemon pid: {daemon_state.pid}")
     typer.echo(
         "window titles: "
         + ("enabled" if settings.collection.window_titles_enabled else "disabled")
