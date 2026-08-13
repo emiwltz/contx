@@ -21,6 +21,16 @@ class CollectorUnavailableError(ContxError):
     """Raised when a requested local collection capability is unavailable."""
 
 
+class ScreenshotCaptureSkipped(ContxError):
+    """Abort one screenshot safely without stopping continuous collection."""
+
+    def __init__(self, reason_code: str) -> None:
+        if not reason_code or len(reason_code) > 64:
+            raise ValueError("screenshot skip reason must be 1 to 64 characters")
+        self.reason_code = reason_code
+        super().__init__(f"Screenshot capture skipped ({reason_code})")
+
+
 class DaemonAlreadyRunningError(ContxError):
     """Raised when a second continuous collector cannot acquire its lease."""
 

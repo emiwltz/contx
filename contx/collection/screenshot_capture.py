@@ -13,7 +13,7 @@ from contx.collection.screenshots import (
     ScreenshotDecision,
     SelectiveScreenshotPlanner,
 )
-from contx.errors import CollectorUnavailableError
+from contx.errors import CollectorUnavailableError, ScreenshotCaptureSkipped
 from contx.models import (
     CollectionControl,
     ExclusionRule,
@@ -29,7 +29,7 @@ PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 class ScreenshotSource(Protocol):
     """Read pixels only after a planner has authorized one capture."""
 
-    def capture_png(self) -> bytes: ...
+    def capture_png(self, sample: ActivitySample) -> bytes: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,7 +82,14 @@ class SelectiveScreenshotService:
             return ScreenshotCaptureResult(decision=decision)
 
         try:
-            payload = self._source.capture_png()
+            payload = self._source.capture_png(sample)
+        except ScreenshotCaptureSkipped as skipped:
+            self._previous_sample = sample
+            self._last_capture_at = sample.observed_at
+            return ScreenshotCaptureResult(
+                decision=decision,
+                discard_reason=skipped.reason_code,
+            )
         except CollectorUnavailableError:
             raise
         except Exception as error:

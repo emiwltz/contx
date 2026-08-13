@@ -214,7 +214,8 @@ in a headless or restricted host session. The in-progress v0.1 foundation now
 adds database-backed pause and exclusions, bounded raw artifacts and
 restart-safe purge, duration and system-state segmentation, non-prompting
 permission preflights, optional privacy-gated window titles, selective and
-exactly deduplicated screenshots, a minimal AppKit menu, an audited
+exactly deduplicated focused-window-only screenshots through ScreenCaptureKit
+with no display-wide fallback, a minimal AppKit menu, an audited
 single-process collection daemon, graceful shutdown, and deterministic
 collector and periodic-processor LaunchAgent manifests. Both jobs remain
 disabled by default; no LaunchAgent, live title access, live screenshot

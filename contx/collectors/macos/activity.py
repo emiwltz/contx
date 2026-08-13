@@ -19,6 +19,8 @@ class RunningApplication(Protocol):
 
     def bundleIdentifier(self) -> str | None: ...
 
+    def processIdentifier(self) -> int: ...
+
 
 class Workspace(Protocol):
     def frontmostApplication(self) -> RunningApplication | None: ...
@@ -30,10 +32,13 @@ class ApplicationMetadata:
 
     app_name: str | None
     app_bundle_id: str | None
+    process_id: int
 
     def __post_init__(self) -> None:
         if not self.app_name and not self.app_bundle_id:
             raise ValueError("application metadata requires a usable identity")
+        if self.process_id <= 0:
+            raise ValueError("application metadata requires a positive process ID")
 
 
 class ApplicationProbe(Protocol):
@@ -56,6 +61,7 @@ class WorkspaceApplicationProbe:
                 )
             app_name = _normalize_identity(application.localizedName())
             bundle_id = _normalize_identity(application.bundleIdentifier())
+            process_id = int(application.processIdentifier())
         except CollectorUnavailableError:
             raise
         except Exception as error:
@@ -66,6 +72,7 @@ class WorkspaceApplicationProbe:
             return ApplicationMetadata(
                 app_name=app_name,
                 app_bundle_id=bundle_id,
+                process_id=process_id,
             )
         except ValueError as error:
             raise CollectorUnavailableError(
@@ -211,6 +218,7 @@ class MacOSActivitySampler:
             activity_state=activity_state,
             app_name=application.app_name,
             app_bundle_id=application.app_bundle_id,
+            process_id=application.process_id,
         )
 
 

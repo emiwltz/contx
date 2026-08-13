@@ -26,8 +26,8 @@ from contx.collectors.macos import (
     FocusedWindowTitleProbe,
     MacOSActivitySampler,
     QuartzIdleSecondsProbe,
-    QuartzScreenshotSource,
     ResolvedSystemStateProbe,
+    ScreenCaptureKitScreenshotSource,
     SystemSignals,
     WorkspaceApplicationProbe,
     WorkspaceNotificationMonitor,
@@ -142,6 +142,7 @@ def build_macos_collection_daemon(
             disk_budget_bytes=collection.raw_disk_budget_mb * 1024 * 1024,
         )
         signals = SystemSignals()
+        application_probe = WorkspaceApplicationProbe()
         activity_sampler = sampler or MacOSActivitySampler(
             clock=daemon_clock,
             state=ResolvedSystemStateProbe(
@@ -149,7 +150,7 @@ def build_macos_collection_daemon(
                 idle=QuartzIdleSecondsProbe(),
                 idle_threshold_seconds=collection.idle_threshold_seconds,
             ),
-            application=WorkspaceApplicationProbe(),
+            application=application_probe,
         )
         policy = CollectionPolicy()
         activity = ContinuousActivityCollector(
@@ -163,6 +164,9 @@ def build_macos_collection_daemon(
                 seconds=collection.segment_max_duration_seconds
             ),
             retain_excluded_activity=collection.retain_excluded_activity,
+        )
+        window_title_probe = (
+            FocusedWindowTitleProbe() if collection.window_titles_enabled else None
         )
         screenshots = (
             None
@@ -178,7 +182,11 @@ def build_macos_collection_daemon(
                         seconds=collection.screenshot_max_interval_seconds
                     ),
                 ),
-                source=screenshot_source or QuartzScreenshotSource(),
+                source=screenshot_source
+                or ScreenCaptureKitScreenshotSource(
+                    application=application_probe,
+                    window_title=window_title_probe,
+                ),
                 raw_store=raw_store,
                 retention=retention,
             )
@@ -188,9 +196,7 @@ def build_macos_collection_daemon(
             controls=controls,
             activity=activity,
             screenshots=screenshots,
-            window_titles=(
-                FocusedWindowTitleProbe() if collection.window_titles_enabled else None
-            ),
+            window_titles=window_title_probe,
             policy=policy,
             clock=daemon_clock,
         )

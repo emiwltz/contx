@@ -15,6 +15,7 @@ from contx.collection import (
 )
 from contx.db import create_database_engine, session_scope, upgrade_database
 from contx.db.repositories import PipelineRepository
+from contx.errors import ScreenshotCaptureSkipped
 from contx.models import (
     ActivityState,
     CollectionControl,
@@ -34,9 +35,19 @@ class RecordingScreenshotSource:
     def __init__(self) -> None:
         self.calls = 0
 
-    def capture_png(self) -> bytes:
+    def capture_png(self, sample: ActivitySample) -> bytes:
         self.calls += 1
+        assert sample.process_id == 4242
         return SYNTHETIC_PNG
+
+
+class SkippingScreenshotSource:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def capture_png(self, sample: ActivitySample) -> bytes:
+        self.calls += 1
+        raise ScreenshotCaptureSkipped("focused_window_changed")
 
 
 def test_excluded_context_never_reads_synthetic_pixels(tmp_path: Path) -> None:
@@ -61,6 +72,43 @@ def test_excluded_context_never_reads_synthetic_pixels(tmp_path: Path) -> None:
     assert result.observation is None
     assert source.calls == 0
     assert not tuple((tmp_path / "raw").glob("*.png"))
+
+
+def test_transient_focus_change_skips_only_the_current_capture(
+    tmp_path: Path,
+) -> None:
+    source = SkippingScreenshotSource()
+    service = SelectiveScreenshotService(
+        planner=SelectiveScreenshotPlanner(
+            policy=CollectionPolicy(),
+            enabled=True,
+            minimum_interval=timedelta(seconds=15),
+            maximum_interval=timedelta(seconds=120),
+        ),
+        source=source,
+        raw_store=FilesystemRawStore(tmp_path / "raw", disk_budget_bytes=1024),
+        retention=timedelta(hours=48),
+    )
+
+    result = service.consider(
+        _sample(),
+        control=CollectionControl(updated_at=NOW),
+        rules=(),
+        manual_requested=True,
+    )
+
+    assert result.observation is None
+    assert result.discard_reason == "focused_window_changed"
+    assert not tuple((tmp_path / "raw").glob("*.png"))
+
+    backoff = service.consider(
+        _sample(at=NOW + timedelta(seconds=1)),
+        control=CollectionControl(updated_at=NOW),
+        rules=(),
+    )
+
+    assert backoff.decision.reason_code == "minimum_interval_not_reached"
+    assert source.calls == 1
 
 
 def test_authorized_synthetic_capture_is_private_bounded_and_replay_safe(
@@ -184,6 +232,7 @@ def _sample(
         activity_state=ActivityState.ACTIVE,
         app_name="Synthetic Editor",
         app_bundle_id=bundle,
+        process_id=4242,
     )
 
 

@@ -26,6 +26,9 @@ class FakeApplication:
     def bundleIdentifier(self) -> str:
         return " com.example.editor "
 
+    def processIdentifier(self) -> int:
+        return 4242
+
 
 class FakeWorkspace:
     def frontmostApplication(self) -> FakeApplication:
@@ -56,7 +59,7 @@ class RecordingApplicationProbe:
 
     def read(self) -> ApplicationMetadata:
         self.calls += 1
-        return ApplicationMetadata("Synthetic Editor", "com.example.editor")
+        return ApplicationMetadata("Synthetic Editor", "com.example.editor", 4242)
 
 
 class FakeQuartz:
@@ -79,6 +82,20 @@ def test_workspace_probe_normalizes_public_application_identity() -> None:
 
     assert metadata.app_name == "Synthetic Editor"
     assert metadata.app_bundle_id == "com.example.editor"
+    assert metadata.process_id == 4242
+
+
+def test_workspace_probe_rejects_an_invalid_process_id() -> None:
+    class InvalidApplication(FakeApplication):
+        def processIdentifier(self) -> int:
+            return -1
+
+    class InvalidWorkspace:
+        def frontmostApplication(self) -> InvalidApplication:
+            return InvalidApplication()
+
+    with pytest.raises(CollectorUnavailableError, match="no usable identity"):
+        WorkspaceApplicationProbe(InvalidWorkspace()).read()
 
 
 def test_system_state_precedence_avoids_idle_probe_when_not_active() -> None:
@@ -153,6 +170,7 @@ def test_sampler_reads_application_identity_only_when_active() -> None:
     assert sample.activity_state is ActivityState.ACTIVE
     assert sample.app_name == "Synthetic Editor"
     assert sample.app_bundle_id == "com.example.editor"
+    assert sample.process_id == 4242
     assert application.calls == 1
 
 

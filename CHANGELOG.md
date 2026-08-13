@@ -107,6 +107,13 @@ guaranteed.
 
 ### Changed
 
+- Replaced display-wide CoreGraphics screenshots with a fail-closed
+  ScreenCaptureKit source that binds each authorized sample to one frontmost
+  layer-0 window by process, bundle, and window ID; revalidates focus before
+  and after capture; excludes window shadows; and never
+  falls back to capturing other windows or displays. Normal focus races skip
+  one screenshot under the existing minimum-interval bound instead of stopping
+  metadata collection.
 - CLI status now distinguishes configured, supervised, paused, and disabled
   collection from the independent persisted pause-control state.
 - Revised the product specification to version 0.3: v0 now requires a local

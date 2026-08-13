@@ -20,7 +20,7 @@ from contx.collectors.macos.permissions import (
     PermissionRequestResult,
     request_collection_permission,
 )
-from contx.collectors.macos.screenshots import QuartzScreenshotSource
+from contx.collectors.macos.screenshots import ScreenCaptureKitScreenshotSource
 from contx.collectors.macos.window_titles import FocusedWindowTitleProbe
 
 __all__ = [
@@ -33,7 +33,7 @@ __all__ = [
     "MacOSPermission",
     "PermissionRequestResult",
     "QuartzIdleSecondsProbe",
-    "QuartzScreenshotSource",
+    "ScreenCaptureKitScreenshotSource",
     "ResolvedSystemStateProbe",
     "SystemSignals",
     "WorkspaceApplicationProbe",

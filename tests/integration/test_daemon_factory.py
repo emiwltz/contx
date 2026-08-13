@@ -193,7 +193,7 @@ def test_enabled_factory_runs_one_isolated_synthetic_cycle(tmp_path: Path) -> No
         engine.dispose()
 
 
-def test_enabled_screenshot_factory_uses_the_native_quartz_source(
+def test_enabled_screenshot_factory_uses_the_native_screencapturekit_source(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -211,17 +211,17 @@ def test_enabled_screenshot_factory_uses_the_native_quartz_source(
     native_sources: list[object] = []
 
     class NativeSource:
-        def capture_png(self) -> bytes:
+        def capture_png(self, sample: ActivitySample) -> bytes:
             return b"synthetic native png"
 
-    def build_native_source() -> NativeSource:
+    def build_native_source(**_dependencies: object) -> NativeSource:
         source = NativeSource()
         native_sources.append(source)
         return source
 
     monkeypatch.setattr(
         factory_module,
-        "QuartzScreenshotSource",
+        "ScreenCaptureKitScreenshotSource",
         build_native_source,
     )
     daemon = build_macos_collection_daemon(

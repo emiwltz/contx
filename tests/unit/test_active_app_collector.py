@@ -21,6 +21,9 @@ class FakeApplication:
     def bundleIdentifier(self) -> str:
         return "com.example.synthetic-codex"
 
+    def processIdentifier(self) -> int:
+        return 4242
+
 
 class FakeWorkspace:
     def frontmostApplication(self) -> FakeApplication:

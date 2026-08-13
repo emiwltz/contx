@@ -28,12 +28,20 @@ class ActivitySample:
     app_name: str | None = None
     app_bundle_id: str | None = None
     window_title: str | None = None
+    process_id: int | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "observed_at", require_aware_utc(self.observed_at))
+        if self.process_id is not None and self.process_id <= 0:
+            raise ValueError("process ID must be positive when provided")
         if self.activity_state is not ActivityState.ACTIVE and any(
             value is not None
-            for value in (self.app_name, self.app_bundle_id, self.window_title)
+            for value in (
+                self.app_name,
+                self.app_bundle_id,
+                self.window_title,
+                self.process_id,
+            )
         ):
             raise ValueError("inactive samples must not contain application metadata")
 

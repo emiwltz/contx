@@ -42,3 +42,4 @@ Every ADR records:
 - [0016 — Serve one same-origin loopback web interface](0016-loopback-web-interface.md)
 - [0017 — Evaluate v0 with paired, content-minimized pilot evidence](0017-paired-real-pilot-evaluation.md)
 - [0018 — Run semantic refreshes as bounded periodic local jobs](0018-bounded-periodic-context-refresh.md)
+- [0019 — Capture only the policy-authorized focused window](0019-capture-only-focused-window.md)

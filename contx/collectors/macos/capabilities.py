@@ -79,6 +79,54 @@ def detect_collection_capabilities(
             "kCGAnyInputEventType",
         )
     )
+    screenshot_api_names = (
+        "CGPreflightScreenCaptureAccess",
+        "kCGWindowListOptionOnScreenOnly",
+        "kCGWindowListExcludeDesktopElements",
+        "kCGNullWindowID",
+        "kCGWindowNumber",
+        "kCGWindowLayer",
+        "kCGWindowAlpha",
+        "kCGWindowOwnerPID",
+        "kCGWindowBounds",
+        "CGWindowListCopyWindowInfo",
+        "SCShareableContent",
+        "SCContentFilter",
+        "SCStreamConfiguration",
+        "SCScreenshotManager",
+        "CFDataCreateMutable",
+        "CGImageDestinationCreateWithData",
+        "CGImageDestinationAddImage",
+        "CGImageDestinationFinalize",
+    )
+    screenshot_api_available = quartz is not None and all(
+        hasattr(quartz, attribute) for attribute in screenshot_api_names
+    )
+    if screenshot_api_available and quartz is not None:
+        screenshot_api_available = all(
+            hasattr(native_type, selector)
+            for native_type, selector in (
+                (
+                    quartz.SCShareableContent,
+                    "getShareableContentExcludingDesktopWindows_"
+                    "onScreenWindowsOnly_completionHandler_",
+                ),
+                (quartz.SCContentFilter, "initWithDesktopIndependentWindow_"),
+                (quartz.SCContentFilter, "contentRect"),
+                (quartz.SCContentFilter, "pointPixelScale"),
+                (quartz.SCStreamConfiguration, "alloc"),
+                (quartz.SCStreamConfiguration, "setWidth_"),
+                (quartz.SCStreamConfiguration, "setHeight_"),
+                (
+                    quartz.SCStreamConfiguration,
+                    "setIgnoreShadowsSingleWindow_",
+                ),
+                (
+                    quartz.SCScreenshotManager,
+                    "captureImageWithFilter_configuration_completionHandler_",
+                ),
+            )
+        )
 
     capabilities = [
         _api_capability("active_application", cocoa_available, "cocoa_bridge_missing"),
@@ -110,23 +158,12 @@ def detect_collection_capabilities(
         _permission_capability(
             name="screenshots",
             enabled=settings.screenshots_enabled,
-            module=quartz,
+            module=quartz if screenshot_api_available else None,
             preflight_name="CGPreflightScreenCaptureAccess",
             missing_api_reason="screen_capture_api_unavailable",
             permission_reason="screen_recording_permission_missing",
             settings_path=(
                 "System Settings > Privacy & Security > Screen & System Audio Recording"
-            ),
-            required_api_names=(
-                "CGRectInfinite",
-                "kCGWindowListOptionOnScreenOnly",
-                "kCGNullWindowID",
-                "kCGWindowImageDefault",
-                "CGWindowListCreateImage",
-                "CFDataCreateMutable",
-                "CGImageDestinationCreateWithData",
-                "CGImageDestinationAddImage",
-                "CGImageDestinationFinalize",
             ),
         ),
     ]

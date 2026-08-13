@@ -48,8 +48,9 @@ class RecordingScreenshotSource:
     def __init__(self) -> None:
         self.calls = 0
 
-    def capture_png(self) -> bytes:
+    def capture_png(self, sample: ActivitySample) -> bytes:
         self.calls += 1
+        assert sample.process_id == 4242
         return SYNTHETIC_PNG
 
 
@@ -245,4 +246,5 @@ def _sample(*, bundle: str = "com.example.editor") -> ActivitySample:
         activity_state=ActivityState.ACTIVE,
         app_name="Synthetic Editor",
         app_bundle_id=bundle,
+        process_id=4242,
     )
