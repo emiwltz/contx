@@ -111,10 +111,34 @@ def test_init_is_idempotent_and_status_is_truthful(tmp_path: Path) -> None:
     assert "background collection: disabled" in status.stdout
     assert "collector daemon: stopped" in status.stdout
     assert "context processor: stopped" in status.stdout
+    assert "collection control: ready" in status.stdout
+    assert "collection: disabled" in status.stdout
 
     paths = resolve_runtime_paths(environment)
     assert stat.S_IMODE(paths.config_file.stat().st_mode) == 0o600
     assert stat.S_IMODE(paths.database_file.stat().st_mode) == 0o600
+
+
+def test_status_distinguishes_enabled_configuration_from_a_running_collector(
+    tmp_path: Path,
+) -> None:
+    environment = {RUNTIME_ROOT_ENV: str(tmp_path)}
+    initialized = runner.invoke(app, ["init"], env=environment)
+    assert initialized.exit_code == 0
+    paths = resolve_runtime_paths(environment)
+    config = paths.config_file.read_text(encoding="utf-8").replace(
+        "background_collection_enabled = false",
+        "background_collection_enabled = true",
+    )
+    paths.config_file.write_text(config, encoding="utf-8")
+
+    status = runner.invoke(app, ["status"], env=environment)
+
+    assert status.exit_code == 0
+    assert "background collection: enabled" in status.stdout
+    assert "collector daemon: stopped" in status.stdout
+    assert "collection control: ready" in status.stdout
+    assert "collection: stopped" in status.stdout
 
 
 def test_run_once_synthetic_uses_the_initialized_runtime(
@@ -212,7 +236,8 @@ def test_pause_blocks_live_source_before_macos_access(
 
     assert paused.exit_code == 0
     assert "collection: paused until" in paused.stdout
-    assert "collection: paused" in status.stdout
+    assert "collection control: paused" in status.stdout
+    assert "collection: disabled" in status.stdout
     assert run.exit_code == 0
     assert "observations: 0" in run.stdout
     assert resumed.stdout == "collection: active\n"

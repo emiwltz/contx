@@ -107,6 +107,8 @@ guaranteed.
 
 ### Changed
 
+- CLI status now distinguishes configured, supervised, paused, and disabled
+  collection from the independent persisted pause-control state.
 - Revised the product specification to version 0.3: v0 now requires a local
   multimodal model, removes deterministic semantic extraction and secret
   redaction from scope, and prohibits remote user-content processing.

@@ -880,7 +880,7 @@ become a second source of truth.
 Current state: complete. The locked TypeScript/Vite build is packaged in the
 Python wheel; API security, static fallback, live loopback binding, collector
 state, exact destructive confirmations, desktop/mobile layouts, semantic DOM,
-and browser-console checks pass. The complete suite passes 362 tests. See
+and browser-console checks pass. The complete suite passes 363 tests. See
 `docs/evaluation/v0.6-web-interface-validation.md`.
 
 ## 15. Phase 9: v0.9 real pilot

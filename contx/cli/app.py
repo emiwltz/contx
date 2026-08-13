@@ -294,11 +294,20 @@ def status() -> None:
         typer.echo(f"model abandoned: {abandoned_transformations}")
     if model_event_backlog is not None:
         typer.echo(f"model event backlog: {model_event_backlog}")
-    collection_state = (
+    control_state = (
         "unavailable"
         if control is None
-        else ("paused" if control.is_paused(at=SystemClock().now()) else "active")
+        else ("paused" if control.is_paused(at=SystemClock().now()) else "ready")
     )
+    typer.echo(f"collection control: {control_state}")
+    if not settings.collection.background_collection_enabled:
+        collection_state = "disabled"
+    elif daemon_state is None or not daemon_state.running:
+        collection_state = "stopped"
+    elif control_state == "paused":
+        collection_state = "paused"
+    else:
+        collection_state = "active"
     typer.echo(f"collection: {collection_state}")
     if control is not None and control.pause_until is not None:
         typer.echo(f"pause until: {control.pause_until.isoformat()}")
