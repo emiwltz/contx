@@ -13,6 +13,8 @@ from contx.collection.continuous import ActivitySample
 from contx.errors import CollectorUnavailableError
 from contx.models import ActivityState, Clock
 
+from .window_identity import FocusedWindowIdentifierProbe
+
 
 class RunningApplication(Protocol):
     def localizedName(self) -> str | None: ...
@@ -200,10 +202,12 @@ class MacOSActivitySampler:
         clock: Clock,
         state: ActivityStateProbe,
         application: ApplicationProbe,
+        window: FocusedWindowIdentifierProbe | None = None,
     ) -> None:
         self._clock = clock
         self._state = state
         self._application = application
+        self._window = window
 
     def sample(self) -> ActivitySample:
         activity_state = self._state.current_state()
@@ -213,12 +217,19 @@ class MacOSActivitySampler:
                 activity_state=activity_state,
             )
         application = self._application.read()
+        window_id: int | None = None
+        if self._window is not None:
+            try:
+                window_id = self._window.read(process_id=application.process_id)
+            except CollectorUnavailableError:
+                window_id = None
         return ActivitySample(
             observed_at=self._clock.now(),
             activity_state=activity_state,
             app_name=application.app_name,
             app_bundle_id=application.app_bundle_id,
             process_id=application.process_id,
+            window_id=window_id,
         )
 
 

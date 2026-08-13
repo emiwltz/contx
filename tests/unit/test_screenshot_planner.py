@@ -122,6 +122,19 @@ def test_automatic_triggers_follow_meaningful_transitions() -> None:
     assert returned.trigger is ScreenshotTrigger.RETURNED_FROM_IDLE
 
 
+def test_ephemeral_window_identity_triggers_change_without_title_access() -> None:
+    decision = _planner().evaluate(
+        _sample(NOW + timedelta(seconds=30), window_id=88),
+        previous_sample=_sample(NOW, window_id=77),
+        last_capture_at=NOW,
+        control=_control(),
+        rules=(),
+    )
+
+    assert decision.capture
+    assert decision.trigger is ScreenshotTrigger.WINDOW_CHANGED
+
+
 def test_minimum_interval_blocks_automatic_change_but_not_manual_request() -> None:
     planner = _planner()
     current = _sample(NOW + timedelta(seconds=5), app="Terminal", bundle="com.term")
@@ -179,6 +192,7 @@ def _sample(
     app: str = "Editor",
     bundle: str = "com.example.editor",
     title: str | None = None,
+    window_id: int | None = None,
 ) -> ActivitySample:
     return ActivitySample(
         observed_at=at,
@@ -186,4 +200,6 @@ def _sample(
         app_name=app,
         app_bundle_id=bundle,
         window_title=title,
+        process_id=4242 if window_id is not None else None,
+        window_id=window_id,
     )

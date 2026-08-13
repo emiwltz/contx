@@ -109,7 +109,8 @@ guaranteed.
 
 - Replaced display-wide CoreGraphics screenshots with a fail-closed
   ScreenCaptureKit source that binds each authorized sample to one frontmost
-  layer-0 window by process, bundle, and window ID; revalidates focus before
+  layer-0 window by a process and window ID sampled before policy evaluation,
+  matches its bundle in ScreenCaptureKit, revalidates focus before
   and after capture; excludes window shadows; and never
   falls back to capturing other windows or displays. Normal focus races skip
   one screenshot under the existing minimum-interval bound instead of stopping

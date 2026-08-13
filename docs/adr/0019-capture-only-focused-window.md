@@ -47,25 +47,27 @@ in one system call.
 
 Use option 2 for v0, as approved by Emi.
 
-The metadata sample carries an ephemeral positive process identifier in
-addition to application name and bundle identifier. CONTX never persists that
-process identifier. After the screenshot planner authorizes a sample, the
-native source:
+The metadata sample carries an ephemeral positive process identifier and, when
+screenshots are enabled, the positive ID of the first normal window for that
+process in Apple's front-to-back CoreGraphics list. This content-free window
+identity is resolved in the same initial sample as the application identity,
+before any optional title or pixel read. CONTX never persists either native
+identifier.
+
+After the screenshot planner authorizes that exact sample, the native source:
 
 1. confirms existing Screen Recording permission without prompting;
-2. confirms that the same process and application identity remain frontmost;
-3. reads the CoreGraphics on-screen window list, which Apple orders front to
-   back, and selects the first visible, non-transparent, positive-sized layer-0
-   window owned by that process;
-4. finds the same window ID, process ID, and bundle identifier in
+2. confirms that the same process, application identity, and sampled window ID
+   remain frontmost;
+3. finds the exact sampled window ID, process ID, and bundle identifier in
    `SCShareableContent`;
-5. creates `SCContentFilter(desktopIndependentWindow:)` for only that window;
-6. excludes the selected window's shadow and bounds either pixel dimension to
+4. creates `SCContentFilter(desktopIndependentWindow:)` for only that window;
+5. excludes the selected window's shadow and bounds either pixel dimension to
    8192 while preserving aspect ratio;
-7. revalidates the application, window ID, and, when title collection is
+6. revalidates the application, window ID, and, when title collection is
    enabled, the exact title immediately before capture;
-8. uses `SCScreenshotManager` to read one image;
-9. repeats the same context checks before encoding or persistence.
+7. uses `SCScreenshotManager` to read one image;
+8. repeats the same context checks before encoding or persistence.
 
 Missing process metadata, permission, APIs, or a five-second native timeout is
 an explicit collector error. A missing normal window, missing exact shareable
@@ -107,14 +109,15 @@ event-driven v0 capture path does not need.
 - A frontmost application without a normal on-screen window skips that
   screenshot with bounded retry cadence rather than taking a broad fallback or
   stopping metadata collection.
-- Window metadata enumeration occurs only after policy authorization and
-  existing permission preflight; the implementation does not inspect titles
-  from the ScreenCaptureKit window list.
+- Content-free window ID resolution occurs only when screenshots are enabled,
+  after the pause gate and as part of the initial application sample. The
+  implementation reads no title from CoreGraphics or ScreenCaptureKit window
+  lists.
 - Optional Accessibility title collection strengthens the race check when it
   is enabled. Without it, application and exact-window identity remain the
   available authorization boundary.
-- The process ID is collection-ephemeral and does not alter persisted schemas,
-  observations, replay identity, exports, or public API responses.
+- Process and window IDs are collection-ephemeral and do not alter persisted
+  schemas, observations, replay identity, exports, or public API responses.
 - The current five-second timeout and 8192-pixel bound are explicit v0 resource
   limits subject to target-Mac pilot evidence.
 - The real smoke test must verify callback delivery from the AppKit collector

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import sys
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable
 from importlib import import_module
 from threading import Event
 from typing import Any, Protocol, cast
@@ -17,6 +17,8 @@ from contx.collectors.macos.activity import (
 )
 from contx.errors import CollectorUnavailableError, ScreenshotCaptureSkipped
 from contx.models import ActivityState
+
+from .window_identity import WindowListApi, frontmost_window_id
 
 PNG_UTI = "public.png"
 DEFAULT_CAPTURE_TIMEOUT_SECONDS = 5.0
@@ -32,27 +34,13 @@ class FocusedWindowTitleReader(Protocol):
     def read(self) -> str | None: ...
 
 
-class ScreenCaptureKitApi(Protocol):
-    kCGWindowListOptionOnScreenOnly: int
-    kCGWindowListExcludeDesktopElements: int
-    kCGNullWindowID: int
-    kCGWindowNumber: str
-    kCGWindowLayer: str
-    kCGWindowAlpha: str
-    kCGWindowOwnerPID: str
-    kCGWindowBounds: str
+class ScreenCaptureKitApi(WindowListApi, Protocol):
     SCShareableContent: Any
     SCContentFilter: Any
     SCStreamConfiguration: Any
     SCScreenshotManager: Any
 
     def CGPreflightScreenCaptureAccess(self) -> bool: ...
-
-    def CGWindowListCopyWindowInfo(
-        self,
-        list_option: int,
-        relative_to_window: int,
-    ) -> Sequence[Mapping[str, object]] | None: ...
 
     def CFDataCreateMutable(
         self,
@@ -99,10 +87,10 @@ class ScreenCaptureKitScreenshotSource:
     def capture_png(self, sample: ActivitySample) -> bytes:
         """Capture one exact window, discarding output if focus changes."""
         process_id = _required_process_id(sample)
+        window_id = _required_window_id(sample)
         quartz = self._quartz or _load_quartz()
         _require_screen_capture_permission(quartz)
-        self._assert_application_unchanged(sample)
-        window_id = _frontmost_window_id(quartz, process_id)
+        self._assert_context_unchanged(sample, quartz, window_id)
 
         shareable_content_method = getattr(
             quartz.SCShareableContent,
@@ -172,13 +160,10 @@ class ScreenCaptureKitScreenshotSource:
                 ) from error
             if current_title != sample.window_title:
                 raise ScreenshotCaptureSkipped("focused_window_title_changed")
-        try:
-            current_window_id = _frontmost_window_id(
-                quartz,
-                _required_process_id(sample),
-            )
-        except ScreenshotCaptureSkipped as error:
-            raise ScreenshotCaptureSkipped("focused_window_changed") from error
+        current_window_id = frontmost_window_id(
+            quartz,
+            _required_process_id(sample),
+        )
         if current_window_id != window_id:
             raise ScreenshotCaptureSkipped("focused_window_changed")
 
@@ -201,6 +186,12 @@ def _required_process_id(sample: ActivitySample) -> int:
             "Focused-window capture requires an active sample with a process ID"
         )
     return sample.process_id
+
+
+def _required_window_id(sample: ActivitySample) -> int:
+    if sample.window_id is None:
+        raise ScreenshotCaptureSkipped("no_authorized_focused_window")
+    return sample.window_id
 
 
 def _same_application(
@@ -226,52 +217,6 @@ def _require_screen_capture_permission(quartz: ScreenCaptureKitApi) -> None:
         ) from error
     if not authorized:
         raise CollectorUnavailableError("macOS screen-capture permission is required")
-
-
-def _frontmost_window_id(quartz: ScreenCaptureKitApi, process_id: int) -> int:
-    options = (
-        quartz.kCGWindowListOptionOnScreenOnly
-        | quartz.kCGWindowListExcludeDesktopElements
-    )
-    try:
-        windows = quartz.CGWindowListCopyWindowInfo(
-            options,
-            quartz.kCGNullWindowID,
-        )
-    except Exception as error:
-        raise CollectorUnavailableError(
-            "Cannot resolve the focused macOS window"
-        ) from error
-    if windows is None:
-        raise CollectorUnavailableError("macOS did not return an on-screen window list")
-    for window in windows:
-        try:
-            native_window = cast(Mapping[str, Any], window)
-            if int(native_window[quartz.kCGWindowOwnerPID]) != process_id:
-                continue
-            if int(native_window[quartz.kCGWindowLayer]) != 0:
-                continue
-            if float(native_window[quartz.kCGWindowAlpha]) <= 0:
-                continue
-            if not _has_visible_bounds(native_window[quartz.kCGWindowBounds]):
-                continue
-            window_id = int(native_window[quartz.kCGWindowNumber])
-        except (KeyError, TypeError, ValueError, OverflowError):
-            continue
-        if window_id > 0:
-            return window_id
-    raise ScreenshotCaptureSkipped("no_capturable_focused_window")
-
-
-def _has_visible_bounds(raw_bounds: object) -> bool:
-    if not isinstance(raw_bounds, Mapping):
-        return False
-    try:
-        width = float(raw_bounds["Width"])
-        height = float(raw_bounds["Height"])
-    except (KeyError, TypeError, ValueError, OverflowError):
-        return False
-    return math.isfinite(width) and math.isfinite(height) and width > 0 and height > 0
 
 
 def _matching_shareable_window(

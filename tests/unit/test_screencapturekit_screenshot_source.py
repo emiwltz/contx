@@ -314,6 +314,27 @@ def test_missing_permission_prevents_window_or_pixel_reads() -> None:
     assert quartz.calls == ["preflight"]
 
 
+def test_sample_without_an_authorized_window_never_preflights_or_reads_pixels() -> None:
+    quartz = FakeQuartz()
+
+    with pytest.raises(
+        ScreenshotCaptureSkipped,
+        match="no_authorized_focused_window",
+    ):
+        _source(quartz).capture_png(_sample(window_id=None))
+
+    assert quartz.calls == []
+
+
+def test_same_process_window_change_before_resolution_fails_closed() -> None:
+    quartz = FakeQuartz(window_ids=(88,))
+
+    with pytest.raises(ScreenshotCaptureSkipped, match="focused_window_changed"):
+        _source(quartz).capture_png(_sample(window_id=77))
+
+    assert quartz.calls == ["preflight", "window_list"]
+
+
 def test_authorized_capture_isolates_one_frontmost_window() -> None:
     quartz = FakeQuartz()
 
@@ -428,7 +449,11 @@ def _source(
     )
 
 
-def _sample(*, title: str | None = None) -> ActivitySample:
+def _sample(
+    *,
+    title: str | None = None,
+    window_id: int | None = 77,
+) -> ActivitySample:
     return ActivitySample(
         observed_at=NOW,
         activity_state=ActivityState.ACTIVE,
@@ -436,6 +461,7 @@ def _sample(*, title: str | None = None) -> ActivitySample:
         app_bundle_id="com.example.editor",
         window_title=title,
         process_id=4242,
+        window_id=window_id,
     )
 
 

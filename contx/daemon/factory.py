@@ -23,6 +23,7 @@ from contx.collection import (
     SelectiveScreenshotService,
 )
 from contx.collectors.macos import (
+    CoreGraphicsFocusedWindowProbe,
     FocusedWindowTitleProbe,
     MacOSActivitySampler,
     QuartzIdleSecondsProbe,
@@ -151,6 +152,11 @@ def build_macos_collection_daemon(
                 idle_threshold_seconds=collection.idle_threshold_seconds,
             ),
             application=application_probe,
+            window=(
+                CoreGraphicsFocusedWindowProbe()
+                if collection.screenshots_enabled
+                else None
+            ),
         )
         policy = CollectionPolicy()
         activity = ContinuousActivityCollector(

@@ -121,6 +121,12 @@ def _transition_trigger(
     ):
         return ScreenshotTrigger.APPLICATION_CHANGED
     if (
+        current.window_id is not None
+        and previous.window_id is not None
+        and current.window_id != previous.window_id
+    ):
+        return ScreenshotTrigger.WINDOW_CHANGED
+    if (
         current.window_title is not None
         and previous.window_title is not None
         and current.window_title != previous.window_title

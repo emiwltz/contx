@@ -21,6 +21,7 @@ from contx.collectors.macos.permissions import (
     request_collection_permission,
 )
 from contx.collectors.macos.screenshots import ScreenCaptureKitScreenshotSource
+from contx.collectors.macos.window_identity import CoreGraphicsFocusedWindowProbe
 from contx.collectors.macos.window_titles import FocusedWindowTitleProbe
 
 __all__ = [
@@ -28,6 +29,7 @@ __all__ = [
     "ApplicationMetadata",
     "CapabilityStatus",
     "CollectionCapability",
+    "CoreGraphicsFocusedWindowProbe",
     "FocusedWindowTitleProbe",
     "MacOSActivitySampler",
     "MacOSPermission",

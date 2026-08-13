@@ -62,6 +62,21 @@ class RecordingApplicationProbe:
         return ApplicationMetadata("Synthetic Editor", "com.example.editor", 4242)
 
 
+class RecordingWindowProbe:
+    def __init__(self, window_id: int | None = 77) -> None:
+        self.window_id = window_id
+        self.process_ids: list[int] = []
+
+    def read(self, *, process_id: int) -> int | None:
+        self.process_ids.append(process_id)
+        return self.window_id
+
+
+class UnavailableWindowProbe:
+    def read(self, *, process_id: int) -> int | None:
+        raise CollectorUnavailableError("synthetic window server failure")
+
+
 class FakeQuartz:
     kCGEventSourceStateCombinedSessionState = 1
     kCGAnyInputEventType = 2
@@ -159,10 +174,12 @@ def test_sampler_never_reads_application_in_non_active_state() -> None:
 
 def test_sampler_reads_application_identity_only_when_active() -> None:
     application = RecordingApplicationProbe()
+    window = RecordingWindowProbe()
     sampler = MacOSActivitySampler(
         clock=FixedClock(NOW),
         state=FixedState(ActivityState.ACTIVE),
         application=application,
+        window=window,
     )
 
     sample = sampler.sample()
@@ -171,7 +188,26 @@ def test_sampler_reads_application_identity_only_when_active() -> None:
     assert sample.app_name == "Synthetic Editor"
     assert sample.app_bundle_id == "com.example.editor"
     assert sample.process_id == 4242
+    assert sample.window_id == 77
     assert application.calls == 1
+    assert window.process_ids == [4242]
+
+
+def test_sampler_keeps_application_metadata_when_window_identity_is_unavailable() -> (
+    None
+):
+    sampler = MacOSActivitySampler(
+        clock=FixedClock(NOW),
+        state=FixedState(ActivityState.ACTIVE),
+        application=RecordingApplicationProbe(),
+        window=UnavailableWindowProbe(),
+    )
+
+    sample = sampler.sample()
+
+    assert sample.app_bundle_id == "com.example.editor"
+    assert sample.process_id == 4242
+    assert sample.window_id is None
 
 
 def test_quartz_probe_uses_combined_session_and_any_input() -> None:

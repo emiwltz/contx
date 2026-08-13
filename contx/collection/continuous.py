@@ -29,11 +29,16 @@ class ActivitySample:
     app_bundle_id: str | None = None
     window_title: str | None = None
     process_id: int | None = None
+    window_id: int | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "observed_at", require_aware_utc(self.observed_at))
         if self.process_id is not None and self.process_id <= 0:
             raise ValueError("process ID must be positive when provided")
+        if self.window_id is not None and self.window_id <= 0:
+            raise ValueError("window ID must be positive when provided")
+        if self.window_id is not None and self.process_id is None:
+            raise ValueError("window ID requires a process ID")
         if self.activity_state is not ActivityState.ACTIVE and any(
             value is not None
             for value in (
@@ -41,6 +46,7 @@ class ActivitySample:
                 self.app_bundle_id,
                 self.window_title,
                 self.process_id,
+                self.window_id,
             )
         ):
             raise ValueError("inactive samples must not contain application metadata")
