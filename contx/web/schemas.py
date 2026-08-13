@@ -727,9 +727,7 @@ class ProposalValidationView(ApiModel):
     wall_duration_ms: int
 
     @classmethod
-    def from_record(
-        cls, record: AgentProposalAdoptionBuild
-    ) -> ProposalValidationView:
+    def from_record(cls, record: AgentProposalAdoptionBuild) -> ProposalValidationView:
         return cls(
             proposal_id=record.proposal_id,
             candidate_id=record.candidate_id,
@@ -775,6 +773,7 @@ class SettingsResponse(ApiModel):
     model: dict[str, Any]
     events: dict[str, Any]
     memory: dict[str, Any]
+    processing: dict[str, Any]
     api: dict[str, Any]
 
     @classmethod
@@ -786,5 +785,6 @@ class SettingsResponse(ApiModel):
             model=payload["model"],
             events=payload["events"],
             memory=payload["memory"],
+            processing=payload["processing"],
             api={"host": "127.0.0.1", "port": port, "version": API_VERSION},
         )

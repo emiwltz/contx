@@ -47,6 +47,7 @@ class ActivityTimelineBuildResult:
     timeline: ActivityTimeline
     event_ids: tuple[UUID, ...]
     transformation_count: int
+    reused: bool = False
 
     @property
     def succeeded(self) -> bool:
@@ -144,6 +145,68 @@ class ActivityTimelineService:
             event_ids=tuple(event.id for event in persisted),
             transformation_count=len(evidence),
         )
+
+    def reuse_or_rebuild(
+        self,
+        *,
+        window_start: datetime,
+        window_end: datetime,
+    ) -> ActivityTimelineBuildResult:
+        """Reuse identical production evidence or create a new replay snapshot."""
+        probe = TimelineBuild(
+            processing_run_id=UUID(int=0),
+            processing_version=self._builder.processing_version,
+            window_start=window_start,
+            window_end=window_end,
+            session_gap_seconds=int(self._sessionizer.session_gap.total_seconds()),
+            max_session_duration_seconds=int(
+                self._sessionizer.max_session_duration.total_seconds()
+            ),
+        )
+        evidence = self._window_evidence(probe)
+        expected_transformations = tuple(
+            sorted((item.transformation.id for item in evidence), key=str)
+        )
+        with session_scope(self._engine) as database_session:
+            timeline_repository = TimelineBuildRepository(database_session)
+            event_repository = ModelEventRepository(database_session)
+            pipeline = PipelineRepository(database_session)
+            for build in timeline_repository.matching_successful(
+                processing_version=probe.processing_version,
+                window_start=probe.window_start,
+                window_end=probe.window_end,
+                session_gap_seconds=probe.session_gap_seconds,
+                max_session_duration_seconds=probe.max_session_duration_seconds,
+            ):
+                events = event_repository.events_for_processing_run(
+                    build.processing_run_id
+                )
+                actual_transformations = tuple(
+                    sorted(
+                        {
+                            transformation_id
+                            for event in events
+                            for transformation_id in (
+                                event_repository.transformation_ids(event.id)
+                            )
+                        },
+                        key=str,
+                    )
+                )
+                run = pipeline.processing_run_by_id(build.processing_run_id)
+                if (
+                    actual_transformations == expected_transformations
+                    and run is not None
+                    and run.input_count == len(evidence)
+                ):
+                    return ActivityTimelineBuildResult(
+                        run=run,
+                        timeline=self.read(run.id),
+                        event_ids=tuple(event.id for event in events),
+                        transformation_count=len(evidence),
+                        reused=True,
+                    )
+        return self.rebuild(window_start=window_start, window_end=window_end)
 
     def read(self, processing_run_id: UUID) -> ActivityTimeline:
         with session_scope(self._engine) as database_session:

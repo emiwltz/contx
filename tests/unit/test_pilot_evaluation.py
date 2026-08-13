@@ -45,9 +45,7 @@ def test_complete_paired_pilot_passes_all_deterministic_gates() -> None:
 
     assert report.ready_for_v0_decision
     assert report.important_event_recall == 1.0
-    assert {item.scenario for item in report.behavior_comparisons} == set(
-        PilotScenario
-    )
+    assert {item.scenario for item in report.behavior_comparisons} == set(PilotScenario)
     assert all(item.demonstrated_benefit for item in report.behavior_comparisons)
     assert all(gate.status is GateStatus.PASS for gate in report.gates)
     assert report.resources is not None
@@ -66,9 +64,7 @@ def test_report_requires_operator_approved_resource_limits() -> None:
 
 
 def test_report_is_incomplete_before_planned_end() -> None:
-    report = evaluate_pilot(
-        _complete_dataset(), evaluated_at=START + timedelta(days=6)
-    )
+    report = evaluate_pilot(_complete_dataset(), evaluated_at=START + timedelta(days=6))
 
     assert _gate(report, "pilot_duration").status is GateStatus.INCOMPLETE
     assert not report.ready_for_v0_decision
@@ -121,9 +117,7 @@ def test_interim_report_ignores_evidence_recorded_after_cutoff() -> None:
 
 def test_missing_ground_truth_reference_is_rejected() -> None:
     dataset = _complete_dataset()
-    changed = dataset.trials[0].model_copy(
-        update={"relevant_truth_ids": (_uuid(999),)}
-    )
+    changed = dataset.trials[0].model_copy(update={"relevant_truth_ids": (_uuid(999),)})
     invalid = dataset.model_copy(update={"trials": (changed, *dataset.trials[1:])})
 
     with pytest.raises(PilotEvaluationError, match="missing ground-truth"):
@@ -138,9 +132,7 @@ def test_workspace_round_trips_strict_jsonl_and_private_permissions(
     workspace.prepare(source.manifest)
     _write_records(workspace.root / workspace.GROUND_TRUTH, source.ground_truth)
     _write_records(workspace.root / workspace.TRIALS, source.trials)
-    _write_records(
-        workspace.root / workspace.TECHNICAL, source.technical_snapshots
-    )
+    _write_records(workspace.root / workspace.TECHNICAL, source.technical_snapshots)
     _write_records(workspace.root / workspace.RESOURCES, source.resource_samples)
     _write_records(workspace.root / workspace.INCIDENTS, source.privacy_incidents)
 
@@ -151,8 +143,7 @@ def test_workspace_round_trips_strict_jsonl_and_private_permissions(
     assert loaded == source
     assert stat.S_IMODE(workspace.root.stat().st_mode) == 0o700
     assert all(
-        stat.S_IMODE(path.stat().st_mode) == 0o600
-        for path in workspace.root.iterdir()
+        stat.S_IMODE(path.stat().st_mode) == 0o600 for path in workspace.root.iterdir()
     )
     rendered = report_path.read_text(encoding="utf-8")
     assert "v0 decision readiness: **ready**" in rendered
@@ -253,18 +244,12 @@ def _complete_dataset(
                 captured_at=START + timedelta(days=index),
                 phase=phase,
                 collector_cpu_percent=2.0 if index == 4 else 1.0,
-                collector_rss_bytes=(
-                    200_000_000 if index == 4 else 100_000_000
-                ),
+                collector_rss_bytes=(200_000_000 if index == 4 else 100_000_000),
                 local_model_rss_bytes=(
-                    6_000_000_000
-                    if phase is ResourcePhase.MODEL_PROCESSING
-                    else 0
+                    6_000_000_000 if phase is ResourcePhase.MODEL_PROCESSING else 0
                 ),
                 web_rss_bytes=(
-                    100_000_000
-                    if phase is ResourcePhase.WEB_INTERACTION
-                    else 0
+                    100_000_000 if phase is ResourcePhase.WEB_INTERACTION else 0
                 ),
                 detection_latency_ms=1000 if index == 4 else 500,
                 raw_disk_bytes=2000 if index == 4 else 1000,
@@ -283,9 +268,7 @@ def _manifest(*, resource_limits: ResourceLimits | None = None) -> PilotManifest
         planned_end_at=END,
         timezone="Europe/Paris",
         target_machine="Mac M4 16 GB",
-        thresholds=PilotThresholds(
-            resource_limits=resource_limits or ResourceLimits()
-        ),
+        thresholds=PilotThresholds(resource_limits=resource_limits or ResourceLimits()),
     )
 
 

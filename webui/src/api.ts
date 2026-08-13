@@ -273,6 +273,7 @@ export type SettingsResponse = {
   model: Record<string, unknown>;
   events: Record<string, unknown>;
   memory: Record<string, unknown>;
+  processing: Record<string, unknown>;
   api: Record<string, unknown>;
 };
 

@@ -186,12 +186,12 @@ def main() -> int:
         recall_lower = recalled.casefold()
         checks = {
             "active_count": (
-                projection_wake.projection.active_memory_count
-                == EXPECTED_ACTIVE_COUNT
+                projection_wake.projection.active_memory_count == EXPECTED_ACTIVE_COUNT
             ),
             "projection_rebuilt": projection_wake.projection.rebuilt,
             "projection_compression_count": (
-                0 < projection_wake.projection.completed_compressions
+                0
+                < projection_wake.projection.completed_compressions
                 <= MAX_PROJECTION_COMPRESSIONS
                 and projection_wake.projection.completed_compressions
                 == len(projection_compressor.blocks)
@@ -266,8 +266,7 @@ def main() -> int:
         failed = tuple(name for name, passed in checks.items() if not passed)
         if failed:
             raise RuntimeError(
-                "Long-history active projection validation failed: "
-                + ", ".join(failed)
+                "Long-history active projection validation failed: " + ", ".join(failed)
             )
     return 0
 
@@ -351,13 +350,9 @@ def _seed_projection_database(engine: Engine) -> None:
                 id=candidate_id,
                 idempotency_key=_sha256(f"long-history-{index}"),
                 text=text,
-                source_type=(
-                    "event" if source_index is None else "memory_correction"
-                ),
+                source_type=("event" if source_index is None else "memory_correction"),
                 source_ids=(
-                    (EVENT_ID,)
-                    if source_index is None
-                    else (links[source_index].id,)
+                    (EVENT_ID,) if source_index is None else (links[source_index].id,)
                 ),
                 utility=0.8,
                 importance=0.8,

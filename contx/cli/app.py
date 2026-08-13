@@ -16,15 +16,21 @@ from contx.application import (
     ActivityTimelineService,
     AgentProposalAdoptionService,
     AgentProposalService,
+    CandidateEvaluationService,
+    ContextRefreshService,
     DataDeletionService,
     EventCorrectionService,
     LocalModelEventService,
     LocalModelProcessingService,
     MemoryCorrectionService,
     MemoryMaintenanceService,
+    MemoryPromotionService,
+    PatternAnalysisService,
+    PatternCandidateService,
     PipelineService,
     RawPurgeService,
 )
+from contx.candidates import PatternCandidateProducer
 from contx.candidates.rules import VerticalSliceCandidateProducer
 from contx.collection import (
     CollectionControlService,
@@ -37,7 +43,7 @@ from contx.collectors.macos import (
     detect_collection_capabilities,
 )
 from contx.collectors.synthetic import SyntheticCollector
-from contx.daemon import probe_daemon_lease
+from contx.daemon import DaemonLease, probe_daemon_lease
 from contx.db import (
     create_database_engine,
     current_database_revision,
@@ -54,10 +60,12 @@ from contx.errors import ConfigurationError, ContxError, PipelineError, RawStore
 from contx.evaluation import (
     PilotManifest,
     PilotResourceSampler,
+    PilotTechnicalSnapshotService,
     PilotThresholds,
     PilotWorkspace,
     ResourceLimits,
     ResourcePhase,
+    TechnicalReview,
     evaluate_pilot,
 )
 from contx.events import (
@@ -77,7 +85,7 @@ from contx.memory_store import (
     OptMemAdapter,
     resolve_optmem_executable,
 )
-from contx.memory_worker import ThresholdMemoryWorker
+from contx.memory_worker import ThresholdMemoryWorker, TransparentCandidateWorker
 from contx.model_provider import (
     OUTPUT_SCHEMA_VERSION,
     PROMPT_VERSION,
@@ -92,6 +100,7 @@ from contx.models import (
     SystemClock,
     UuidIdentifierSource,
 )
+from contx.patterns import TemporalPatternEngine
 from contx.raw_store import FilesystemRawStore
 from contx.settings import (
     EventSettings,
@@ -251,6 +260,23 @@ def status() -> None:
         and daemon_state.pid is not None
     ):
         typer.echo(f"collector daemon pid: {daemon_state.pid}")
+    processor_state = (
+        probe_daemon_lease(paths.processor_lock) if paths.processing.is_dir() else None
+    )
+    typer.echo(
+        "context processor: "
+        + (
+            "running"
+            if processor_state is not None and processor_state.running
+            else "stopped"
+        )
+    )
+    if (
+        processor_state is not None
+        and processor_state.running
+        and processor_state.pid is not None
+    ):
+        typer.echo(f"context processor pid: {processor_state.pid}")
     typer.echo(
         "window titles: "
         + ("enabled" if settings.collection.window_titles_enabled else "disabled")
@@ -309,9 +335,7 @@ def web(
         web_app = create_app(runtime)
     except (ContxError, ValueError) as error:
         _abort(
-            error
-            if isinstance(error, ContxError)
-            else ConfigurationError(str(error))
+            error if isinstance(error, ContxError) else ConfigurationError(str(error))
         )
     uvicorn.run(
         web_app,
@@ -370,8 +394,11 @@ def prepare_pilot(
         typer.Option(
             "--max-p95-cpu",
             min=0.01,
-            max=100,
-            help="Operator-approved collector CPU limit; omit until decided.",
+            max=1600,
+            help=(
+                "Operator-approved combined multi-core CPU limit; "
+                "100 percent equals one fully used core."
+            ),
         ),
     ] = None,
     maximum_p95_rss_bytes: Annotated[
@@ -403,9 +430,7 @@ def prepare_pilot(
                 resource_limits=ResourceLimits(
                     p95_total_cpu_percent_max=maximum_p95_cpu_percent,
                     p95_total_rss_bytes_max=maximum_p95_rss_bytes,
-                    p95_detection_latency_ms_max=(
-                        maximum_p95_detection_latency_ms
-                    ),
+                    p95_detection_latency_ms_max=(maximum_p95_detection_latency_ms),
                 )
             ),
         )
@@ -550,6 +575,105 @@ def sample_pilot_resources(
     typer.echo(f"raw disk: {sample.raw_disk_bytes} bytes")
 
 
+@pilot_app.command("sample-technical")
+def sample_pilot_technical_state(
+    directory: Annotated[
+        Path,
+        typer.Argument(help="Private pilot evidence directory."),
+    ],
+    materially_false_memories: Annotated[
+        int,
+        typer.Option(
+            min=0,
+            help="Cumulative accepted memories reviewed as materially false.",
+        ),
+    ],
+    irrelevant_memories: Annotated[
+        int,
+        typer.Option(
+            min=0,
+            help="Cumulative accepted memories reviewed as irrelevant.",
+        ),
+    ],
+    duplicate_memories: Annotated[
+        int,
+        typer.Option(
+            min=0,
+            help="Cumulative accepted memories reviewed as duplicates.",
+        ),
+    ],
+    synthetic_secret_promotions: Annotated[
+        int,
+        typer.Option(
+            min=0,
+            help="Cumulative synthetic test secrets found in durable memory.",
+        ),
+    ],
+    excluded_context_captures: Annotated[
+        int,
+        typer.Option(
+            min=0,
+            help="Cumulative reviewed captures from contexts that should be excluded.",
+        ),
+    ],
+    remote_user_content_transports: Annotated[
+        int,
+        typer.Option(
+            min=0,
+            help="Cumulative reviewed user-content transfers to non-loopback services.",
+        ),
+    ],
+) -> None:
+    """Append derived counters plus explicit human review; never collect activity."""
+    engine: Engine | None = None
+    try:
+        workspace = PilotWorkspace(directory.expanduser().resolve(strict=False))
+        dataset = workspace.load()
+        paths = resolve_runtime_paths()
+        settings = load_settings(paths)
+        if current_database_revision(paths.database_file) != head_database_revision():
+            raise ConfigurationError(
+                "CONTX must be initialized at the current database revision"
+            )
+        engine = create_database_engine(paths.database_file)
+        snapshot = PilotTechnicalSnapshotService(
+            engine=engine,
+            active_memory=_build_active_memory_projection_service(
+                engine=engine,
+                projection_root=paths.memory_projection,
+                model_settings=settings.model,
+                wake_budget_bytes=settings.memory.wake_budget_bytes,
+            ),
+            clock=SystemClock(),
+        ).capture(
+            pilot_started_at=dataset.manifest.started_at,
+            review=TechnicalReview(
+                materially_false_memories=materially_false_memories,
+                irrelevant_memories=irrelevant_memories,
+                duplicate_memories=duplicate_memories,
+                synthetic_secret_promotions=synthetic_secret_promotions,
+                excluded_context_captures=excluded_context_captures,
+                remote_user_content_transports=remote_user_content_transports,
+            ),
+        )
+        workspace.append_technical_snapshot(snapshot)
+    except (ContxError, ValueError) as error:
+        _abort(
+            error
+            if isinstance(error, ContxError)
+            else ConfigurationError(f"Invalid technical review: {error}")
+        )
+    finally:
+        if engine is not None:
+            engine.dispose()
+    typer.echo(f"technical snapshot: {snapshot.captured_at.isoformat()}")
+    typer.echo(f"accepted memories: {snapshot.accepted_memories}")
+    typer.echo(f"provenanced memories: {snapshot.accepted_memories_with_provenance}")
+    typer.echo(f"local model outputs: {snapshot.model_outputs}")
+    typer.echo(f"active context: {snapshot.active_context_bytes} bytes")
+    typer.echo("collection: unchanged")
+
+
 @model_app.command("status")
 def local_model_status() -> None:
     """Preflight the configured loopback runtime without sending user content."""
@@ -577,10 +701,13 @@ def local_model_status() -> None:
 def process() -> None:
     """Process a bounded screenshot backlog through the configured local model."""
     engine: Engine | None = None
+    lease: DaemonLease | None = None
     try:
         paths = resolve_runtime_paths()
         initialize_runtime_paths(paths)
         settings = load_settings(paths)
+        lease = DaemonLease(paths.processor_lock, owner="context processor")
+        lease.acquire()
         upgrade_database(paths.database_file)
         engine = create_database_engine(paths.database_file)
         clock = SystemClock()
@@ -609,6 +736,8 @@ def process() -> None:
     finally:
         if engine is not None:
             engine.dispose()
+        if lease is not None:
+            lease.release()
 
     runtime_state = (
         "available" if model_result.runtime.runtime_available else "unavailable"
@@ -634,6 +763,158 @@ def process() -> None:
     typer.echo(f"model event backlog: {event_result.backlog_count}")
     if not model_result.succeeded or not event_result.succeeded:
         raise typer.Exit(code=2)
+
+
+@app.command()
+def refresh(
+    window_start: Annotated[
+        str,
+        typer.Option("--from", help="Inclusive timezone-aware ISO 8601 start."),
+    ],
+    window_end: Annotated[
+        str,
+        typer.Option("--until", help="Exclusive timezone-aware ISO 8601 end."),
+    ],
+    comparison_boundary: Annotated[
+        str,
+        typer.Option(
+            "--compare-at",
+            help="Timezone-aware boundary inside the window for change detection.",
+        ),
+    ],
+) -> None:
+    """Drain one local batch or publish a complete memory refresh."""
+    engine: Engine | None = None
+    lease: DaemonLease | None = None
+    try:
+        start = _parse_cli_datetime(window_start)
+        end = _parse_cli_datetime(window_end)
+        boundary = _parse_cli_datetime(comparison_boundary)
+        paths = resolve_runtime_paths()
+        initialize_runtime_paths(paths)
+        settings = load_settings(paths)
+        lease = DaemonLease(paths.processor_lock, owner="context processor")
+        lease.acquire()
+        upgrade_database(paths.database_file)
+        engine = create_database_engine(paths.database_file)
+        clock = SystemClock()
+        identifiers = UuidIdentifierSource()
+        memory_store = _build_memory_store(
+            paths.memory,
+            wake_budget_bytes=settings.memory.wake_budget_bytes,
+        )
+        timeline = _activity_timeline_service(
+            engine,
+            settings=settings.events,
+            clock=clock,
+            identifiers=identifiers,
+        )
+        service = ContextRefreshService(
+            model_processing=LocalModelProcessingService(
+                engine=engine,
+                raw_store=_build_raw_store(
+                    paths.raw,
+                    budget_mb=settings.collection.raw_disk_budget_mb,
+                ),
+                provider=_build_local_model_provider(settings.model),
+                endpoint=settings.model.endpoint,
+                configured_model=settings.model.model_name,
+                max_image_bytes=settings.model.max_image_mb * 1024 * 1024,
+                clock=clock,
+                identifiers=identifiers,
+            ),
+            model_events=LocalModelEventService(
+                engine=engine,
+                builder=ModelTransformationEventBuilder(clock=clock),
+                clock=clock,
+                identifiers=identifiers,
+            ),
+            timeline=timeline,
+            patterns=PatternAnalysisService(
+                engine=engine,
+                timeline_service=timeline,
+                pattern_engine=TemporalPatternEngine(clock=clock),
+                clock=clock,
+                identifiers=identifiers,
+            ),
+            candidates=PatternCandidateService(
+                engine=engine,
+                producer=PatternCandidateProducer(clock=clock),
+                clock=clock,
+                identifiers=identifiers,
+            ),
+            evaluation=CandidateEvaluationService(
+                engine=engine,
+                worker=TransparentCandidateWorker(clock=clock),
+                clock=clock,
+                identifiers=identifiers,
+            ),
+            promotion=MemoryPromotionService(
+                engine=engine,
+                memory_store=memory_store,
+                clock=clock,
+                identifiers=identifiers,
+            ),
+            maintenance=MemoryMaintenanceService(
+                engine=engine,
+                memory_store=memory_store,
+                compressor=_build_memory_compressor(settings.model),
+                clock=clock,
+                identifiers=identifiers,
+                max_compressions=settings.memory.max_compressions_per_cycle,
+            ),
+            projection=_build_active_memory_projection_service(
+                engine=engine,
+                projection_root=paths.memory_projection,
+                model_settings=settings.model,
+                wake_budget_bytes=settings.memory.wake_budget_bytes,
+            ),
+        )
+        result = service.run_once(
+            window_start=start,
+            window_end=end,
+            comparison_boundary=boundary,
+        )
+    except ContxError as error:
+        _abort(error)
+    finally:
+        if engine is not None:
+            engine.dispose()
+        if lease is not None:
+            lease.release()
+
+    typer.echo(f"model run: {result.model_processing.run.status.value}")
+    typer.echo(f"model backlog: {result.model_processing.backlog_count}")
+    typer.echo(
+        f"model abandoned total: {result.model_processing.total_abandoned_count}"
+    )
+    typer.echo(f"events built: {len(result.model_events.events)}")
+    typer.echo(f"model event backlog: {result.model_events.backlog_count}")
+    if result.blocked:
+        typer.echo("refresh: blocked")
+        raise typer.Exit(code=2)
+    if result.deferred:
+        typer.echo("refresh: deferred until local backlogs are empty")
+        raise typer.Exit(code=3)
+    if not result.completed:
+        raise PipelineError("Refresh ended without a complete published result")
+    assert result.timeline is not None
+    assert result.patterns is not None
+    assert result.candidates is not None
+    assert result.evaluation is not None
+    assert result.promotion is not None
+    assert result.maintenance is not None
+    assert result.projection is not None
+    typer.echo(f"timeline run: {result.timeline.run.id}")
+    typer.echo(f"timeline events: {len(result.timeline.timeline.entries)}")
+    typer.echo(f"patterns: {len(result.patterns.patterns)}")
+    typer.echo(f"candidates: {len(result.candidates.candidates)}")
+    typer.echo(f"decisions: {len(result.evaluation.decisions)}")
+    typer.echo(f"promoted memories: {len(result.promotion.memory_links)}")
+    completed_compressions = result.maintenance.maintenance.completed_compressions
+    typer.echo(f"maintenance compressions: {completed_compressions}")
+    typer.echo(f"active memories: {result.projection.active_memory_count}")
+    typer.echo("refresh: complete")
 
 
 @timeline_app.command("build")

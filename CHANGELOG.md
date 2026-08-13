@@ -74,6 +74,8 @@ guaranteed.
 - A same-origin React/Vite/TypeScript control interface source with visible
   local-model degradation, pause/resume, exclusions, wake preview, append-only
   corrections, proposal review, and inspectable provenance.
+- Locked browser dependencies and a verified production build packaged as
+  hashed static assets inside the Python wheel.
 - Loopback host, origin, fetch-site, strict JSON content-type, caching, framing,
   referrer, and MIME-sniffing protections for the local browser boundary.
 - Exact-confirmation immediate raw purge and full-data deletion; complete
@@ -87,6 +89,19 @@ guaranteed.
 - `contx pilot sample-resources` with exact-PID native macOS CPU/RSS sampling,
   safe disk measurement, four representative phases, and atomic private
   evidence append.
+- `contx pilot sample-technical` with persistence-derived memory, provenance,
+  correction, model-attempt, retention, and wake metrics plus mandatory
+  explicit human-review counters.
+- A complete restartable `contx refresh` path from the mandatory local-model
+  queue through events, frozen timelines, patterns, decisions, historical
+  OptMem promotion, bounded maintenance, and the atomic active projection.
+- Same-evidence production timeline reuse so exact refresh retries retain
+  replay audit without appending duplicate historical memories.
+- A disabled-by-default periodic local processor, configurable aligned rolling
+  windows, sanitized one-shot supervision, and a separate bounded LaunchAgent
+  manifest under ADR 0018.
+- Processing cadence and rolling-window settings in the read-only local web
+  settings view.
 
 ### Changed
 
@@ -110,3 +125,6 @@ guaranteed.
   same append-only semantics.
 - Corrected persisted observations so optional activity interval boundaries
   remain readable when absent.
+- Corrected the web overview so active, paused, stopped, and configuration-
+  disabled collection states reflect the real daemon instead of only the
+  durable pause bit.

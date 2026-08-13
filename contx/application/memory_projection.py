@@ -112,9 +112,7 @@ class ActiveMemoryProjectionService:
             )
         wake = memory_store.wake(
             part=part,
-            snapshot=(
-                None if snapshot is None else projection.active_memory_count
-            ),
+            snapshot=(None if snapshot is None else projection.active_memory_count),
         )
         return ActiveMemoryWakeResult(
             wake=replace(wake, snapshot=projection_snapshot),
@@ -376,9 +374,7 @@ class ActiveMemoryProjectionService:
             if _FINGERPRINT_PATTERN.fullmatch(child.name) is None:
                 continue
             if child.is_symlink() or not child.is_dir():
-                raise MemoryStoreError(
-                    "Active memory projection generation is unsafe"
-                )
+                raise MemoryStoreError("Active memory projection generation is unsafe")
             pointer = _parse_pointer_payload(
                 _read_private_json(child / READY_FILE, missing_ok=True)
             )
@@ -576,9 +572,7 @@ def _projection_fingerprint(records: tuple[ActiveMemoryRecord, ...]) -> str:
 def _generation_identity(fingerprint: str) -> str:
     if _FINGERPRINT_PATTERN.fullmatch(fingerprint) is None:
         raise MemoryStoreError("Active memory projection identity is invalid")
-    return hashlib.sha256(
-        f"{fingerprint}:{uuid4().hex}".encode("ascii")
-    ).hexdigest()
+    return hashlib.sha256(f"{fingerprint}:{uuid4().hex}".encode("ascii")).hexdigest()
 
 
 def _pointer_payload(

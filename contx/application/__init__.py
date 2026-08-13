@@ -12,6 +12,12 @@ from contx.application.agent_proposals import (
     AgentProposalAdoptionService,
     AgentProposalService,
 )
+from contx.application.context_refresh import (
+    ContextRefreshResult,
+    ContextRefreshService,
+    ContextRefreshWindow,
+    aligned_refresh_window,
+)
 from contx.application.continuous_collection import (
     ContinuousCollectionResult,
     ContinuousCollectionRunner,
@@ -79,6 +85,9 @@ __all__ = [
     "ContinuousCollectionResult",
     "ContinuousCollectionRunner",
     "ContinuousCollectionSession",
+    "ContextRefreshResult",
+    "ContextRefreshService",
+    "ContextRefreshWindow",
     "DataDeletionResult",
     "DataDeletionService",
     "CandidateEvaluationResult",
@@ -118,5 +127,6 @@ __all__ = [
     "RawPurgeResult",
     "RawPurgeService",
     "ThreadStopSignal",
+    "aligned_refresh_window",
     "correction_content",
 ]

@@ -171,9 +171,7 @@ def test_exact_duplicate_policy_overrides_an_accepted_semantic_response() -> Non
 def test_dedicated_semantic_equivalence_rejects_a_paraphrase() -> None:
     evaluator = OllamaAgentProposalEvaluator(
         transport=RecordingTransport(
-            equivalence_content=json.dumps(
-                {"equivalent": True, "confidence": 0.94}
-            )
+            equivalence_content=json.dumps({"equivalent": True, "confidence": 0.94})
         )
     )
 

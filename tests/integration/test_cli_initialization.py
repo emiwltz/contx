@@ -12,11 +12,14 @@ from sqlalchemy import select
 from typer.testing import CliRunner
 
 import contx.cli.app as cli_module
+from contx.application import ActiveMemoryProjectionResult, ActiveMemoryWakeResult
 from contx.cli.app import app
+from contx.daemon import DaemonLease
 from contx.db import create_database_engine, session_scope
 from contx.db.models import EventModel, MemoryLinkModel
 from contx.db.repositories import EventCorrectionRepository, PipelineRepository
-from contx.memory_store import AgentProposalEvaluation, RecordingMemoryStore
+from contx.evaluation import PilotWorkspace
+from contx.memory_store import AgentProposalEvaluation, MemoryWake, RecordingMemoryStore
 from contx.model_provider import (
     DEFAULT_MODEL,
     LocalModelExecution,
@@ -34,6 +37,7 @@ from contx.models import (
 )
 from contx.raw_store import FilesystemRawStore
 from contx.settings import RUNTIME_ROOT_ENV, resolve_runtime_paths
+from tests.helpers import FixedClock
 
 runner = CliRunner()
 MODEL = DEFAULT_MODEL
@@ -105,6 +109,7 @@ def test_init_is_idempotent_and_status_is_truthful(tmp_path: Path) -> None:
     assert "schema: current" in status.stdout
     assert "background collection: disabled" in status.stdout
     assert "collector daemon: stopped" in status.stdout
+    assert "context processor: stopped" in status.stdout
 
     paths = resolve_runtime_paths(environment)
     assert stat.S_IMODE(paths.config_file.stat().st_mode) == 0o600
@@ -302,8 +307,7 @@ def test_pilot_prepare_creates_private_evidence_without_touching_runtime(
     assert workspace.is_dir()
     assert stat.S_IMODE(workspace.stat().st_mode) == 0o700
     assert all(
-        stat.S_IMODE(path.stat().st_mode) == 0o600
-        for path in workspace.iterdir()
+        stat.S_IMODE(path.stat().st_mode) == 0o600 for path in workspace.iterdir()
     )
     assert not runtime_root.exists()
 
@@ -341,6 +345,70 @@ def test_empty_pilot_evidence_is_reported_as_incomplete(tmp_path: Path) -> None:
     assert "v0 decision: not ready" in validated.stdout
 
 
+def test_pilot_technical_sample_combines_runtime_and_explicit_review(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "pilot"
+    runtime_root = tmp_path / "runtime"
+    environment = {RUNTIME_ROOT_ENV: str(runtime_root)}
+    monkeypatch.setattr(
+        cli_module,
+        "SystemClock",
+        lambda: FixedClock(datetime(2026, 8, 13, 8, tzinfo=UTC)),
+    )
+    initialized = runner.invoke(app, ["init"], env=environment)
+    prepared = runner.invoke(
+        app,
+        [
+            "pilot",
+            "prepare",
+            str(workspace),
+            "--start",
+            "2026-08-10T08:00:00+02:00",
+            "--end",
+            "2026-08-17T08:00:00+02:00",
+        ],
+        env=environment,
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "_build_active_memory_projection_service",
+        lambda **_kwargs: EmptyActiveMemory(),
+    )
+
+    sampled = runner.invoke(
+        app,
+        [
+            "pilot",
+            "sample-technical",
+            str(workspace),
+            "--materially-false-memories",
+            "0",
+            "--irrelevant-memories",
+            "0",
+            "--duplicate-memories",
+            "0",
+            "--synthetic-secret-promotions",
+            "0",
+            "--excluded-context-captures",
+            "0",
+            "--remote-user-content-transports",
+            "0",
+        ],
+        env=environment,
+    )
+
+    snapshots = PilotWorkspace(workspace.resolve()).load().technical_snapshots
+    assert initialized.exit_code == 0
+    assert prepared.exit_code == 0
+    assert sampled.exit_code == 0
+    assert "collection: unchanged" in sampled.stdout
+    assert len(snapshots) == 1
+    assert snapshots[0].accepted_memories == 0
+    assert snapshots[0].active_context_bytes == 0
+
+
 def test_pilot_prepare_rejects_a_duration_outside_protocol(tmp_path: Path) -> None:
     result = runner.invoke(
         app,
@@ -357,6 +425,57 @@ def test_pilot_prepare_rejects_a_duration_outside_protocol(tmp_path: Path) -> No
 
     assert result.exit_code == 2
     assert "between 7 and 14 days" in result.stderr
+
+
+def test_pilot_prepare_accepts_a_multi_core_cpu_limit(tmp_path: Path) -> None:
+    workspace = tmp_path / "pilot"
+
+    result = runner.invoke(
+        app,
+        [
+            "pilot",
+            "prepare",
+            str(workspace),
+            "--start",
+            "2026-08-03T08:00:00+02:00",
+            "--end",
+            "2026-08-10T08:00:00+02:00",
+            "--max-p95-cpu",
+            "400",
+        ],
+    )
+
+    manifest = PilotWorkspace(workspace.resolve()).load().manifest
+    assert result.exit_code == 0
+    assert manifest.thresholds.resource_limits.p95_total_cpu_percent_max == 400
+
+
+class EmptyActiveMemory:
+    def synchronize(self) -> ActiveMemoryProjectionResult:
+        return ActiveMemoryProjectionResult(
+            fingerprint="a" * 64,
+            generation="b" * 64,
+            active_memory_count=0,
+            rebuilt=False,
+            completed_compressions=0,
+        )
+
+    def wake(
+        self,
+        *,
+        part: int = 1,
+        snapshot: int | None = None,
+    ) -> ActiveMemoryWakeResult:
+        return ActiveMemoryWakeResult(
+            wake=MemoryWake(content="", complete=True, snapshot=42),
+            projection=ActiveMemoryProjectionResult(
+                fingerprint="a" * 64,
+                generation="b" * 64,
+                active_memory_count=0,
+                rebuilt=False,
+                completed_compressions=0,
+            ),
+        )
 
 
 def test_capabilities_do_not_enable_or_request_sensitive_access(tmp_path: Path) -> None:
@@ -401,6 +520,94 @@ def test_model_status_preflights_without_sending_user_content(
     assert "runtime: available" in result.stdout
     assert f"model: installed ({MODEL})" in result.stdout
     assert f"model digest: {'a' * 64}" in result.stdout
+
+
+def test_refresh_cli_publishes_a_complete_empty_derivation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class AvailableProvider:
+        def status(self) -> LocalModelRuntimeStatus:
+            return LocalModelRuntimeStatus(
+                endpoint="http://127.0.0.1:11434",
+                runtime_available=True,
+                runtime_version="0.32.5",
+                model=MODEL,
+                model_available=True,
+                model_digest="a" * 64,
+            )
+
+        def interpret(self, request: LocalModelRequest) -> LocalModelExecution:
+            raise AssertionError("an empty refresh must not invoke the model")
+
+    environment = {RUNTIME_ROOT_ENV: str(tmp_path)}
+    monkeypatch.setattr(
+        cli_module,
+        "_build_memory_store",
+        lambda _path, **_kwargs: RecordingMemoryStore(),
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "_build_local_model_provider",
+        lambda _settings: AvailableProvider(),
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "_build_active_memory_projection_service",
+        lambda **_kwargs: EmptyActiveMemory(),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "refresh",
+            "--from",
+            "2026-08-10T08:00:00+02:00",
+            "--compare-at",
+            "2026-08-11T08:00:00+02:00",
+            "--until",
+            "2026-08-12T08:00:00+02:00",
+        ],
+        env=environment,
+    )
+
+    assert result.exit_code == 0
+    assert "model backlog: 0" in result.stdout
+    assert "timeline events: 0" in result.stdout
+    assert "promoted memories: 0" in result.stdout
+    assert "active memories: 0" in result.stdout
+    assert result.stdout.endswith("refresh: complete\n")
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    (
+        ("process",),
+        (
+            "refresh",
+            "--from",
+            "2026-08-10T08:00:00Z",
+            "--compare-at",
+            "2026-08-11T08:00:00Z",
+            "--until",
+            "2026-08-12T08:00:00Z",
+        ),
+    ),
+)
+def test_manual_processing_refuses_an_active_context_processor(
+    tmp_path: Path,
+    arguments: tuple[str, ...],
+) -> None:
+    environment = {RUNTIME_ROOT_ENV: str(tmp_path)}
+    initialized = runner.invoke(app, ["init"], env=environment)
+    assert initialized.exit_code == 0
+    paths = resolve_runtime_paths(environment)
+
+    with DaemonLease(paths.processor_lock, owner="context processor"):
+        result = runner.invoke(app, list(arguments), env=environment)
+
+    assert result.exit_code == 2
+    assert "CONTX context processor is already running" in result.stderr
 
 
 def test_timeline_cli_builds_and_reads_an_empty_frozen_window(tmp_path: Path) -> None:

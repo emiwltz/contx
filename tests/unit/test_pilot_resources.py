@@ -147,9 +147,7 @@ def test_native_probe_calculates_cpu_and_reads_rss(
     )
     monkeypatch.setattr(resource_module, "_mach_timebase", lambda: (1, 1))
     monkeypatch.setattr(time, "sleep", lambda _seconds: None)
-    monkeypatch.setattr(
-        time, "monotonic_ns", lambda: next(monotonic)
-    )
+    monkeypatch.setattr(time, "monotonic_ns", lambda: next(monotonic))
 
     result = probe_process_resources(42)
 

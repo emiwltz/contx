@@ -168,10 +168,9 @@ class OllamaMemoryCompressor:
             raise LocalModelResponseError(
                 "Local memory compressor returned a multiline summary"
             )
-        if (
-            _CORRECTION_EVIDENCE_PATTERN.search(request.prompt) is not None
-            and not summary.casefold().startswith("correction:")
-        ):
+        if _CORRECTION_EVIDENCE_PATTERN.search(
+            request.prompt
+        ) is not None and not summary.casefold().startswith("correction:"):
             summary = f"Correction: {summary}"
         if len(summary.encode("utf-8")) > request.max_bytes:
             raise LocalModelResponseError(

@@ -1,5 +1,6 @@
 """Versioned loopback-only HTTP contract for the local interface."""
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
@@ -60,6 +61,7 @@ def test_api_reports_degraded_status_and_controls_persistent_collection(
     try:
         with TestClient(create_app(runtime)) as client:
             initial = client.get("/api/v1/status")
+            settings = client.get("/api/v1/settings")
             paused = client.post("/api/v1/pause", json={"duration_minutes": 15})
             resumed = client.post("/api/v1/resume", json={})
 
@@ -67,10 +69,48 @@ def test_api_reports_degraded_status_and_controls_persistent_collection(
         assert initial.json()["health"] == "degraded"
         assert initial.json()["model"]["reason_code"] == "runtime_unavailable"
         assert not initial.json()["collection"]["paused"]
+        assert settings.status_code == 200
+        assert settings.json()["processing"] == {
+            "model_interval_seconds": 900,
+            "analysis_interval_seconds": 7200,
+            "analysis_window_days": 14,
+            "comparison_period_days": 7,
+        }
         assert paused.status_code == 200
         assert paused.json()["paused"]
         assert resumed.status_code == 200
         assert not resumed.json()["paused"]
+    finally:
+        runtime.engine.dispose()
+
+
+def test_packaged_frontend_and_assets_are_served_with_local_security_headers(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime(tmp_path)
+    try:
+        with TestClient(create_app(runtime)) as client:
+            index = client.get("/")
+            fallback = client.get("/memory")
+            asset_path = re.search(r'src="(/assets/[^"]+\.js)"', index.text)
+            assert asset_path is not None
+            asset = client.get(asset_path.group(1))
+            unknown_api = client.get("/api/v1/unknown")
+
+        assert index.status_code == 200
+        assert fallback.status_code == 200
+        assert index.text == fallback.text
+        assert "<title>CONTX — mémoire de contexte locale</title>" in index.text
+        assert asset.status_code == 200
+        assert asset.headers["content-type"].startswith("text/javascript")
+        assert unknown_api.status_code == 404
+        for response in (index, fallback, asset, unknown_api):
+            assert response.headers["cache-control"] == "no-store"
+            assert response.headers["x-content-type-options"] == "nosniff"
+            assert response.headers["x-frame-options"] == "DENY"
+            assert (
+                "frame-ancestors 'none'" in response.headers["content-security-policy"]
+            )
     finally:
         runtime.engine.dispose()
 

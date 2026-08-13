@@ -349,6 +349,29 @@ class PipelineRepository:
             for link, candidate in rows
         )
 
+    def durable_memory_records_since(
+        self,
+        since: datetime,
+    ) -> tuple[tuple[MemoryLink, MemoryCandidate], ...]:
+        """Load every finalized memory created at or after one pilot boundary."""
+        rows = self._session.execute(
+            select(MemoryLinkModel, MemoryCandidateModel)
+            .join(
+                MemoryCandidateModel,
+                MemoryCandidateModel.id == MemoryLinkModel.candidate_id,
+            )
+            .where(
+                MemoryLinkModel.created_at >= format_utc(since),
+                MemoryLinkModel.status != MemoryLinkStatus.PENDING.value,
+                MemoryCandidateModel.status == CandidateStatus.STORED.value,
+            )
+            .order_by(MemoryLinkModel.created_at, MemoryLinkModel.id)
+        )
+        return tuple(
+            (_memory_link_from_model(link), _candidate_from_model(candidate))
+            for link, candidate in rows
+        )
+
     def processing_runs(self, *, limit: int = 100) -> tuple[ProcessingRun, ...]:
         """Load recent observable pipeline outcomes."""
         _validate_inspection_limit(limit)
@@ -585,9 +608,7 @@ class PipelineRepository:
                 reference_candidate is None
                 or reference_candidate.sensitivity != candidate.sensitivity
             ):
-                raise DatabaseError(
-                    "Agent proposal memory sensitivity is inconsistent"
-                )
+                raise DatabaseError("Agent proposal memory sensitivity is inconsistent")
             reference_provenance = reference.provenance
             if expected_patterns != set(reference_provenance["pattern_ids"]):
                 raise DatabaseError(
@@ -1345,6 +1366,41 @@ class TimelineBuildRepository:
         model = self._session.get(TimelineBuildModel, str(processing_run_id))
         return None if model is None else _timeline_build_from_model(model)
 
+    def matching_successful(
+        self,
+        *,
+        processing_version: str,
+        window_start: datetime,
+        window_end: datetime,
+        session_gap_seconds: int,
+        max_session_duration_seconds: int,
+        limit: int = 100,
+    ) -> tuple[TimelineBuild, ...]:
+        """Load recent successful builds with identical replay parameters."""
+        _validate_inspection_limit(limit)
+        models = self._session.scalars(
+            select(TimelineBuildModel)
+            .join(
+                ProcessingRunModel,
+                ProcessingRunModel.id == TimelineBuildModel.processing_run_id,
+            )
+            .where(
+                TimelineBuildModel.processing_version == processing_version,
+                TimelineBuildModel.window_start == format_utc(window_start),
+                TimelineBuildModel.window_end == format_utc(window_end),
+                TimelineBuildModel.session_gap_seconds == session_gap_seconds,
+                TimelineBuildModel.max_session_duration_seconds
+                == max_session_duration_seconds,
+                ProcessingRunModel.status == ProcessingRunStatus.SUCCEEDED.value,
+            )
+            .order_by(
+                ProcessingRunModel.started_at.desc(),
+                ProcessingRunModel.id.desc(),
+            )
+            .limit(limit)
+        )
+        return tuple(_timeline_build_from_model(model) for model in models)
+
 
 class PatternRepository:
     """Persist replayable patterns with event and processing-run provenance."""
@@ -1469,6 +1525,32 @@ class PatternBuildRepository:
         model = self._session.get(PatternBuildModel, str(processing_run_id))
         return None if model is None else _pattern_build_from_model(model)
 
+    def successful_for_source(
+        self,
+        source_timeline_run_id: UUID,
+        *,
+        limit: int = 100,
+    ) -> tuple[PatternBuild, ...]:
+        """Load recent successful pattern builds for one timeline snapshot."""
+        _validate_inspection_limit(limit)
+        models = self._session.scalars(
+            select(PatternBuildModel)
+            .join(
+                ProcessingRunModel,
+                ProcessingRunModel.id == PatternBuildModel.processing_run_id,
+            )
+            .where(
+                PatternBuildModel.source_timeline_run_id == str(source_timeline_run_id),
+                ProcessingRunModel.status == ProcessingRunStatus.SUCCEEDED.value,
+            )
+            .order_by(
+                ProcessingRunModel.started_at.desc(),
+                ProcessingRunModel.id.desc(),
+            )
+            .limit(limit)
+        )
+        return tuple(_pattern_build_from_model(model) for model in models)
+
 
 class CandidateBuildRepository:
     """Persist and read pattern-to-candidate replay provenance."""
@@ -1504,6 +1586,32 @@ class CandidateBuildRepository:
     def by_processing_run(self, processing_run_id: UUID) -> CandidateBuild | None:
         model = self._session.get(CandidateBuildModel, str(processing_run_id))
         return None if model is None else _candidate_build_from_model(model)
+
+    def successful_for_source(
+        self,
+        source_pattern_run_id: UUID,
+        *,
+        limit: int = 100,
+    ) -> tuple[CandidateBuild, ...]:
+        """Load recent successful candidate builds for one pattern snapshot."""
+        _validate_inspection_limit(limit)
+        models = self._session.scalars(
+            select(CandidateBuildModel)
+            .join(
+                ProcessingRunModel,
+                ProcessingRunModel.id == CandidateBuildModel.processing_run_id,
+            )
+            .where(
+                CandidateBuildModel.source_pattern_run_id == str(source_pattern_run_id),
+                ProcessingRunModel.status == ProcessingRunStatus.SUCCEEDED.value,
+            )
+            .order_by(
+                ProcessingRunModel.started_at.desc(),
+                ProcessingRunModel.id.desc(),
+            )
+            .limit(limit)
+        )
+        return tuple(_candidate_build_from_model(model) for model in models)
 
 
 class PatternCandidateRepository:
@@ -1699,6 +1807,34 @@ class CandidateEvaluationBuildRepository:
         )
         return None if model is None else _candidate_evaluation_build_from_model(model)
 
+    def successful_for_source(
+        self,
+        source_candidate_run_id: UUID,
+        *,
+        limit: int = 100,
+    ) -> tuple[CandidateEvaluationBuild, ...]:
+        """Load recent successful evaluations for one candidate snapshot."""
+        _validate_inspection_limit(limit)
+        models = self._session.scalars(
+            select(CandidateEvaluationBuildModel)
+            .join(
+                ProcessingRunModel,
+                ProcessingRunModel.id
+                == CandidateEvaluationBuildModel.processing_run_id,
+            )
+            .where(
+                CandidateEvaluationBuildModel.source_candidate_run_id
+                == str(source_candidate_run_id),
+                ProcessingRunModel.status == ProcessingRunStatus.SUCCEEDED.value,
+            )
+            .order_by(
+                ProcessingRunModel.started_at.desc(),
+                ProcessingRunModel.id.desc(),
+            )
+            .limit(limit)
+        )
+        return tuple(_candidate_evaluation_build_from_model(model) for model in models)
+
 
 class MemoryPromotionBuildRepository:
     """Persist the selected candidate-evaluation snapshot for promotion."""
@@ -1743,6 +1879,33 @@ class MemoryPromotionBuildRepository:
             str(processing_run_id),
         )
         return None if model is None else _memory_promotion_build_from_model(model)
+
+    def successful_for_source(
+        self,
+        source_evaluation_run_id: UUID,
+        *,
+        limit: int = 100,
+    ) -> tuple[MemoryPromotionBuild, ...]:
+        """Load recent successful promotions for one evaluation snapshot."""
+        _validate_inspection_limit(limit)
+        models = self._session.scalars(
+            select(MemoryPromotionBuildModel)
+            .join(
+                ProcessingRunModel,
+                ProcessingRunModel.id == MemoryPromotionBuildModel.processing_run_id,
+            )
+            .where(
+                MemoryPromotionBuildModel.source_evaluation_run_id
+                == str(source_evaluation_run_id),
+                ProcessingRunModel.status == ProcessingRunStatus.SUCCEEDED.value,
+            )
+            .order_by(
+                ProcessingRunModel.started_at.desc(),
+                ProcessingRunModel.id.desc(),
+            )
+            .limit(limit)
+        )
+        return tuple(_memory_promotion_build_from_model(model) for model in models)
 
 
 class MemoryPromotionRepository:
@@ -1984,9 +2147,7 @@ class AgentProposalAdoptionRepository:
             str(proposal_id),
         )
         return (
-            None
-            if model is None
-            else _agent_proposal_adoption_build_from_model(model)
+            None if model is None else _agent_proposal_adoption_build_from_model(model)
         )
 
     def build_by_candidate(
@@ -1999,9 +2160,7 @@ class AgentProposalAdoptionRepository:
             )
         )
         return (
-            None
-            if model is None
-            else _agent_proposal_adoption_build_from_model(model)
+            None if model is None else _agent_proposal_adoption_build_from_model(model)
         )
 
     def list_builds(
@@ -2318,6 +2477,37 @@ class RawObservationRepository:
         )
         return tuple(_observation_from_model(model) for model in models)
 
+    def expired_count(self, *, at: datetime) -> int:
+        """Count raw records that should already have been tombstoned."""
+        return int(
+            self._session.scalar(
+                select(func.count())
+                .select_from(ObservationModel)
+                .where(
+                    ObservationModel.expires_at <= format_utc(at),
+                    ObservationModel.processing_status
+                    != ObservationStatus.PURGED.value,
+                )
+            )
+            or 0
+        )
+
+    def excluded_capture_count(self, *, since: datetime) -> int:
+        """Count persisted screenshot artifacts marked as excluded."""
+        return int(
+            self._session.scalar(
+                select(func.count())
+                .select_from(ObservationModel)
+                .where(
+                    ObservationModel.captured_at >= format_utc(since),
+                    ObservationModel.source_type == SourceType.SCREENSHOT.value,
+                    ObservationModel.excluded.is_(True),
+                    ObservationModel.artifact_path.is_not(None),
+                )
+            )
+            or 0
+        )
+
     def retained(self, *, limit: int = 1000) -> tuple[Observation, ...]:
         """Load raw-bearing observations for an explicit immediate purge."""
         if limit < 1:
@@ -2325,8 +2515,7 @@ class RawObservationRepository:
         models = self._session.scalars(
             select(ObservationModel)
             .where(
-                ObservationModel.processing_status
-                != ObservationStatus.PURGED.value,
+                ObservationModel.processing_status != ObservationStatus.PURGED.value,
             )
             .order_by(ObservationModel.expires_at, ObservationModel.id)
             .limit(limit)
@@ -2861,9 +3050,7 @@ def _agent_proposal_adoption_build_from_model(
         raise DatabaseError("Agent proposal adoption provider is invalid")
     return AgentProposalAdoptionBuild(
         proposal_id=UUID(model.proposal_id),
-        candidate_id=(
-            None if model.candidate_id is None else UUID(model.candidate_id)
-        ),
+        candidate_id=(None if model.candidate_id is None else UUID(model.candidate_id)),
         provider="ollama",
         endpoint=model.endpoint,
         model=model.model,

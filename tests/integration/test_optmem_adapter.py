@@ -7,6 +7,8 @@ import json
 import os
 import stat
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -268,6 +270,40 @@ def test_compression_is_bounded_and_invalid_summary_can_be_rebuilt(
     assert pending.complete
     assert pending.completed_compressions == 1
     assert len(compressor.requests) == 2
+
+
+def test_reads_and_maintenance_share_the_cross_process_adapter_lock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executable, checksum = _write_executable(tmp_path, FAKE_OPTMEM)
+    adapter = OptMemAdapter(
+        executable=executable,
+        memory_directory=tmp_path / "memory",
+        expected_sha256=checksum,
+    )
+    adapter.initialize()
+    adapter.append("First memory.", idempotency_key="first")
+    adapter.append("Second memory.", idempotency_key="second")
+    lock_events: list[str] = []
+
+    @contextmanager
+    def tracked_adapter_lock() -> Iterator[None]:
+        lock_events.append("enter")
+        try:
+            yield
+        finally:
+            lock_events.append("exit")
+
+    monkeypatch.setattr(adapter, "_adapter_lock", tracked_adapter_lock)
+
+    adapter.wake()
+    adapter.recall("memory")
+    adapter.zoom("0-1")
+    adapter.maintain(RecordingCompressor("Combined memory."), max_compressions=1)
+    adapter.invalidate_summary("0-1")
+
+    assert lock_events == ["enter", "exit"] * 5
 
 
 class RecordingCompressor:

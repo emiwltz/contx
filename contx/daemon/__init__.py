@@ -7,8 +7,11 @@ from contx.daemon.factory import (
 )
 from contx.daemon.launch_agent import (
     LAUNCH_AGENT_LABEL,
+    PROCESSOR_LAUNCH_AGENT_LABEL,
     launch_agent_program_arguments,
+    processor_launch_agent_program_arguments,
     render_launch_agent,
+    render_processor_launch_agent,
 )
 from contx.daemon.lease import DaemonLease, DaemonLeaseStatus, probe_daemon_lease
 from contx.daemon.lifecycle import CollectionDaemonLifecycle
@@ -23,8 +26,11 @@ __all__ = [
     "DaemonLeaseStatus",
     "GracefulStopSignalBridge",
     "LAUNCH_AGENT_LABEL",
+    "PROCESSOR_LAUNCH_AGENT_LABEL",
     "launch_agent_program_arguments",
+    "processor_launch_agent_program_arguments",
     "probe_daemon_lease",
     "render_launch_agent",
+    "render_processor_launch_agent",
     "build_macos_collection_daemon",
 ]

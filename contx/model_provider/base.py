@@ -306,9 +306,7 @@ class ModelAttempt(BaseModel):
     started_at: datetime
     ended_at: datetime
 
-    _utc_timestamps = field_validator("started_at", "ended_at")(
-        require_aware_utc
-    )
+    _utc_timestamps = field_validator("started_at", "ended_at")(require_aware_utc)
 
     @model_validator(mode="after")
     def validate_attempt(self) -> Self:

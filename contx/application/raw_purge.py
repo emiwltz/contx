@@ -54,9 +54,7 @@ class RawPurgeService:
         started_at = self._clock.now()
         running_run = ProcessingRun(
             id=self._identifiers.new(),
-            pipeline=(
-                "raw_purge_immediate" if include_unexpired else "raw_purge"
-            ),
+            pipeline=("raw_purge_immediate" if include_unexpired else "raw_purge"),
             version=RAW_PURGE_VERSION,
             started_at=started_at,
         )

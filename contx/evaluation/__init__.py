@@ -15,6 +15,7 @@ from contx.evaluation.models import (
     ResourcePhase,
     ResourceSample,
     Severity,
+    TechnicalReview,
     TechnicalSnapshot,
     TrialEvaluation,
 )
@@ -34,6 +35,7 @@ from contx.evaluation.resources import (
     directory_usage_bytes,
     probe_process_resources,
 )
+from contx.evaluation.technical import PilotTechnicalSnapshotService
 
 __all__ = [
     "BehaviorComparison",
@@ -50,6 +52,7 @@ __all__ = [
     "PilotResourceSampler",
     "PilotScenario",
     "PilotThresholds",
+    "PilotTechnicalSnapshotService",
     "PilotWorkspace",
     "PrivacyIncident",
     "PrivacyIncidentCategory",
@@ -59,6 +62,7 @@ __all__ = [
     "ResourceSample",
     "Severity",
     "TechnicalSnapshot",
+    "TechnicalReview",
     "TrialEvaluation",
     "evaluate_pilot",
     "directory_usage_bytes",

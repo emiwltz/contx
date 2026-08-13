@@ -139,6 +139,7 @@ contx run-once --source synthetic       # deterministic end-to-end proof
 contx run-once --source active-app      # one explicit macOS metadata sample
 contx model status                      # content-free local runtime/model preflight
 contx process                           # process one bounded local-model backlog batch
+contx refresh --from <iso> --compare-at <iso> --until <iso> # complete frozen refresh
 contx timeline build --from <iso> --until <iso> # replay a frozen activity window
 contx timeline show <processing-run-id> # inspect one selected timeline snapshot
 contx timeline correct <event-id> --summary <text> --reason <text>
@@ -154,6 +155,8 @@ contx proposals adopt <proposal-uuid>   # explicit user action + local validatio
 contx proposals reject <proposal-uuid>  # explicit rejection, no memory write
 contx correct <memory-uuid> '<replacement>'
 contx pilot prepare <directory> --start <iso> --end <iso>
+contx pilot sample-technical <directory> <required-reviewed-counts>
+contx pilot sample-resources <directory> --phase <phase>
 contx pilot validate <directory>          # inspect incomplete/fail/review/pass gates
 contx pilot report <directory> --at <iso> # private aggregate v0 evidence
 ```
@@ -182,10 +185,10 @@ explicit user instruction.
 | **v0.9** | **J7 real pilot** | 7–14 day pilot, ground truth, with/without CONTX comparison, error analysis, OptMem decision. |
 | **v1.0** | **J8 hardening** | Fixes, optimization, install/upgrade/uninstall, recovery, distribution, licensing, and documentation. |
 
-**Active goal:** finish the blocked v0.6 build/browser verification while
-preparing the content-minimized v0.9 evaluation harness. Real v0.1 collector
-activation and the real pilot remain separately action-time gated (§37 and the
-[implementation plan](./docs/implementation-plan.md)).
+**Active goal:** complete the remaining authorized J1 evidence and run the
+content-minimized v0.9 real pilot. Real collector activation, macOS permission
+use, collector/processor LaunchAgent installation, and the pilot start remain separately
+action-time gated (§37 and the [implementation plan](./docs/implementation-plan.md)).
 
 ---
 
@@ -211,9 +214,10 @@ adds database-backed pause and exclusions, bounded raw artifacts and
 restart-safe purge, duration and system-state segmentation, non-prompting
 permission preflights, optional privacy-gated window titles, selective and
 exactly deduplicated screenshots, a minimal AppKit menu, an audited
-single-process daemon, graceful shutdown, and a deterministic LaunchAgent
-manifest. The daemon remains disabled by default; no LaunchAgent, live title
-access, live screenshot capture, or real-data pilot has been activated.
+single-process collection daemon, graceful shutdown, and deterministic
+collector and periodic-processor LaunchAgent manifests. Both jobs remain
+disabled by default; no LaunchAgent, live title access, live screenshot
+capture, or real-data pilot has been activated.
 
 The completed v0.2 foundation adds mandatory local-model settings, a
 literal-loopback-only Ollama transport, a strict multimodal interpretation
@@ -231,6 +235,15 @@ foreign-key-backed transformation and processing-run provenance. The hard
 durable-memory gate rejects `sensitive` and `forbidden` content. Protected-value
 reproduction is measured locally but is not a masking gate; v0 has no
 deterministic extraction or redaction path and no remote user-content path.
+
+ADR 0018 closes the production path after those events. A short-lived local
+processor handles one bounded batch every 15 minutes once background operation
+is explicitly enabled. It publishes no partial derivation while model or event
+backlogs remain, then runs the frozen timeline, patterns, candidate decisions,
+OptMem promotion and maintenance, and active projection over a configurable
+UTC-aligned rolling window. Exact same-evidence retries reuse their production
+timeline and final memory link. `contx refresh` exposes the same complete path
+with explicit boundaries for controlled operation and diagnosis.
 
 The completed v0.3 foundation adds a bounded event vocabulary, configurable
 sessionization, explicit validity, evidence lineage, processing-run timeline
@@ -254,15 +267,14 @@ matrix triggered ADR 0015: `wake` now uses an atomic, source-fingerprinted,
 active-only OptMem projection while `recall`, `zoom`, and source maintenance
 remain historical.
 
-The in-progress v0.6 source now adds a versioned `/api/v1` FastAPI contract,
+The completed v0.6 increment adds a versioned `/api/v1` FastAPI contract,
 bounded inspection views, a same-origin React/Vite/TypeScript interface,
-loopback host/origin/content-type hardening, pause/resume and exclusion
-controls, active wake preview, append-only correction actions, proposal review,
-confirmed immediate raw purge, and narrow confirmed full deletion. The browser
-never receives raw filesystem paths. The web artifact is not yet runnable:
-dependency resolution, API tests, the frontend build, packaged-static checks,
-and browser QA remain blocked by the current execution-credit limit and J6 is
-therefore not marked complete.
+loopback host/origin/content-type hardening, truthful live collector state,
+pause/resume and exclusion controls, active wake preview, append-only
+correction actions, proposal review, confirmed immediate raw purge, and narrow
+confirmed full deletion. The browser never receives raw filesystem paths. The
+locked frontend builds into the Python wheel; API, packaging, live loopback,
+desktop/mobile browser, safety-action, and console checks pass.
 
 The real pilot belongs to the following increment. OptMem is used from an
 ignored development snapshot and is not bundled in the current checkout. See
@@ -281,7 +293,7 @@ for the explicit proposal-adoption and real-Gemma proof, and
 [`docs/evaluation/v0.5-active-projection-validation.md`](docs/evaluation/v0.5-active-projection-validation.md)
 for the long-history active-projection comparison, and
 [`docs/evaluation/v0.6-web-interface-validation.md`](docs/evaluation/v0.6-web-interface-validation.md)
-for the implemented web boundary and its pending dependency-backed checks.
+for the completed web boundary and build/browser evidence.
 
 ---
 
@@ -303,7 +315,22 @@ uv run contx init
 uv run contx model status
 uv run contx run-once --source synthetic
 uv run contx wake
+uv run contx web
 ```
+
+Frontend release preparation is explicit and reproducible:
+
+```sh
+cd webui
+npm install
+npm run typecheck
+npm run build
+cd ..
+uv build --no-sources
+```
+
+The production wheel contains the generated static assets; Node is not needed
+to run `contx web` after packaging.
 
 The last two commands require the reviewed OptMem executable. A development
 checkout is resolved from `optmem/memo`; an installed copy can be selected with

@@ -16,22 +16,19 @@ artifact hashes are authoritative in `uv.lock`.
 | Typer | 0.27.0 | MIT | Actively maintained; adds Rich and Shellingham for CLI behavior. Pure Python on the target platform. | Keep command services independent of Typer so another CLI layer can call the same application contracts. |
 
 These libraries solve standardized or failure-prone boundaries. CONTX does not
-add OCR dependencies. J6 is now the immediate consumer for the web dependencies
-below.
+add OCR dependencies. J6 is the consumer for the web dependencies below.
 
 ## J6 local web interface
 
-These constraints are selected in project metadata but are not yet resolved in
-`uv.lock` or `webui/package-lock.json`. The execution environment refused the
-required network-enabled resolution because its privileged-use quota is
-exhausted. Exact resolved versions and transitive hashes must replace the
-selected ranges here before J6 completion.
+Both dependency graphs are now resolved. Exact Python artifacts and hashes are
+authoritative in `uv.lock`; exact browser build artifacts are authoritative in
+`webui/package-lock.json`.
 
-| Dependency | Selected line | License | Cost and removal strategy |
+| Dependency | Locked version | License | Cost and removal strategy |
 |---|---:|---|---|
-| [FastAPI](https://pypi.org/project/fastapi/) | `>=0.139,<0.140` | MIT | Typed local HTTP and OpenAPI boundary on Pydantic/Starlette. Replaceable without data migration if response validation and security middleware are preserved. |
-| [Uvicorn](https://pypi.org/project/uvicorn/) | `>=0.51,<0.52` | BSD-3-Clause | Minimal ASGI server, forced to literal loopback by CONTX. Replaceable by another local ASGI server after bind and shutdown tests. |
-| [httpx](https://pypi.org/project/httpx/) | `>=0.28,<1` | BSD-3-Clause | Development-only in-process FastAPI/Starlette integration tests. Not shipped as an application requirement. |
+| [FastAPI](https://pypi.org/project/fastapi/) | `0.139.2` | MIT | Typed local HTTP and OpenAPI boundary on Pydantic/Starlette. Replaceable without data migration if response validation and security middleware are preserved. |
+| [Uvicorn](https://pypi.org/project/uvicorn/) | `0.51.0` | BSD-3-Clause | Minimal ASGI server, forced to literal loopback by CONTX. Replaceable by another local ASGI server after bind and shutdown tests. |
+| [httpx](https://pypi.org/project/httpx/) | `0.28.1` | BSD-3-Clause | Development-only in-process FastAPI/Starlette integration tests. Not shipped as an application requirement. FastAPI's compatibility import currently emits a deprecation warning in favor of a future `httpx2` test client. |
 
 | Web build dependency | Selected version | License | Scope and removal strategy |
 |---|---:|---|---|
@@ -43,7 +40,8 @@ selected ranges here before J6 completion.
 The React Vite plugin is intentionally omitted: the v0 interface does not need
 React Refresh in production, and Vite can compile the selected JSX transform
 from the TypeScript configuration. This keeps the build dependency graph
-smaller. The decision must be confirmed by the pending production build.
+smaller. Type checking and the production build both pass; the npm audit
+reports zero known vulnerabilities at the configured moderate severity gate.
 
 ## External local model runtime
 
@@ -76,6 +74,7 @@ Python packaging metadata if necessary.
 
 The selected direct packages are actively maintained, compatible with Python
 3.12 and the Apple Silicon target, and use permissive licenses compatible with
-CONTX. The resolved environment contains 33 installed packages including
+CONTX. The resolved environment contains 43 installed packages including
 development tooling. `uv` verified a source distribution and wheel containing
-only the CONTX Python package and the project license.
+the CONTX Python package, the built static interface, metadata, and the project
+license.

@@ -193,6 +193,21 @@ class MemoryPromotionService:
             memory_maintenance_required=False,
         )
 
+    def matching_successful(
+        self,
+        *,
+        source_evaluation_run_id: UUID,
+    ) -> MemoryPromotionResult | None:
+        """Find a successful promotion with the current processing version."""
+        with session_scope(self._engine) as database_session:
+            builds = MemoryPromotionBuildRepository(
+                database_session
+            ).successful_for_source(source_evaluation_run_id)
+        for build in builds:
+            if build.processing_version == self._processing_version:
+                return self.read(build.processing_run_id)
+        return None
+
     def _resolve_candidate(
         self,
         database_session: Session,

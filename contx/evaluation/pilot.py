@@ -203,6 +203,16 @@ class PilotWorkspace:
                 _jsonl_bytes((*existing, sample)),
             )
 
+    def append_technical_snapshot(self, snapshot: TechnicalSnapshot) -> None:
+        """Atomically append one content-free technical and reviewed snapshot."""
+        self._protect_root()
+        with self._lock(exclusive=True):
+            existing = _load_jsonl(self.root / self.TECHNICAL, TechnicalSnapshot)
+            _replace_private_file(
+                self.root / self.TECHNICAL,
+                _jsonl_bytes((*existing, snapshot)),
+            )
+
     def write_report(self, report: PilotReport) -> Path:
         self._protect_root()
         path = self.root / self.REPORT
@@ -214,19 +224,13 @@ class PilotWorkspace:
         manifest = _load_json_record(self.root / self.MANIFEST, PilotManifest)
         return PilotDataset(
             manifest=manifest,
-            ground_truth=_load_jsonl(
-                self.root / self.GROUND_TRUTH, GroundTruthEntry
-            ),
+            ground_truth=_load_jsonl(self.root / self.GROUND_TRUTH, GroundTruthEntry),
             trials=_load_jsonl(self.root / self.TRIALS, TrialEvaluation),
             technical_snapshots=_load_jsonl(
                 self.root / self.TECHNICAL, TechnicalSnapshot
             ),
-            resource_samples=_load_jsonl(
-                self.root / self.RESOURCES, ResourceSample
-            ),
-            privacy_incidents=_load_jsonl(
-                self.root / self.INCIDENTS, PrivacyIncident
-            ),
+            resource_samples=_load_jsonl(self.root / self.RESOURCES, ResourceSample),
+            privacy_incidents=_load_jsonl(self.root / self.INCIDENTS, PrivacyIncident),
         )
 
     @contextmanager
@@ -242,9 +246,7 @@ class PilotWorkspace:
             descriptor = os.open(path, flags)
             file_status = os.fstat(descriptor)
             if not stat.S_ISREG(file_status.st_mode):
-                raise PilotEvaluationError(
-                    "Pilot workspace lock is not a regular file"
-                )
+                raise PilotEvaluationError("Pilot workspace lock is not a regular file")
             if stat.S_IMODE(file_status.st_mode) != PRIVATE_FILE_MODE:
                 raise PilotEvaluationError(
                     "Pilot workspace lock permissions are too broad"
@@ -321,8 +323,7 @@ def evaluate_pilot(dataset: PilotDataset, *, evaluated_at: datetime) -> PilotRep
         completed_duration_days=duration_days,
         ground_truth_count=len(dataset.ground_truth),
         important_ground_truth_count=sum(
-            item.importance.counts_as_important
-            and item.kind.value != "expected_ignore"
+            item.importance.counts_as_important and item.kind.value != "expected_ignore"
             for item in dataset.ground_truth
         ),
         important_event_recall=important_recall,
@@ -516,13 +517,9 @@ def _dataset_at(dataset: PilotDataset, *, at: datetime) -> PilotDataset:
             "ground_truth": tuple(
                 item for item in dataset.ground_truth if item.occurred_at <= at
             ),
-            "trials": tuple(
-                item for item in dataset.trials if item.evaluated_at <= at
-            ),
+            "trials": tuple(item for item in dataset.trials if item.evaluated_at <= at),
             "technical_snapshots": tuple(
-                item
-                for item in dataset.technical_snapshots
-                if item.captured_at <= at
+                item for item in dataset.technical_snapshots if item.captured_at <= at
             ),
             "resource_samples": tuple(
                 item for item in dataset.resource_samples if item.captured_at <= at
@@ -573,8 +570,7 @@ def _compare_scenario(
         coverage_delta=coverage_delta,
         false_claim_rate_delta=false_delta,
         demonstrated_benefit=(
-            quality_delta >= minimum_delta
-            and false_delta <= maximum_false_regression
+            quality_delta >= minimum_delta and false_delta <= maximum_false_regression
         ),
     )
 
@@ -601,9 +597,7 @@ def _condition_metrics(trials: Sequence[TrialEvaluation]) -> ConditionMetrics:
         + 0.15 * (synthesis / 5)
     )
     wake_values = [
-        trial.wake_latency_ms
-        for trial in trials
-        if trial.wake_latency_ms is not None
+        trial.wake_latency_ms for trial in trials if trial.wake_latency_ms is not None
     ]
     return ConditionMetrics(
         trial_count=len(trials),
@@ -614,9 +608,7 @@ def _condition_metrics(trials: Sequence[TrialEvaluation]) -> ConditionMetrics:
         mean_relevance=relevance,
         mean_synthesis=synthesis,
         mean_clarifications=_mean(trial.clarification_questions for trial in trials),
-        mean_response_latency_ms=_mean(
-            trial.response_latency_ms for trial in trials
-        ),
+        mean_response_latency_ms=_mean(trial.response_latency_ms for trial in trials),
         mean_context_bytes=_mean(trial.context_bytes for trial in trials),
         mean_wake_latency_ms=None if not wake_values else _mean(wake_values),
         quality_score=quality,
@@ -642,12 +634,8 @@ def _technical_metrics(
         irrelevant_memory_rate=_ratio(
             snapshot.irrelevant_memories, accepted, empty=0.0
         ),
-        duplicate_memory_rate=_ratio(
-            snapshot.duplicate_memories, accepted, empty=0.0
-        ),
-        manual_correction_rate=_ratio(
-            snapshot.manual_corrections, accepted, empty=0.0
-        ),
+        duplicate_memory_rate=_ratio(snapshot.duplicate_memories, accepted, empty=0.0),
+        manual_correction_rate=_ratio(snapshot.manual_corrections, accepted, empty=0.0),
         sensitive_promotions=snapshot.sensitive_promotions,
         synthetic_secret_promotions=snapshot.synthetic_secret_promotions,
         invalid_model_output_rate=_ratio(
@@ -675,9 +663,7 @@ def _resource_metrics(samples: Sequence[ResourceSample]) -> ResourceMetrics | No
         ),
         p95_detection_latency_ms=(
             None
-            if not any(
-                sample.detection_latency_ms is not None for sample in samples
-            )
+            if not any(sample.detection_latency_ms is not None for sample in samples)
             else _percentile(
                 [
                     sample.detection_latency_ms
@@ -688,9 +674,7 @@ def _resource_metrics(samples: Sequence[ResourceSample]) -> ResourceMetrics | No
             )
         ),
         maximum_raw_disk_bytes=max(sample.raw_disk_bytes for sample in samples),
-        maximum_durable_disk_bytes=max(
-            sample.durable_disk_bytes for sample in samples
-        ),
+        maximum_durable_disk_bytes=max(sample.durable_disk_bytes for sample in samples),
     )
 
 
@@ -777,8 +761,7 @@ def _build_gates(
             [
                 _boolean_gate(
                     "memory_provenance",
-                    technical.provenance_coverage
-                    >= thresholds.provenance_coverage_min,
+                    technical.provenance_coverage >= thresholds.provenance_coverage_min,
                     _percent(technical.provenance_coverage),
                 ),
                 _boolean_gate(
@@ -789,27 +772,19 @@ def _build_gates(
                     "below "
                     f"{_percent(thresholds.materially_false_memory_rate_max)}",
                 ),
-                _zero_gate(
-                    "raw_retention", technical.raw_records_past_retention
-                ),
-                _zero_gate(
-                    "excluded_capture", technical.excluded_context_captures
-                ),
+                _zero_gate("raw_retention", technical.raw_records_past_retention),
+                _zero_gate("excluded_capture", technical.excluded_context_captures),
                 _zero_gate(
                     "local_only_transport", technical.remote_user_content_transports
                 ),
-                _zero_gate(
-                    "synthetic_secret", technical.synthetic_secret_promotions
-                ),
+                _zero_gate("synthetic_secret", technical.synthetic_secret_promotions),
                 _boolean_gate(
                     "context_budget",
                     technical.active_context_bytes <= thresholds.wake_budget_bytes,
                     f"{technical.active_context_bytes}/"
                     f"{thresholds.wake_budget_bytes} bytes",
                 ),
-                _zero_gate(
-                    "model_attempt_audit", technical.unknown_model_attempts
-                ),
+                _zero_gate("model_attempt_audit", technical.unknown_model_attempts),
             ]
         )
     limits = thresholds.resource_limits
@@ -849,10 +824,8 @@ def _build_gates(
         assert limits.p95_total_rss_bytes_max is not None
         assert limits.p95_detection_latency_ms_max is not None
         passed = (
-            resources.p95_total_cpu_percent
-            <= limits.p95_total_cpu_percent_max
-            and resources.p95_total_rss_bytes
-            <= limits.p95_total_rss_bytes_max
+            resources.p95_total_cpu_percent <= limits.p95_total_cpu_percent_max
+            and resources.p95_total_rss_bytes <= limits.p95_total_rss_bytes_max
             and resources.p95_detection_latency_ms is not None
             and resources.p95_detection_latency_ms
             <= limits.p95_detection_latency_ms_max
@@ -1001,9 +974,9 @@ def _write_all(descriptor: int, content: bytes) -> None:
 
 
 def _jsonl_bytes(records: Sequence[BaseModel]) -> bytes:
-    return (
-        "".join(record.model_dump_json() + "\n" for record in records)
-    ).encode("utf-8")
+    return ("".join(record.model_dump_json() + "\n" for record in records)).encode(
+        "utf-8"
+    )
 
 
 def _require_unique_ids(label: str, identifiers: Iterable[UUID]) -> None:

@@ -231,11 +231,10 @@ class OllamaAgentProposalEvaluator:
                 confidence=output.confidence,
             )
         _validate_decision(output, minimum_confidence=minimum_confidence)
-        if (
-            not active_memories
-            and output.reason_code
-            in {"duplicate_active_memory", "conflicts_with_active_memory"}
-        ):
+        if not active_memories and output.reason_code in {
+            "duplicate_active_memory",
+            "conflicts_with_active_memory",
+        }:
             raise LocalModelResponseError(
                 "Local proposal validation cited unavailable active memory"
             )
@@ -441,8 +440,7 @@ def _validate_decision(
 def _has_exact_duplicate(proposal: str, active_memories: tuple[str, ...]) -> bool:
     normalized = " ".join(proposal.casefold().split())
     return any(
-        " ".join(memory.casefold().split()) == normalized
-        for memory in active_memories
+        " ".join(memory.casefold().split()) == normalized for memory in active_memories
     )
 
 

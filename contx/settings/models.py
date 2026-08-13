@@ -109,6 +109,27 @@ class MemorySettings(BaseModel):
     max_compressions_per_cycle: int = Field(default=4, ge=1, le=32)
 
 
+class ProcessingSettings(BaseModel):
+    """Bounded local processing and rolling analysis cadence."""
+
+    model_interval_seconds: int = Field(default=900, ge=60, le=3600)
+    analysis_interval_seconds: int = Field(default=7200, ge=900, le=86400)
+    analysis_window_days: int = Field(default=14, ge=2, le=90)
+    comparison_period_days: int = Field(default=7, ge=1, le=45)
+
+    @model_validator(mode="after")
+    def validate_analysis_window(self) -> Self:
+        if self.analysis_interval_seconds % self.model_interval_seconds != 0:
+            raise ValueError(
+                "analysis interval must be a multiple of the model interval"
+            )
+        if self.comparison_period_days >= self.analysis_window_days:
+            raise ValueError(
+                "comparison period must be shorter than the analysis window"
+            )
+        return self
+
+
 class AppSettings(BaseModel):
     """Versioned CONTX configuration."""
 
@@ -119,6 +140,7 @@ class AppSettings(BaseModel):
     model: ModelSettings = Field(default_factory=ModelSettings)
     events: EventSettings = Field(default_factory=EventSettings)
     memory: MemorySettings = Field(default_factory=MemorySettings)
+    processing: ProcessingSettings = Field(default_factory=ProcessingSettings)
 
 
 def load_settings(

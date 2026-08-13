@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
+import contx.daemon.factory as factory_module
 from contx.collection import ActivitySample
 from contx.daemon import build_macos_collection_daemon
 from contx.db import create_database_engine, session_scope
@@ -190,6 +191,53 @@ def test_enabled_factory_runs_one_isolated_synthetic_cycle(tmp_path: Path) -> No
         }
     finally:
         engine.dispose()
+
+
+def test_enabled_screenshot_factory_uses_the_native_quartz_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _paths(tmp_path)
+    initialize_runtime_paths(paths)
+    configured = (
+        paths.config_file.read_text()
+        .replace(
+            "background_collection_enabled = false",
+            "background_collection_enabled = true",
+        )
+        .replace("screenshots_enabled = false", "screenshots_enabled = true")
+    )
+    paths.config_file.write_text(configured)
+    native_sources: list[object] = []
+
+    class NativeSource:
+        def capture_png(self) -> bytes:
+            return b"synthetic native png"
+
+    def build_native_source() -> NativeSource:
+        source = NativeSource()
+        native_sources.append(source)
+        return source
+
+    monkeypatch.setattr(
+        factory_module,
+        "QuartzScreenshotSource",
+        build_native_source,
+    )
+    daemon = build_macos_collection_daemon(
+        paths=paths,
+        clock=MutableClock(),
+        sampler=FixedSampler(),
+        notifications=RecordingComponent(),
+        menu=RecordingComponent(),
+        lease=RecordingLease(),
+        application=FakeApplication(),
+        scheduler=FakeScheduler(),
+        signal_api=FakeSignalApi(),
+    )
+
+    assert len(native_sources) == 1
+    daemon.close()
 
 
 def _paths(root: Path) -> RuntimePaths:

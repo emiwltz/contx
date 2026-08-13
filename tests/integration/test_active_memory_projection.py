@@ -118,9 +118,7 @@ def test_failed_rebuild_keeps_previous_generation_publishable(
 
         assert (projection_root / "CURRENT.json").read_bytes() == pointer_before
         current = json.loads(pointer_before)
-        current_generation = (
-            projection_root / "generations" / current["generation"]
-        )
+        current_generation = projection_root / "generations" / current["generation"]
         assert current_generation.is_dir()
         assert PersistentMemoryStore(current_generation).entries == (
             "Atlas deploys to staging.",
@@ -413,8 +411,7 @@ class PersistentMemoryStore:
     def wake(self, *, part: int = 1, snapshot: int | None = None) -> MemoryWake:
         entries = self.entries
         content = "".join(
-            f"#{index} 2026-08-02 {entry}\n"
-            for index, entry in enumerate(entries)
+            f"#{index} 2026-08-02 {entry}\n" for index, entry in enumerate(entries)
         )
         return MemoryWake(content=content, complete=True, snapshot=len(entries))
 

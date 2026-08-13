@@ -23,10 +23,18 @@ class DaemonLeaseStatus:
 
 
 class DaemonLease:
-    """Hold one exclusive advisory lock for a foreground collector process."""
+    """Hold one exclusive advisory lock for a named CONTX process."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, owner: str = "collection daemon") -> None:
         self._path = _validate_path(path)
+        normalized_owner = owner.strip()
+        if (
+            not normalized_owner
+            or len(normalized_owner) > 64
+            or any(character in normalized_owner for character in "\r\n")
+        ):
+            raise ValueError("process lease owner is invalid")
+        self._owner = normalized_owner
         self._descriptor: int | None = None
 
     def acquire(self) -> None:
@@ -38,7 +46,7 @@ class DaemonLease:
         except BlockingIOError as error:
             os.close(descriptor)
             raise DaemonAlreadyRunningError(
-                "A CONTX collection daemon is already running"
+                f"A CONTX {self._owner} is already running"
             ) from error
         try:
             os.ftruncate(descriptor, 0)

@@ -206,9 +206,9 @@ class InspectionService:
             return ActivityInspection(
                 observations=pipeline.observations(limit=limit),
                 events=pipeline.events(limit=limit),
-                event_corrections=EventCorrectionRepository(
-                    database_session
-                ).list(limit=limit),
+                event_corrections=EventCorrectionRepository(database_session).list(
+                    limit=limit
+                ),
             )
 
     def patterns(self, *, limit: int = DEFAULT_INSPECTION_LIMIT) -> tuple[Pattern, ...]:
@@ -221,18 +221,18 @@ class InspectionService:
             return MemoryInspection(
                 candidates=pipeline.candidates(limit=limit),
                 records=pipeline.memory_records(limit=limit),
-                corrections=MemoryCorrectionRepository(
-                    database_session
-                ).list_builds(limit=limit),
+                corrections=MemoryCorrectionRepository(database_session).list_builds(
+                    limit=limit
+                ),
             )
 
     def privacy(self, *, limit: int = DEFAULT_INSPECTION_LIMIT) -> PrivacyInspection:
         with session_scope(self._engine) as database_session:
             pipeline = PipelineRepository(database_session)
             observations = pipeline.observations(limit=limit)
-            transformations = ModelTransformationRepository(
-                database_session
-            ).list(limit=limit)
+            transformations = ModelTransformationRepository(database_session).list(
+                limit=limit
+            )
             decisions = CandidateDecisionRepository(database_session).list(limit=limit)
         artifacts: list[RawArtifactInspection] = []
         for observation in observations:

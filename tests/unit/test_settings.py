@@ -44,6 +44,10 @@ def test_defaults_are_safe(tmp_path: Path) -> None:
     assert settings.events.max_session_duration_seconds == 7200
     assert settings.memory.wake_budget_bytes == 20000
     assert settings.memory.max_compressions_per_cycle == 4
+    assert settings.processing.model_interval_seconds == 900
+    assert settings.processing.analysis_interval_seconds == 7200
+    assert settings.processing.analysis_window_days == 14
+    assert settings.processing.comparison_period_days == 7
 
 
 def test_environment_overrides_config(tmp_path: Path) -> None:
@@ -126,6 +130,25 @@ screenshot_max_interval_seconds = 30
     )
 
     with pytest.raises(ConfigurationError, match="maximum interval"):
+        load_settings(paths, {})
+
+
+def test_processing_cadence_and_comparison_window_are_consistent(
+    tmp_path: Path,
+) -> None:
+    paths = _initialized_paths(tmp_path)
+    paths.config_file.write_text(
+        """config_version = 1
+[processing]
+model_interval_seconds = 1000
+analysis_interval_seconds = 7200
+analysis_window_days = 7
+comparison_period_days = 7
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigurationError, match="analysis interval"):
         load_settings(paths, {})
 
 

@@ -50,6 +50,12 @@ max_session_duration_seconds = 7200
 [memory]
 wake_budget_bytes = 20000
 max_compressions_per_cycle = 4
+
+[processing]
+model_interval_seconds = 900
+analysis_interval_seconds = 7200
+analysis_window_days = 14
+comparison_period_days = 7
 """
 
 
@@ -92,6 +98,10 @@ class RuntimePaths:
     @property
     def daemon_lock(self) -> Path:
         return self.processing / "collector.lock"
+
+    @property
+    def processor_lock(self) -> Path:
+        return self.processing / "processor.lock"
 
     @property
     def owned_directories(self) -> tuple[Path, ...]:

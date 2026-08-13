@@ -26,6 +26,7 @@ from contx.collectors.macos import (
     FocusedWindowTitleProbe,
     MacOSActivitySampler,
     QuartzIdleSecondsProbe,
+    QuartzScreenshotSource,
     ResolvedSystemStateProbe,
     SystemSignals,
     WorkspaceApplicationProbe,
@@ -46,7 +47,7 @@ from contx.daemon.lifecycle import (
 )
 from contx.daemon.signals import GracefulStopSignalBridge, SignalApi
 from contx.db import create_database_engine, upgrade_database
-from contx.errors import CollectorUnavailableError, ConfigurationError
+from contx.errors import ConfigurationError
 from contx.models import Clock, SystemClock, UuidIdentifierSource
 from contx.raw_store import FilesystemRawStore
 from contx.settings import (
@@ -127,11 +128,6 @@ def build_macos_collection_daemon(
         raise ConfigurationError(
             "Background collection is disabled in CONTX configuration"
         )
-    if collection.screenshots_enabled and screenshot_source is None:
-        raise CollectorUnavailableError(
-            "Screenshot collection is enabled but no authorized source is configured"
-        )
-
     engine: Engine | None = None
     try:
         upgrade_database(runtime_paths.database_file)
@@ -182,7 +178,7 @@ def build_macos_collection_daemon(
                         seconds=collection.screenshot_max_interval_seconds
                     ),
                 ),
-                source=_require_screenshot_source(screenshot_source),
+                source=screenshot_source or QuartzScreenshotSource(),
                 raw_store=raw_store,
                 retention=retention,
             )
@@ -239,13 +235,3 @@ def build_macos_collection_daemon(
         engine=engine,
         signal_api=signal_api,
     )
-
-
-def _require_screenshot_source(
-    source: ScreenshotSource | None,
-) -> ScreenshotSource:
-    if source is None:
-        raise CollectorUnavailableError(
-            "Screenshot collection requires an authorized source"
-        )
-    return source

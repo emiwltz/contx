@@ -6,6 +6,7 @@ from contx.settings.models import (
     EventSettings,
     MemorySettings,
     ModelSettings,
+    ProcessingSettings,
     load_settings,
 )
 from contx.settings.paths import (
@@ -22,6 +23,7 @@ __all__ = [
     "EventSettings",
     "ModelSettings",
     "MemorySettings",
+    "ProcessingSettings",
     "RuntimePaths",
     "initialize_runtime_paths",
     "load_settings",

@@ -39,17 +39,13 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["proposal_id"],
             ["agent_proposals.id"],
-            name=(
-                "fk_agent_proposal_adoption_builds_proposal_id_agent_proposals"
-            ),
+            name=("fk_agent_proposal_adoption_builds_proposal_id_agent_proposals"),
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
             ["candidate_id"],
             ["memory_candidates.id"],
-            name=(
-                "fk_agent_proposal_adoption_builds_candidate_id_memory_candidates"
-            ),
+            name=("fk_agent_proposal_adoption_builds_candidate_id_memory_candidates"),
             ondelete="RESTRICT",
         ),
         sa.PrimaryKeyConstraint(

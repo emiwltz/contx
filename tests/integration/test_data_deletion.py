@@ -41,6 +41,19 @@ def test_full_deletion_refuses_a_running_collector(tmp_path: Path) -> None:
     assert paths.config_file.is_file()
 
 
+def test_full_deletion_refuses_a_running_context_processor(tmp_path: Path) -> None:
+    paths = _paths(tmp_path / "runtime")
+    initialize_runtime_paths(paths)
+
+    with (
+        DaemonLease(paths.processor_lock, owner="context processor"),
+        pytest.raises(PipelineError, match="Stop the CONTX context processor"),
+    ):
+        DataDeletionService(paths=paths).delete_all()
+
+    assert paths.config_file.is_file()
+
+
 def test_full_deletion_refuses_nested_or_broad_roots(tmp_path: Path) -> None:
     unsafe = RuntimePaths(
         application_support=tmp_path,

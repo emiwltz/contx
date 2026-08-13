@@ -90,15 +90,10 @@ def test_compression_preserves_correction_authority_across_tree_merges() -> None
         )
     )
 
-    assert (
-        missing_marker.compress(request)
-        == "Correction: Atlas targets local-only."
-    )
+    assert missing_marker.compress(request) == "Correction: Atlas targets local-only."
 
     retained_transport = RecordingTransport(
-        chat_content=json.dumps(
-            {"summary": "Correction: Atlas targets local-only."}
-        )
+        chat_content=json.dumps({"summary": "Correction: Atlas targets local-only."})
     )
     retained = OllamaMemoryCompressor(transport=retained_transport)
     assert retained.compress(request).startswith("Correction:")

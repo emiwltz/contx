@@ -111,9 +111,7 @@ class PilotManifest(StrictRecord):
     target_machine: str = Field(min_length=1, max_length=255)
     thresholds: PilotThresholds = Field(default_factory=PilotThresholds)
 
-    _utc_timestamps = field_validator("started_at", "planned_end_at")(
-        require_aware_utc
-    )
+    _utc_timestamps = field_validator("started_at", "planned_end_at")(require_aware_utc)
 
     @field_validator("timezone", "target_machine")
     @classmethod
@@ -276,6 +274,17 @@ class TechnicalSnapshot(StrictRecord):
         return self
 
 
+class TechnicalReview(StrictRecord):
+    """Human-reviewed cumulative counters that persistence cannot infer safely."""
+
+    materially_false_memories: int = Field(ge=0)
+    irrelevant_memories: int = Field(ge=0)
+    duplicate_memories: int = Field(ge=0)
+    synthetic_secret_promotions: int = Field(ge=0)
+    excluded_context_captures: int = Field(ge=0)
+    remote_user_content_transports: int = Field(ge=0)
+
+
 class ResourceSample(StrictRecord):
     schema_version: Literal[1] = 1
     captured_at: datetime
@@ -303,9 +312,7 @@ class ResourceSample(StrictRecord):
     @property
     def total_rss_bytes(self) -> int:
         return (
-            self.collector_rss_bytes
-            + self.local_model_rss_bytes
-            + self.web_rss_bytes
+            self.collector_rss_bytes + self.local_model_rss_bytes + self.web_rss_bytes
         )
 
     @model_validator(mode="after")

@@ -98,13 +98,14 @@ def test_explicit_adoption_appends_exact_proposal_with_transitive_provenance(
         assert memory.entries == ("Atlas uses Python.", PROPOSAL_TEXT)
 
         with session_scope(engine) as database_session:
-            build = AgentProposalAdoptionRepository(
-                database_session
-            ).build_by_proposal(proposal.id)
-            assert build == adopted.build
-            assert AgentProposalRepository(database_session).by_id(
+            build = AgentProposalAdoptionRepository(database_session).build_by_proposal(
                 proposal.id
-            ) == adopted.proposal
+            )
+            assert build == adopted.build
+            assert (
+                AgentProposalRepository(database_session).by_id(proposal.id)
+                == adopted.proposal
+            )
     finally:
         engine.dispose()
 
@@ -126,9 +127,9 @@ def test_interruption_after_append_resumes_without_model_or_memory_duplicate(
 
         with session_scope(engine) as database_session:
             persisted = AgentProposalRepository(database_session).by_id(proposal.id)
-            build = AgentProposalAdoptionRepository(
-                database_session
-            ).build_by_proposal(proposal.id)
+            build = AgentProposalAdoptionRepository(database_session).build_by_proposal(
+                proposal.id
+            )
             assert persisted is not None
             assert persisted.status is AgentProposalStatus.PENDING
             assert build is not None
@@ -260,9 +261,9 @@ def test_reference_change_during_model_call_aborts_before_staging(
         assert memory.entries == ()
         with session_scope(engine) as database_session:
             persisted = AgentProposalRepository(database_session).by_id(proposal.id)
-            build = AgentProposalAdoptionRepository(
-                database_session
-            ).build_by_proposal(proposal.id)
+            build = AgentProposalAdoptionRepository(database_session).build_by_proposal(
+                proposal.id
+            )
             assert persisted is not None
             assert persisted.status is AgentProposalStatus.PENDING
             assert build is None
@@ -285,9 +286,7 @@ def test_memory_reference_adoption_inherits_existing_transitive_provenance(
             reference_id=existing.id,
         )
 
-        adopted = _service(engine, memory, evaluator).adopt(
-            proposal_id=proposal.id
-        )
+        adopted = _service(engine, memory, evaluator).adopt(proposal_id=proposal.id)
 
         assert adopted.memory_link is not None
         assert adopted.memory_link.provenance.pattern_ids == ()
@@ -341,9 +340,7 @@ def test_pattern_reference_adoption_preserves_all_evidence_edges(
             reference_id=PATTERN_ID,
         )
 
-        adopted = _service(engine, memory, evaluator).adopt(
-            proposal_id=proposal.id
-        )
+        adopted = _service(engine, memory, evaluator).adopt(proposal_id=proposal.id)
 
         assert adopted.memory_link is not None
         assert adopted.memory_link.provenance.pattern_ids == (PATTERN_ID,)
@@ -396,9 +393,7 @@ class RecordingEvaluator:
         active_memories: tuple[str, ...],
         minimum_confidence: float,
     ) -> AgentProposalEvaluation:
-        self.calls.append(
-            (proposal, reference, active_memories, minimum_confidence)
-        )
+        self.calls.append((proposal, reference, active_memories, minimum_confidence))
         return self._result
 
 

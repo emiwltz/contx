@@ -40,6 +40,11 @@ class DataDeletionService:
                 raise PipelineError(
                     "Stop the CONTX collection daemon before deleting all data"
                 )
+            processor = probe_daemon_lease(self._paths.processor_lock)
+            if processor.running:
+                raise PipelineError(
+                    "Stop the CONTX context processor before deleting all data"
+                )
         for _label, root in roots:
             _validate_tree(root)
         if self._engine is not None:

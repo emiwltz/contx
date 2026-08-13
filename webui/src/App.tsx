@@ -127,6 +127,8 @@ export function App() {
     setActiveView(view);
   };
 
+  const collection = data ? collectionPresentation(data.status.collection) : null;
+
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -187,24 +189,23 @@ export function App() {
             >
               Actualiser
             </button>
-            {data && (
+            {data && collection && (
               <button
                 className={
-                  data.status.collection.paused ? "button accent" : "button danger"
+                  collection.action === "resume"
+                    ? "button accent"
+                    : collection.action === "pause"
+                      ? "button danger"
+                      : "button secondary"
                 }
-                disabled={mutating}
+                disabled={mutating || collection.action === null}
                 onClick={() =>
-                  void mutate(() =>
-                    apiMutation(
-                      data.status.collection.paused ? "/resume" : "/pause",
-                      "POST",
-                      {},
-                    ),
-                  )
+                  collection.action &&
+                  void mutate(() => apiMutation(`/${collection.action}`, "POST", {}))
                 }
                 type="button"
               >
-                {data.status.collection.paused ? "Reprendre" : "Mettre en pause"}
+                {collection.actionLabel}
               </button>
             )}
           </div>
@@ -294,7 +295,7 @@ function Overview({
   status: StatusResponse;
   processing: ProcessingRun[];
 }) {
-  const collectionLabel = status.collection.paused ? "En pause" : "Active";
+  const collection = collectionPresentation(status.collection);
   const modelHealthy = status.model.runtime_available && status.model.model_available;
   return (
     <div className="page-stack">
@@ -311,24 +312,20 @@ function Overview({
       <section className="hero-card">
         <div>
           <p className="eyebrow">ÉTAT EN TEMPS RÉEL</p>
-          <h2>{status.collection.paused ? "La collecte attend." : "CONTX observe localement."}</h2>
-          <p>
-            {status.collection.paused
-              ? "Aucune nouvelle observation n’est collectée. La mémoire et l’historique restent consultables."
-              : "La politique d’exclusion est appliquée avant chaque capture autorisée."}
-          </p>
+          <h2>{collection.headline}</h2>
+          <p>{collection.description}</p>
         </div>
         <div className="hero-orbit" aria-hidden="true">
-          <span>{collectionLabel}</span>
+          <span>{collection.label}</span>
         </div>
       </section>
 
       <section className="metric-grid" aria-label="Indicateurs principaux">
         <Metric
           label="Collecte"
-          value={collectionLabel}
-          detail={status.collection.daemon_running ? "Daemon actif" : "Daemon arrêté"}
-          tone={status.collection.paused ? "amber" : "green"}
+          value={collection.label}
+          detail={collection.detail}
+          tone={collection.tone}
         />
         <Metric
           label="Modèle local"
@@ -788,7 +785,7 @@ function Settings({ settings, exclusions }: { settings: SettingsResponse; exclus
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleted, setDeleted] = useState(false);
   const sections = useMemo(() => [
-    ["Collecte", settings.collection], ["Modèle local", settings.model], ["Événements", settings.events], ["Mémoire", settings.memory], ["API locale", settings.api],
+    ["Collecte", settings.collection], ["Modèle local", settings.model], ["Événements", settings.events], ["Mémoire", settings.memory], ["Traitement", settings.processing], ["API locale", settings.api],
   ] as const, [settings]);
 
   if (deleted) {
@@ -841,6 +838,70 @@ function EmptyState({ title, detail }: { title: string; detail: string }) {
 
 function EmptyInline({ text }: { text: string }) {
   return <p className="empty-inline">{text}</p>;
+}
+
+type CollectionPresentation = {
+  label: string;
+  headline: string;
+  description: string;
+  detail: string;
+  tone: string;
+  action: "pause" | "resume" | null;
+  actionLabel: string;
+};
+
+function collectionPresentation(
+  collection: StatusResponse["collection"],
+): CollectionPresentation {
+  if (collection.daemon_running && collection.paused) {
+    return {
+      label: "En pause",
+      headline: "La collecte attend.",
+      description:
+        "Aucune nouvelle observation n’est collectée. La mémoire et l’historique restent consultables.",
+      detail: "Daemon actif · collecte suspendue",
+      tone: "amber",
+      action: "resume",
+      actionLabel: "Reprendre",
+    };
+  }
+
+  if (collection.daemon_running) {
+    return {
+      label: "Active",
+      headline: "CONTX observe localement.",
+      description:
+        "La politique d’exclusion est appliquée avant chaque capture autorisée.",
+      detail: "Daemon actif",
+      tone: "green",
+      action: "pause",
+      actionLabel: "Mettre en pause",
+    };
+  }
+
+  if (collection.background_enabled) {
+    return {
+      label: "Arrêtée",
+      headline: "Le collecteur n’est pas démarré.",
+      description:
+        "La collecte de fond est configurée, mais aucun daemon CONTX actif n’a été détecté.",
+      detail: "Daemon arrêté",
+      tone: "red",
+      action: null,
+      actionLabel: "Collecteur arrêté",
+    };
+  }
+
+  return {
+    label: "Désactivée",
+    headline: "La collecte de fond est désactivée.",
+    description:
+      "Aucune nouvelle observation n’est collectée. La mémoire locale existante reste consultable.",
+    detail: "Désactivée dans la configuration",
+    tone: "neutral",
+    action: null,
+    actionLabel: "Collecte désactivée",
+  };
 }
 
 function viewFromHash(): View {

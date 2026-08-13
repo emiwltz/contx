@@ -17,12 +17,13 @@
 | Phase 0 decision baseline | Complete | ADRs 0001–0006, aligned specification and architecture, Apache-2.0 baseline, OptMem provenance gate |
 | J0 engineering foundation | Complete | Locked Python 3.12 package, private runtime paths, Alembic/SQLite WAL, strict schemas and repositories |
 | v0.0.1 vertical slice | Complete | Synthetic and live one-shot collectors, candidate decision, OptMem persistence, provenance, direct `contx wake`, replay/failure tests |
-| v0.1 / J1 | In progress | Controlled metadata and screenshot policy, exclusions, bounded raw storage, restart-safe purge, gated AppKit daemon, menu control, permission preflights, and launchd manifest are implemented; real activation, installation, one-day collection, and measured target-Mac baselines remain gated |
+| v0.1 / J1 | In progress | Controlled metadata and screenshot policy, exclusions, bounded raw storage, restart-safe purge, gated AppKit daemon, menu control, permission preflights, and collector/processor launchd manifests are implemented; real activation, installation, one-day collection, and measured target-Mac baselines remain gated |
 | v0.2 / J2 | Complete | Gemma 4 E4B QAT with prompt v9 passed the fixed 16/16 privacy and quality matrix, bounded cold/warm resource measurements were recorded, the persistent local model-to-event proof passed, and sensitive or forbidden output is blocked from durable memory |
 | v0.3 / J3 | Complete | Frozen-day sessionization produces a deterministic readable timeline; same-version replay is idempotent, changed versions coexist, and append-only corrections survive compatible evidence-lineage rebuilds |
 | v0.4 / J4 | Complete | Multi-day pattern detection, fused candidates, explicit scoring, rejection/deferral reasons, validity, and side-by-side rule and threshold replays passed the synthetic exit gate |
 | v0.5 / J5 | Complete | Promotion, explicit proposal adoption, restart-safe corrections, historical `recall`/`zoom`, active-only `wake`, real-agent contracts, and the OptMem/Gemma long-history matrix pass under ADRs 0013–0015 |
-| v0.6 / J6 | In progress | Versioned FastAPI contracts, bounded inspection views, loopback hardening, React/Vite source, safety controls, confirmed raw/full deletion services, and non-web regression tests are implemented under ADR 0016; dependency resolution, API tests, frontend build, packaged-static verification, and browser QA are blocked by the execution quota |
+| v0.6 / J6 | Complete | Versioned FastAPI contracts, bounded inspection views, loopback hardening, truthful collector state, React/Vite production build, safety controls, packaged-static verification, live socket inspection, desktop/mobile browser QA, and full regression tests pass under ADR 0016 |
+| v0.9 / J7 | In progress | The complete bounded periodic path from local-model backlog to active OptMem, private paired-pilot workspace, strict evaluator, exact-PID resource sampling, automatic SQLite technical counters, explicit human-review counters, and model-attempt audit are implemented; J1 authorization gates and the 7–14 day real pilot remain |
 
 The completed vertical-slice evidence and residual limitations are recorded in
 `docs/evaluation/v0.0.1-validation.md`. Completion here does not imply that the
@@ -62,6 +63,7 @@ The following decisions are approved for planning and implementation.
 | Runtime data layout | Native macOS locations | Durable state, temporary raw data, and logs have separate lifecycle and backup behavior |
 | OptMem | CONTX may use and evolve the complete OptMem codebase | OptMem remains behind `MemoryStore`; provenance and redistributable license evidence are still required before public distribution |
 | Initial process model | Explicit on-demand execution first; a background daemon only after control and visibility exist | No unattended collection in the first vertical slice |
+| Production refresh | Separate bounded periodic local job under ADR 0018 | Collection stays responsive; partial backlogs never publish derived memory; exact retries remain idempotent |
 | Project license | Apache License 2.0 | J0 adds the canonical license text and records third-party notices separately |
 | Git workflow | Work directly on `main` | Commits remain small and local; no push, amend, rebase, or history rewrite without explicit approval |
 
@@ -875,10 +877,10 @@ become a second source of truth.
 - the UI exposes a clear degraded state when the required local model is
   unavailable.
 
-Current state: source implementation and 301 non-web regression tests pass.
-The gate remains open until dependency resolution, FastAPI integration tests,
-the TypeScript/Vite build, packaged static files, live loopback inspection, and
-browser QA pass. See
+Current state: complete. The locked TypeScript/Vite build is packaged in the
+Python wheel; API security, static fallback, live loopback binding, collector
+state, exact destructive confirmations, desktop/mobile layouts, semantic DOM,
+and browser-console checks pass. The complete suite passes 355 tests. See
 `docs/evaluation/v0.6-web-interface-validation.md`.
 
 ## 15. Phase 9: v0.9 real pilot
@@ -916,12 +918,26 @@ manual corrections, provenance coverage, sensitive-content promotion, invalid
 model-output rate, context size, wake latency, CPU, memory, and disk use.
 
 ADR 0017 fixes the provisional paired scoring contract before results are
-known. `contx pilot prepare|validate|report` now provides a private, strict,
+known. `contx pilot prepare|validate|report` provides a private, strict,
 cutoff-aware evidence workspace and aggregate report without activating
-collection. A native `libproc` sampler now appends content-free exact-PID CPU,
-RSS, latency, and safe-directory disk evidence for four representative phases.
-The real pilot remains unstarted. Safely derived technical snapshots are the
-remaining harness work before the action-time gate.
+collection. A native `libproc` sampler appends content-free exact-PID CPU, RSS,
+latency, and safe-directory disk evidence for four representative phases.
+`contx pilot sample-technical` derives finalized memories, provenance,
+corrections, sensitive promotions, audited model outputs, unknown interrupted
+attempts, expired raw records, and live wake size/latency from local state. It
+requires explicit reviewed counts for false, irrelevant, duplicate, synthetic
+secret, excluded-context, and remote-transport findings. The real pilot remains
+unstarted behind the J1 and action-time approval gates.
+
+ADR 0018 now supplies the missing production orchestration. The disabled
+periodic processor handles one bounded local-model/event batch per invocation,
+defers every downstream stage until both backlogs are empty, then runs the
+frozen timeline through pattern analysis, transparent decisions, historical
+OptMem promotion and maintenance, and atomic active projection. Two-hour
+analysis boundaries are aligned inside a configurable 14-day window with a
+seven-day comparison period. An exact same-evidence refresh reuses its
+production timeline and memory link; explicit historical replay still creates
+separate auditable runs. Neither periodic job has been installed or activated.
 
 ### 15.3 v0 exit gate
 
@@ -1039,6 +1055,7 @@ The following changes require explicit action-time approval even if their code
 has already been implemented:
 
 - enabling persistent background collection;
+- installing or loading the collector or periodic-processor LaunchAgents;
 - enabling live screenshot collection;
 - enabling window-title collection outside a controlled test;
 - introducing a remote model or any outbound user-data path, which also

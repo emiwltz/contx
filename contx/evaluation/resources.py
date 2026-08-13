@@ -127,9 +127,7 @@ class PilotResourceSampler:
             web_rss_bytes=web.rss_bytes,
             detection_latency_ms=detection_latency_ms,
             raw_disk_bytes=directory_usage_bytes(self._paths.raw),
-            durable_disk_bytes=directory_usage_bytes(
-                self._paths.application_support
-            ),
+            durable_disk_bytes=directory_usage_bytes(self._paths.application_support),
         )
         self._workspace.append_resource_sample(sample)
         return sample

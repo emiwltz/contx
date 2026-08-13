@@ -144,6 +144,29 @@ class PatternAnalysisService:
             )
         return PatternAnalysisResult(run=run, build=build, patterns=patterns)
 
+    def matching_successful(
+        self,
+        *,
+        source_timeline_run_id: UUID,
+        comparison_boundary: datetime,
+    ) -> PatternAnalysisResult | None:
+        """Find a successful run with the current engine's exact parameters."""
+        with session_scope(self._engine) as database_session:
+            builds = PatternBuildRepository(database_session).successful_for_source(
+                source_timeline_run_id
+            )
+        for build in builds:
+            if (
+                build.processing_version == self._pattern_engine.processing_version
+                and build.comparison_boundary == comparison_boundary
+                and build.min_project_events == self._pattern_engine.min_project_events
+                and build.resumption_gap_seconds
+                == int(self._pattern_engine.resumption_gap.total_seconds())
+                and build.change_ratio == self._pattern_engine.change_ratio
+            ):
+                return self.read(build.processing_run_id)
+        return None
+
     def _save_run_and_build(self, run: ProcessingRun, build: PatternBuild) -> None:
         with session_scope(self._engine) as database_session:
             PipelineRepository(database_session).save_processing_run(run)
@@ -246,6 +269,24 @@ class PatternCandidateService:
             ).candidates_for_processing_run(processing_run_id)
         return PatternCandidateResult(run=run, build=build, candidates=candidates)
 
+    def matching_successful(
+        self,
+        *,
+        source_pattern_run_id: UUID,
+    ) -> PatternCandidateResult | None:
+        """Find a successful run with the current producer's exact parameters."""
+        with session_scope(self._engine) as database_session:
+            builds = CandidateBuildRepository(database_session).successful_for_source(
+                source_pattern_run_id
+            )
+        for build in builds:
+            if (
+                build.processing_version == self._producer.processing_version
+                and build.scoring_weights == self._producer.scoring_weights
+            ):
+                return self.read(build.processing_run_id)
+        return None
+
 
 class CandidateEvaluationService:
     """Evaluate a frozen candidate run under one explicit replayable policy."""
@@ -331,6 +372,27 @@ class CandidateEvaluationService:
                 database_session
             ).decisions_for_processing_run(processing_run_id)
         return CandidateEvaluationResult(run=run, build=build, decisions=decisions)
+
+    def matching_successful(
+        self,
+        *,
+        source_candidate_run_id: UUID,
+    ) -> CandidateEvaluationResult | None:
+        """Find a successful run with the current worker's exact policy."""
+        with session_scope(self._engine) as database_session:
+            builds = CandidateEvaluationBuildRepository(
+                database_session
+            ).successful_for_source(source_candidate_run_id)
+        for build in builds:
+            if (
+                build.policy_version == self._worker.policy_version
+                and build.acceptance_threshold == self._worker.acceptance_threshold
+                and build.minimum_confidence == self._worker.minimum_confidence
+                and build.maximum_ambiguity == self._worker.maximum_ambiguity
+                and build.maximum_redundancy == self._worker.maximum_redundancy
+            ):
+                return self.read(build.processing_run_id)
+        return None
 
 
 def _record_run_failure(

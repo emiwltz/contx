@@ -37,6 +37,19 @@ def test_second_daemon_cannot_acquire_the_same_lease(tmp_path: Path) -> None:
         DaemonLease(lock_path).acquire()
 
 
+def test_process_lease_reports_its_configured_owner(tmp_path: Path) -> None:
+    lock_path = tmp_path / "processor.lock"
+
+    with (
+        DaemonLease(lock_path, owner="context processor"),
+        pytest.raises(
+            DaemonAlreadyRunningError,
+            match="CONTX context processor is already running",
+        ),
+    ):
+        DaemonLease(lock_path, owner="context processor").acquire()
+
+
 def test_symlink_lease_is_rejected_without_touching_target(tmp_path: Path) -> None:
     target = tmp_path / "outside"
     target.write_text("must remain", encoding="utf-8")

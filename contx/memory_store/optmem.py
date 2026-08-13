@@ -147,7 +147,8 @@ class OptMemAdapter:
         arguments = ["wake", str(part)]
         if snapshot is not None:
             arguments.append(str(snapshot))
-        result = self._run(tuple(arguments))
+        with self._adapter_lock():
+            result = self._run(tuple(arguments))
         maintenance_required = _maintenance_required(result.stdout)
         if result.returncode != 0 and not maintenance_required:
             raise MemoryStoreError("OptMem could not produce memory context")
@@ -177,7 +178,8 @@ class OptMemAdapter:
     def recall(self, pattern: str) -> str:
         if not pattern or "\n" in pattern or "\r" in pattern:
             raise ValueError("recall pattern must be one non-empty line")
-        result = self._run(("recall", pattern))
+        with self._adapter_lock():
+            result = self._run(("recall", pattern))
         if result.returncode != 0:
             raise MemoryStoreError("OptMem could not search final memory")
         return result.stdout
@@ -185,7 +187,8 @@ class OptMemAdapter:
     def zoom(self, block: str) -> str:
         if re.fullmatch(r"\d+-\d+", block) is None:
             raise ValueError("zoom block must use the form <lo>-<hi>")
-        result = self._run(("zoom", block))
+        with self._adapter_lock():
+            result = self._run(("zoom", block))
         if result.returncode != 0:
             raise MemoryStoreError("OptMem could not navigate final memory")
         return result.stdout
@@ -198,19 +201,20 @@ class OptMemAdapter:
     ) -> MemoryMaintenance:
         if not 1 <= max_compressions <= 100:
             raise ValueError("maximum compressions must be between 1 and 100")
-        completed = 0
-        request = self._next_compression()
-        while request is not None and completed < max_compressions:
-            summary = _validate_compression_summary(
-                compressor.compress(request),
-                max_bytes=request.max_bytes,
-            )
-            result = self._run(("nap", request.block, summary))
-            if result.returncode != 0:
-                raise MemoryStoreError("OptMem could not persist a compression")
-            completed += 1
+        with self._adapter_lock():
+            completed = 0
             request = self._next_compression()
-        self._protect_store()
+            while request is not None and completed < max_compressions:
+                summary = _validate_compression_summary(
+                    compressor.compress(request),
+                    max_bytes=request.max_bytes,
+                )
+                result = self._run(("nap", request.block, summary))
+                if result.returncode != 0:
+                    raise MemoryStoreError("OptMem could not persist a compression")
+                completed += 1
+                request = self._next_compression()
+            self._protect_store()
         return MemoryMaintenance(
             completed_compressions=completed,
             complete=request is None,
@@ -220,10 +224,11 @@ class OptMemAdapter:
     def invalidate_summary(self, block: str) -> None:
         if re.fullmatch(r"\d+-\d+", block) is None:
             raise ValueError("summary block must use the form <lo>-<hi>")
-        result = self._run(("forget", block))
-        if result.returncode != 0:
-            raise MemoryStoreError("OptMem could not invalidate the summary")
-        self._protect_store()
+        with self._adapter_lock():
+            result = self._run(("forget", block))
+            if result.returncode != 0:
+                raise MemoryStoreError("OptMem could not invalidate the summary")
+            self._protect_store()
 
     def _next_compression(self) -> MemoryCompressionRequest | None:
         result = self._run(("nap",))

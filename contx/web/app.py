@@ -481,9 +481,7 @@ def create_app(runtime: WebRuntime | None = None) -> FastAPI:
             status=result.proposal.status.value,
             decision=result.build.decision.value,
             reason=result.build.reason_code.value,
-            memory_id=(
-                None if result.memory_link is None else result.memory_link.id
-            ),
+            memory_id=(None if result.memory_link is None else result.memory_link.id),
             replayed=result.replayed,
         )
 
