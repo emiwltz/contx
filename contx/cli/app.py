@@ -40,7 +40,9 @@ from contx.collection import (
 from contx.collectors import Collector
 from contx.collectors.macos import (
     ActiveApplicationCollector,
+    MacOSPermission,
     detect_collection_capabilities,
+    request_collection_permission,
 )
 from contx.collectors.synthetic import SyntheticCollector
 from contx.daemon import DaemonLease, probe_daemon_lease
@@ -121,12 +123,14 @@ timeline_app = typer.Typer(help="Build, inspect, and correct activity timelines.
 memory_app = typer.Typer(help="Inspect and maintain final semantic memory.")
 proposals_app = typer.Typer(help="Review and explicitly decide agent proposals.")
 pilot_app = typer.Typer(help="Prepare and score the controlled real-data pilot.")
+permissions_app = typer.Typer(help="Inspect or explicitly request macOS access.")
 app.add_typer(exclusions_app, name="exclusions")
 app.add_typer(model_app, name="model")
 app.add_typer(timeline_app, name="timeline")
 app.add_typer(memory_app, name="memory")
 app.add_typer(proposals_app, name="proposals")
 app.add_typer(pilot_app, name="pilot")
+app.add_typer(permissions_app, name="permissions")
 
 
 class RunSource(StrEnum):
@@ -316,6 +320,50 @@ def capabilities() -> None:
         typer.echo(f"{capability.name}: {capability.status.value}{detail}")
         if capability.settings_path is not None:
             typer.echo(f"  settings: {capability.settings_path}")
+
+
+@permissions_app.command("request")
+def request_permissions(
+    accessibility: Annotated[
+        bool,
+        typer.Option(
+            "--accessibility",
+            help="Ask macOS for access to the focused window title.",
+        ),
+    ] = False,
+    screen_recording: Annotated[
+        bool,
+        typer.Option(
+            "--screen-recording",
+            help="Ask macOS for access to selective screen captures.",
+        ),
+    ] = False,
+) -> None:
+    """Request only the explicitly selected permissions; collect no activity."""
+    selected = (
+        *((MacOSPermission.ACCESSIBILITY,) if accessibility else ()),
+        *((MacOSPermission.SCREEN_RECORDING,) if screen_recording else ()),
+    )
+    if not selected:
+        raise typer.BadParameter("select --accessibility, --screen-recording, or both")
+    for permission in selected:
+        if permission is MacOSPermission.ACCESSIBILITY:
+            typer.echo(
+                "Accessibility is used only for an authorized focused-window title."
+            )
+        else:
+            typer.echo(
+                "Screen Recording is used only for policy-authorized "
+                "selective captures."
+            )
+        try:
+            result = request_collection_permission(permission)
+        except ContxError as error:
+            _abort(error)
+        state = "granted" if result.granted else "permission required"
+        typer.echo(f"{result.permission.value}: {state}")
+        if not result.granted:
+            typer.echo(f"  settings: {result.settings_path}")
 
 
 @app.command()

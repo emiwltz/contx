@@ -40,6 +40,14 @@ Accessibility element. It reads only the focused application, focused window,
 and title attributes needed by the confirmed v0 contract. Titles remain
 disabled unless explicitly configured.
 
+The separate setup command `contx permissions request --accessibility` may
+call the native prompt API only after this exact user action. The command
+explains the purpose before requesting, collects no activity, performs one
+request without retrying, and prints the System Settings path when access is
+still missing. Screen Recording follows the same explicit setup contract
+behind its own `--screen-recording` flag. Neither request is reachable from
+collector startup, capability inspection, or background supervision.
+
 This decision authorizes dependency installation, implementation, and
 synthetic tests. It does not authorize requesting Accessibility permission or
 reading a live window title; those remain action-time approval gates.
@@ -61,6 +69,8 @@ v0 scope change.
 - Quartz remains responsible only for idle and screen-capture APIs.
 - Capability detection loads Accessibility separately from Quartz.
 - Missing permission produces a degraded capability and no attribute read.
+- Permission prompts occur only through an explicitly selected setup command;
+  denial never causes an automatic retry.
 - Pause, inactive-session, and application exclusion checks still happen
   before title persistence or screenshot capture.
 - Packaging must include three narrow PyObjC framework packages rather than

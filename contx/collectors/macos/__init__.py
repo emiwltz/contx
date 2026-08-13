@@ -15,6 +15,11 @@ from contx.collectors.macos.capabilities import (
     detect_collection_capabilities,
 )
 from contx.collectors.macos.notifications import WorkspaceNotificationMonitor
+from contx.collectors.macos.permissions import (
+    MacOSPermission,
+    PermissionRequestResult,
+    request_collection_permission,
+)
 from contx.collectors.macos.screenshots import QuartzScreenshotSource
 from contx.collectors.macos.window_titles import FocusedWindowTitleProbe
 
@@ -25,6 +30,8 @@ __all__ = [
     "CollectionCapability",
     "FocusedWindowTitleProbe",
     "MacOSActivitySampler",
+    "MacOSPermission",
+    "PermissionRequestResult",
     "QuartzIdleSecondsProbe",
     "QuartzScreenshotSource",
     "ResolvedSystemStateProbe",
@@ -32,4 +39,5 @@ __all__ = [
     "WorkspaceApplicationProbe",
     "WorkspaceNotificationMonitor",
     "detect_collection_capabilities",
+    "request_collection_permission",
 ]

@@ -10,6 +10,8 @@ guaranteed.
 
 ### Added
 
+- An explicit, non-collecting macOS permission-request command that explains
+  each selected capability and never prompts from the collector itself.
 - Detailed implementation plan from the first vertical slice through v1.
 - Architecture Decision Record structure and the initial accepted decisions.
 - Apache-2.0 project licensing baseline.

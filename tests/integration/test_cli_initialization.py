@@ -14,6 +14,7 @@ from typer.testing import CliRunner
 import contx.cli.app as cli_module
 from contx.application import ActiveMemoryProjectionResult, ActiveMemoryWakeResult
 from contx.cli.app import app
+from contx.collectors.macos import MacOSPermission, PermissionRequestResult
 from contx.daemon import DaemonLease
 from contx.db import create_database_engine, session_scope
 from contx.db.models import EventModel, MemoryLinkModel
@@ -487,6 +488,58 @@ def test_capabilities_do_not_enable_or_request_sensitive_access(tmp_path: Path) 
     assert "active_application:" in result.stdout
     assert "window_titles: disabled (disabled_by_configuration)" in result.stdout
     assert "screenshots: disabled (disabled_by_configuration)" in result.stdout
+
+
+def test_permission_request_requires_an_explicit_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        cli_module,
+        "request_collection_permission",
+        lambda _permission: pytest.fail("no native request expected"),
+    )
+
+    result = runner.invoke(app, ["permissions", "request"])
+
+    assert result.exit_code == 2
+    assert "select --accessibility, --screen-recording, or both" in result.stderr
+
+
+def test_permission_request_explains_and_calls_only_selected_native_apis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[MacOSPermission] = []
+
+    def request(permission: MacOSPermission) -> PermissionRequestResult:
+        calls.append(permission)
+        return PermissionRequestResult(
+            permission=permission,
+            granted=permission is MacOSPermission.SCREEN_RECORDING,
+            settings_path=f"Synthetic settings for {permission.value}",
+        )
+
+    monkeypatch.setattr(cli_module, "request_collection_permission", request)
+
+    result = runner.invoke(
+        app,
+        [
+            "permissions",
+            "request",
+            "--accessibility",
+            "--screen-recording",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls == [
+        MacOSPermission.ACCESSIBILITY,
+        MacOSPermission.SCREEN_RECORDING,
+    ]
+    assert "authorized focused-window title" in result.stdout
+    assert "policy-authorized selective captures" in result.stdout
+    assert "accessibility: permission required" in result.stdout
+    assert "Synthetic settings for accessibility" in result.stdout
+    assert "screen_recording: granted" in result.stdout
 
 
 def test_model_status_preflights_without_sending_user_content(

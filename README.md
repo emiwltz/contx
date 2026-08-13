@@ -127,12 +127,13 @@ MemoryStore               (append-only historical OptMem + active OptMem generat
 Context delivered to the agent  (active wake; historical recall/zoom)
 ```
 
-The implemented v0.0.1 CLI surface is:
+The current CLI surface includes:
 
 ```text
 contx init                              # initialize paths and database, collection off
 contx status                            # inspect initialization and safe defaults
 contx capabilities                      # inspect collection permissions without prompting
+contx permissions request --accessibility --screen-recording # explicit macOS prompts
 contx pause --for 15m                   # stop collection through persisted control state
 contx resume                            # resume collection explicitly
 contx run-once --source synthetic       # deterministic end-to-end proof
