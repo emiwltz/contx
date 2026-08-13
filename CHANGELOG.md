@@ -10,6 +10,10 @@ guaranteed.
 
 ### Added
 
+- An explicitly confirmed macOS focused-window smoke harness that creates only
+  two harmless AppKit windows, proves that an intra-process focus change is
+  rejected, writes one exclusive `0600` PNG for review, requests no permission,
+  and leaves background collection unchanged.
 - An explicit, non-collecting macOS permission-request command that explains
   each selected capability and never prompts from the collector itself.
 - Detailed implementation plan from the first vertical slice through v1.

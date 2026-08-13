@@ -122,7 +122,9 @@ event-driven v0 capture path does not need.
   limits subject to target-Mac pilot evidence.
 - The real smoke test must verify callback delivery from the AppKit collector
   run loop, focused-window selection, permission UX, and rejection after a
-  deliberate focus change.
+  deliberate same-process focus change. The repository smoke harness uses only
+  two synthetic AppKit windows and requires an exact confirmation phrase before
+  any live title or pixel read.
 
 ## Residual risk
 
