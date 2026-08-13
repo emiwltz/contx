@@ -1,5 +1,6 @@
 """Focused-window ScreenCaptureKit permission and race boundaries."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -10,6 +11,7 @@ from contx.collectors.macos import (
     ApplicationMetadata,
     ScreenCaptureKitScreenshotSource,
 )
+from contx.collectors.macos.screenshots import _register_screencapturekit_metadata
 from contx.errors import CollectorUnavailableError, ScreenshotCaptureSkipped
 from contx.models import ActivityState
 
@@ -95,7 +97,7 @@ class FakeShareableContentApi:
         self,
         exclude_desktop: bool,
         on_screen_only: bool,
-        completion: object,
+        completion: Callable[[object | None, object | None], None],
     ) -> None:
         self._quartz.calls.append("shareable")
         assert exclude_desktop
@@ -103,6 +105,18 @@ class FakeShareableContentApi:
         if not self._quartz.finish_shareable:
             return
         completion(self._quartz.shareable_content, self._quartz.shareable_error)
+
+
+class FakeNativeError:
+    def __init__(self, domain: str, code: int) -> None:
+        self._domain = domain
+        self._code = code
+
+    def domain(self) -> str:
+        return self._domain
+
+    def code(self) -> int:
+        return self._code
 
 
 @dataclass
@@ -177,7 +191,7 @@ class FakeScreenshotManager:
         self,
         content_filter: FakeContentFilter,
         configuration: FakeConfiguration,
-        completion: object,
+        completion: Callable[[object | None, object | None], None],
     ) -> None:
         self._quartz.calls.append("capture")
         assert content_filter.window is not None
@@ -423,6 +437,46 @@ def test_non_shareable_or_timed_out_window_fails_closed() -> None:
     assert "capture" not in timeout.calls
 
 
+def test_native_failure_reports_only_content_free_error_identity() -> None:
+    quartz = FakeQuartz()
+    quartz.shareable_error = FakeNativeError("com.apple.ScreenCaptureKit", -3801)
+    quartz.shareable_content = None  # type: ignore[assignment]
+
+    with pytest.raises(
+        CollectorUnavailableError,
+        match=r"com\.apple\.ScreenCaptureKit code -3801",
+    ):
+        _source(quartz).capture_png(_sample())
+
+    unsafe = FakeQuartz()
+    unsafe.shareable_error = FakeNativeError("private window title", -1)
+    unsafe.shareable_content = None  # type: ignore[assignment]
+    with pytest.raises(CollectorUnavailableError, match=r"\(native error\)$"):
+        _source(unsafe).capture_png(_sample())
+
+
+def test_screencapturekit_completion_metadata_has_exact_native_types() -> None:
+    registry = FakeMetadataRegistry()
+
+    _register_screencapturekit_metadata(registry)
+
+    assert registry.calls == [
+        (
+            b"SCShareableContent",
+            (
+                b"getShareableContentExcludingDesktopWindows:"
+                b"onScreenWindowsOnly:completionHandler:"
+            ),
+            b"@",
+        ),
+        (
+            b"SCScreenshotManager",
+            b"captureImageWithFilter:configuration:completionHandler:",
+            b"^{CGImage=}",
+        ),
+    ]
+
+
 def test_large_retina_window_is_bounded_without_changing_aspect_ratio() -> None:
     quartz = FakeQuartz()
     quartz.content_size = (8000.0, 4000.0)
@@ -467,3 +521,31 @@ def _sample(
 
 def _metadata() -> ApplicationMetadata:
     return ApplicationMetadata("Synthetic Editor", "com.example.editor", 4242)
+
+
+class FakeMetadataRegistry:
+    def __init__(self) -> None:
+        self.calls: list[tuple[bytes, bytes, bytes]] = []
+
+    def registerMetaDataForSelector(
+        self,
+        class_name: bytes,
+        selector: bytes,
+        metadata: dict[str, object],
+    ) -> None:
+        arguments = metadata["arguments"]
+        assert isinstance(arguments, dict)
+        completion = arguments[4]
+        assert isinstance(completion, dict)
+        callable_metadata = completion["callable"]
+        assert isinstance(callable_metadata, dict)
+        assert callable_metadata["retval"] == {"type": b"v"}
+        block_arguments = callable_metadata["arguments"]
+        assert isinstance(block_arguments, dict)
+        assert block_arguments[0] == {"type": b"^v"}
+        assert block_arguments[2] == {"type": b"@"}
+        result = block_arguments[1]
+        assert isinstance(result, dict)
+        result_type = result["type"]
+        assert isinstance(result_type, bytes)
+        self.calls.append((class_name, selector, result_type))

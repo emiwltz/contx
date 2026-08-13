@@ -28,6 +28,10 @@ SHAREABLE_CONTENT_SELECTOR = (
 )
 CONTENT_FILTER_SELECTOR = "initWithDesktopIndependentWindow_"
 CAPTURE_IMAGE_SELECTOR = "captureImageWithFilter_configuration_completionHandler_"
+SHAREABLE_CONTENT_OBJC_SELECTOR = (
+    b"getShareableContentExcludingDesktopWindows:onScreenWindowsOnly:completionHandler:"
+)
+CAPTURE_IMAGE_OBJC_SELECTOR = b"captureImageWithFilter:configuration:completionHandler:"
 
 
 class FocusedWindowTitleReader(Protocol):
@@ -327,9 +331,70 @@ def _await_result(
         raise CollectorUnavailableError(failure_message) from error
     if not finished.wait(timeout_seconds):
         raise CollectorUnavailableError(timeout_message)
-    if native_error[0] is not None or result[0] is None:
+    if native_error[0] is not None:
+        identifier = _native_error_identifier(native_error[0])
+        raise CollectorUnavailableError(f"{failure_message} ({identifier})")
+    if result[0] is None:
         raise CollectorUnavailableError(failure_message)
     return result[0]
+
+
+def _native_error_identifier(error: object) -> str:
+    """Return only the content-free domain and numeric code from NSError."""
+    try:
+        native_error: Any = error
+        domain = str(native_error.domain())
+        code = int(native_error.code())
+    except Exception:
+        return "native error"
+    if (
+        not domain
+        or len(domain) > 100
+        or not all(
+            character.isascii()
+            and (character.isalnum() or character in {".", "-", "_"})
+            for character in domain
+        )
+    ):
+        return "native error"
+    return f"{domain} code {code}"
+
+
+def _register_screencapturekit_metadata(objc_module: object) -> None:
+    """Supply block signatures absent from the runtime ScreenCaptureKit bridge."""
+    try:
+        registry: Any = objc_module
+        registry.registerMetaDataForSelector(
+            b"SCShareableContent",
+            SHAREABLE_CONTENT_OBJC_SELECTOR,
+            _completion_metadata(result_type=b"@"),
+        )
+        registry.registerMetaDataForSelector(
+            b"SCScreenshotManager",
+            CAPTURE_IMAGE_OBJC_SELECTOR,
+            _completion_metadata(result_type=b"^{CGImage=}"),
+        )
+    except Exception as error:
+        raise CollectorUnavailableError(
+            "The required ScreenCaptureKit callback metadata is unavailable"
+        ) from error
+
+
+def _completion_metadata(*, result_type: bytes) -> dict[str, object]:
+    return {
+        "arguments": {
+            4: {
+                "callable": {
+                    "retval": {"type": b"v"},
+                    "arguments": {
+                        0: {"type": b"^v"},
+                        1: {"type": result_type},
+                        2: {"type": b"@"},
+                    },
+                }
+            }
+        }
+    }
 
 
 def _encode_png(quartz: ScreenCaptureKitApi, image: object) -> bytes:
@@ -367,6 +432,8 @@ def _load_quartz() -> ScreenCaptureKitApi:
         raise CollectorUnavailableError("Screen capture is available only on macOS")
     try:
         quartz = import_module("Quartz")
+        objc_module = import_module("objc")
+        _register_screencapturekit_metadata(objc_module)
         required = (
             "kCGWindowListOptionOnScreenOnly",
             "kCGWindowListExcludeDesktopElements",

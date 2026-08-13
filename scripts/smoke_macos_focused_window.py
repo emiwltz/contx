@@ -24,6 +24,11 @@ def main() -> int:
     arguments = parser.parse_args()
     if arguments.confirm != CONFIRMATION:
         parser.error(f"--confirm must be exactly: {CONFIRMATION}")
+    print(
+        "synthetic window: click the blue CONTX window if macOS does not "
+        "activate it automatically",
+        flush=True,
+    )
     try:
         result = run_focused_window_smoke(arguments.output)
     except (ContxError, OSError, ValueError) as error:

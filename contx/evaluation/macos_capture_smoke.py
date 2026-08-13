@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import os
 import struct
 import sys
 import time
+from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from importlib import import_module
 from pathlib import Path
 from threading import Event, Thread
 from types import ModuleType
-from typing import Any
+from typing import Any, Protocol, TypeVar, cast
 
 from contx.collection import ActivitySample
 from contx.collectors.macos import (
@@ -32,7 +35,21 @@ PRIMARY_TITLE = "CONTX Synthetic Focused Window"
 SECONDARY_TITLE = "CONTX Synthetic Race Window"
 CAPTURE_TIMEOUT_SECONDS = 5.0
 WORKER_TIMEOUT_SECONDS = 7.0
+APPLICATION_START_DELAY_SECONDS = 0.25
+APPLICATION_ACTIVATION_TIMEOUT_SECONDS = 10.0
+APPLICATION_ACTIVATION_POLL_SECONDS = 0.1
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+APPLICATION_EVENT_SELECTOR = (
+    "otherEventWithType_location_modifierFlags_timestamp_windowNumber_"
+    "context_subtype_data1_data2_"
+)
+ResultT = TypeVar("ResultT")
+
+
+class DelayedCallScheduler(Protocol):
+    """Schedule one callable on the main AppKit thread."""
+
+    def __call__(self, delay: float, callback: Callable[[], None]) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,9 +66,27 @@ class FocusedWindowSmokeResult:
 class _SyntheticWindowHost:
     """Own two harmless windows while servicing the main AppKit run loop."""
 
-    def __init__(self, appkit: ModuleType, foundation: ModuleType) -> None:
+    def __init__(
+        self,
+        appkit: ModuleType,
+        foundation: ModuleType,
+        *,
+        call_later: DelayedCallScheduler | None = None,
+        focus_settle_seconds: float = 0.35,
+        activation_poll_seconds: float = APPLICATION_ACTIVATION_POLL_SECONDS,
+    ) -> None:
+        if (
+            not math.isfinite(focus_settle_seconds)
+            or not math.isfinite(activation_poll_seconds)
+            or focus_settle_seconds < 0
+            or activation_poll_seconds < 0
+        ):
+            raise ValueError("AppKit smoke durations must be finite and non-negative")
         self._appkit = appkit
         self._foundation = foundation
+        self._call_later = call_later
+        self._focus_settle_seconds = focus_settle_seconds
+        self._activation_poll_seconds = activation_poll_seconds
         self._application: Any | None = None
         self._primary: Any | None = None
         self._secondary: Any | None = None
@@ -61,9 +96,11 @@ class _SyntheticWindowHost:
             raise RuntimeError("synthetic window host is already started")
         try:
             application = self._appkit.NSApplication.sharedApplication()
-            application.setActivationPolicy_(
+            policy_changed = application.setActivationPolicy_(
                 self._appkit.NSApplicationActivationPolicyRegular
             )
+            if not policy_changed:
+                raise RuntimeError("AppKit rejected the synthetic activation policy")
             self._application = application
             primary = self._create_window(
                 title=PRIMARY_TITLE,
@@ -86,6 +123,64 @@ class _SyntheticWindowHost:
                 "Cannot create the synthetic AppKit smoke windows"
             ) from error
         self.focus_primary()
+
+    def run_while_active(self, callback: Callable[[], ResultT]) -> ResultT:
+        """Run one bounded smoke workflow inside the real NSApplication loop."""
+        application = self._required_application()
+        primary = self._required_primary()
+        call_later = self._call_later or _load_call_later()
+        results: list[ResultT] = []
+        failures: list[Exception] = []
+        try:
+            application.finishLaunching()
+            primary.makeKeyAndOrderFront_(None)
+            application.activateIgnoringOtherApps_(True)
+            wake_event = self._application_wake_event()
+
+            def run_callback_and_stop() -> None:
+                try:
+                    self._wait_until_primary_is_active()
+                    results.append(callback())
+                except Exception as error:
+                    failures.append(error)
+                finally:
+                    application.stop_(None)
+                    application.postEvent_atStart_(wake_event, True)
+
+            call_later(
+                APPLICATION_START_DELAY_SECONDS,
+                run_callback_and_stop,
+            )
+            application.run()
+        except CollectorUnavailableError:
+            raise
+        except Exception as error:
+            raise CollectorUnavailableError(
+                "Cannot run the synthetic AppKit smoke workflow"
+            ) from error
+        if failures:
+            raise failures[0]
+        if len(results) != 1:
+            raise CollectorUnavailableError(
+                "The synthetic AppKit smoke workflow did not finish"
+            )
+        return results[0]
+
+    def _wait_until_primary_is_active(self) -> None:
+        application = self._required_application()
+        primary = self._required_primary()
+        deadline = time.monotonic() + APPLICATION_ACTIVATION_TIMEOUT_SECONDS
+        while True:
+            primary.makeKeyAndOrderFront_(None)
+            application.activateIgnoringOtherApps_(True)
+            self.pump(self._activation_poll_seconds)
+            if application.isActive() and primary.isKeyWindow():
+                return
+            if time.monotonic() >= deadline:
+                raise CollectorUnavailableError(
+                    "The synthetic AppKit smoke window was not activated; "
+                    "click the synthetic window while the smoke command is waiting"
+                )
 
     def focus_primary(self) -> None:
         self._focus(self._required_primary())
@@ -121,7 +216,27 @@ class _SyntheticWindowHost:
                 pass
         self._secondary = None
         self._primary = None
+        if self._application is not None:
+            with suppress(Exception):
+                self._application.deactivate()
         self._application = None
+
+    def _application_wake_event(self) -> object:
+        event_factory = getattr(
+            self._appkit.NSEvent,
+            APPLICATION_EVENT_SELECTOR,
+        )
+        return event_factory(
+            self._appkit.NSEventTypeApplicationDefined,
+            (0.0, 0.0),
+            0,
+            0.0,
+            0,
+            None,
+            0,
+            0,
+            0,
+        )
 
     def _create_window(
         self,
@@ -174,7 +289,7 @@ class _SyntheticWindowHost:
         application = self._required_application()
         window.makeKeyAndOrderFront_(None)
         application.activateIgnoringOtherApps_(True)
-        self.pump(0.35)
+        self.pump(self._focus_settle_seconds)
 
     def _required_application(self) -> Any:
         if self._application is None:
@@ -209,28 +324,22 @@ def run_focused_window_smoke(output_path: Path) -> FocusedWindowSmokeResult:
         window_title=title,
         timeout_seconds=CAPTURE_TIMEOUT_SECONDS,
     )
+    race_source = ScreenCaptureKitScreenshotSource(
+        application=application,
+        timeout_seconds=CAPTURE_TIMEOUT_SECONDS,
+    )
     try:
         host.start()
-        primary_sample = _sample_expected_window(
-            expected_title=PRIMARY_TITLE,
-            application=application,
-            window=window,
-            title=title,
+        focus_race_reason, payload = host.run_while_active(
+            lambda: _run_active_capture_workflow(
+                source=source,
+                race_source=race_source,
+                application=application,
+                window=window,
+                title=title,
+                host=host,
+            )
         )
-        host.focus_secondary()
-        focus_race_reason = _expect_focus_race_skip(
-            source,
-            primary_sample,
-            host,
-        )
-        host.focus_primary()
-        capture_sample = _sample_expected_window(
-            expected_title=PRIMARY_TITLE,
-            application=application,
-            window=window,
-            title=title,
-        )
-        payload = _capture_with_run_loop(source, capture_sample, host)
         width, height = png_dimensions(payload)
         target = write_private_png(target, payload)
     finally:
@@ -242,6 +351,38 @@ def run_focused_window_smoke(output_path: Path) -> FocusedWindowSmokeResult:
         content_hash=hashlib.sha256(payload).hexdigest(),
         focus_race_reason=focus_race_reason,
     )
+
+
+def _run_active_capture_workflow(
+    *,
+    source: ScreenCaptureKitScreenshotSource,
+    race_source: ScreenCaptureKitScreenshotSource,
+    application: WorkspaceApplicationProbe,
+    window: CoreGraphicsFocusedWindowProbe,
+    title: FocusedWindowTitleProbe,
+    host: _SyntheticWindowHost,
+) -> tuple[str, bytes]:
+    primary_sample = _sample_expected_window(
+        expected_title=PRIMARY_TITLE,
+        application=application,
+        window=window,
+        title=title,
+    )
+    host.focus_secondary()
+    focus_race_reason = _expect_focus_race_skip(
+        race_source,
+        primary_sample,
+        host,
+    )
+    host.focus_primary()
+    capture_sample = _sample_expected_window(
+        expected_title=PRIMARY_TITLE,
+        application=application,
+        window=window,
+        title=title,
+    )
+    payload = _capture_with_run_loop(source, capture_sample, host)
+    return focus_race_reason, payload
 
 
 def png_dimensions(payload: bytes) -> tuple[int, int]:
@@ -334,10 +475,7 @@ def _expect_focus_race_skip(
     try:
         _capture_with_run_loop(source, primary_sample, host)
     except ScreenshotCaptureSkipped as skipped:
-        if skipped.reason_code not in {
-            "focused_window_changed",
-            "focused_window_title_changed",
-        }:
+        if skipped.reason_code != "focused_window_changed":
             raise CollectorUnavailableError(
                 "The synthetic focus race returned an unexpected result"
             ) from skipped
@@ -392,3 +530,14 @@ def _load_native_modules() -> tuple[ModuleType, ModuleType]:
             "The macOS Cocoa bridge is unavailable for the smoke test"
         ) from error
     return appkit, foundation
+
+
+def _load_call_later() -> DelayedCallScheduler:
+    try:
+        app_helper = import_module("PyObjCTools.AppHelper")
+        call_later = app_helper.callLater
+    except (AttributeError, ImportError) as error:
+        raise CollectorUnavailableError(
+            "The PyObjC AppKit event-loop helper is unavailable"
+        ) from error
+    return cast(DelayedCallScheduler, call_later)

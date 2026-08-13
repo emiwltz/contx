@@ -81,6 +81,15 @@ capability therefore reports unavailable on older systems even though other
 CONTX capabilities may continue to work. The minimum supported version for a
 future distributed v1 remains a separate packaging decision.
 
+On the target macOS 26.5.2 environment, PyObjC 12.2.1 exposes both selected
+methods but omits their completion-block signatures from runtime metadata.
+Before resolving either selector, CONTX uses PyObjC's public manual-metadata
+registry to declare `SCShareableContent` plus `NSError` for the shareable
+content callback, and `CGImageRef` plus `NSError` for the screenshot callback.
+Without this registration the bridge can call the Python completion with two
+false `None` values. The registration is a typed bridge correction, not a
+pixel fallback or a custom native ABI.
+
 This decision changes implementation only. It does not authorize a macOS
 permission request, a live title read, a live screenshot, persistent
 collection, LaunchAgent installation, or the real-data pilot.
@@ -120,11 +129,12 @@ event-driven v0 capture path does not need.
   schemas, observations, replay identity, exports, or public API responses.
 - The current five-second timeout and 8192-pixel bound are explicit v0 resource
   limits subject to target-Mac pilot evidence.
-- The real smoke test must verify callback delivery from the AppKit collector
-  run loop, focused-window selection, permission UX, and rejection after a
-  deliberate same-process focus change. The repository smoke harness uses only
-  two synthetic AppKit windows and requires an exact confirmation phrase before
-  any live title or pixel read.
+- The authorized target-Mac smoke verified callback delivery from the real
+  `NSApplication` run loop, focused-window selection, permission UX, exact
+  title access, and `focused_window_changed` rejection after a deliberate
+  same-process focus change. The repository harness uses only two synthetic
+  AppKit windows and requires an exact confirmation phrase before any live
+  title or pixel read.
 
 ## Residual risk
 
@@ -143,11 +153,11 @@ Screenshot collection can be disabled independently without changing stored
 metadata, model, event, or memory contracts. Do not restore all-display capture
 as a fallback.
 
-If the live smoke reveals PyObjC callback deadlock, unreliable focus matching,
-or unacceptable race behavior, replace only this `ScreenshotSource` with a
-small signed Swift ScreenCaptureKit helper. The replacement must preserve the
-same exact-window input contract, fail-closed checks, timeout, dimension bound,
-no-prompt behavior, and post-capture discard rule.
+If the controlled pilot reveals PyObjC callback deadlock, unreliable focus
+matching, or unacceptable race behavior, replace only this `ScreenshotSource`
+with a small signed Swift ScreenCaptureKit helper. The replacement must
+preserve the same exact-window input contract, fail-closed checks, timeout,
+dimension bound, no-prompt behavior, and post-capture discard rule.
 
 ## Sources
 
@@ -157,3 +167,4 @@ no-prompt behavior, and post-capture discard rule.
 - [Apple `SCWindow`](https://developer.apple.com/documentation/screencapturekit/scwindow)
 - [Apple desktop-independent single-window content filter](https://developer.apple.com/documentation/screencapturekit/sccontentfilter/init%28desktopindependentwindow%3A%29)
 - [Apple ScreenCaptureKit capture sample](https://developer.apple.com/documentation/screencapturekit/capturing-screen-content-in-macos)
+- [PyObjC manual metadata loading](https://pyobjc.readthedocs.io/en/latest/metadata/manual.html)

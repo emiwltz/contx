@@ -186,10 +186,12 @@ explicit user instruction.
 | **v0.9** | **J7 real pilot** | 7–14 day pilot, ground truth, with/without CONTX comparison, error analysis, OptMem decision. |
 | **v1.0** | **J8 hardening** | Fixes, optimization, install/upgrade/uninstall, recovery, distribution, licensing, and documentation. |
 
-**Active goal:** complete the remaining authorized J1 evidence and run the
-content-minimized v0.9 real pilot. Real collector activation, macOS permission
-use, collector/processor LaunchAgent installation, and the pilot start remain separately
-action-time gated (§37 and the [implementation plan](./docs/implementation-plan.md)).
+**Active goal:** complete the remaining J1 supervision and resource evidence,
+then run the content-minimized v0.9 real pilot. The authorized macOS permission
+UX and synthetic native title/screenshot smoke are complete. Real collector
+activation, collector/processor LaunchAgent installation, and the pilot start
+remain separately action-time gated (§37 and the
+[implementation plan](./docs/implementation-plan.md)).
 
 ---
 
@@ -218,8 +220,11 @@ exactly deduplicated focused-window-only screenshots through ScreenCaptureKit
 with no display-wide fallback, a minimal AppKit menu, an audited
 single-process collection daemon, graceful shutdown, and deterministic
 collector and periodic-processor LaunchAgent manifests. Both jobs remain
-disabled by default; no LaunchAgent, live title access, live screenshot
-capture, or real-data pilot has been activated.
+disabled by default; no LaunchAgent or real-data pilot has been activated. One
+explicitly authorized target-Mac smoke used only two synthetic CONTX windows to
+confirm Accessibility title access, exact-window ScreenCaptureKit capture, and
+same-process focus-race rejection without changing configuration or starting
+background collection.
 
 The completed v0.2 foundation adds mandatory local-model settings, a
 literal-loopback-only Ollama transport, a strict multimodal interpretation
