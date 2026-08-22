@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,7 +18,7 @@ from contx.collectors.macos import (
 from contx.daemon.launch_agent import (
     LAUNCH_AGENT_LABEL,
     PROCESSOR_LAUNCH_AGENT_LABEL,
-    launch_agent_program_arguments,
+    native_host_launch_agent_program_arguments,
     processor_launch_agent_program_arguments,
     render_launch_agent,
     render_processor_launch_agent,
@@ -29,6 +30,7 @@ from contx.daemon.launch_agent_lifecycle import (
     UserLaunchAgentLifecycle,
     resolve_launch_agents_directory,
 )
+from contx.daemon.lease import probe_daemon_lease
 from contx.db import current_database_revision, head_database_revision
 from contx.errors import ConfigurationError, ContxError
 from contx.memory_store import OptMemAdapter, resolve_optmem_executable
@@ -43,8 +45,10 @@ from contx.settings import (
     set_background_collection_features,
 )
 
-COLLECTOR_EXECUTABLE_NAME = "contx-collector"
 PROCESSOR_EXECUTABLE_NAME = "contx-processor"
+NATIVE_HOST_RELATIVE_EXECUTABLE = Path("Applications/CONTX.app/Contents/MacOS/CONTX")
+DEFAULT_COLLECTOR_START_TIMEOUT_SECONDS = 10.0
+DEFAULT_COLLECTOR_START_POLL_INTERVAL_SECONDS = 0.1
 
 
 class ModelReadinessProbe(Protocol):
@@ -85,6 +89,7 @@ class BackgroundCollectionStatus:
     window_titles_enabled: bool
     screenshots_enabled: bool
     collection_paused: bool
+    collector_running: bool
     agents: tuple[LaunchAgentStatus, ...]
     problems: tuple[str, ...]
 
@@ -101,6 +106,7 @@ class BackgroundCollectionStatus:
             and self.window_titles_enabled
             and self.screenshots_enabled
             and not self.collection_paused
+            and self.collector_running
             and len(observed_labels) == len(expected_labels)
             and set(observed_labels) == expected_labels
             and all(
@@ -137,12 +143,26 @@ class BackgroundCollectionLifecycleService:
         pause_collection: Callable[[], object],
         resume_collection: Callable[[], object],
         collection_is_paused: Callable[[], bool],
+        collector_is_running: Callable[[], bool],
         platform: str = sys.platform,
         capability_detector: Callable[..., tuple[CollectionCapability, ...]] = (
             detect_collection_capabilities
         ),
         schema_is_current: Callable[[], bool] | None = None,
+        collector_start_timeout_seconds: float = (
+            DEFAULT_COLLECTOR_START_TIMEOUT_SECONDS
+        ),
+        collector_start_poll_interval_seconds: float = (
+            DEFAULT_COLLECTOR_START_POLL_INTERVAL_SECONDS
+        ),
+        monotonic: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
+        if (
+            collector_start_timeout_seconds <= 0
+            or collector_start_poll_interval_seconds <= 0
+        ):
+            raise ValueError("Collector startup wait durations must be positive")
         self._paths = paths
         self._agents = agents
         self._model = model
@@ -150,9 +170,16 @@ class BackgroundCollectionLifecycleService:
         self._pause_collection = pause_collection
         self._resume_collection = resume_collection
         self._collection_is_paused = collection_is_paused
+        self._collector_is_running = collector_is_running
         self._platform = platform
         self._capability_detector = capability_detector
         self._schema_is_current = schema_is_current or self._default_schema_is_current
+        self._collector_start_timeout_seconds = collector_start_timeout_seconds
+        self._collector_start_poll_interval_seconds = (
+            collector_start_poll_interval_seconds
+        )
+        self._monotonic = monotonic
+        self._sleep = sleep
 
     def inspect(self) -> BackgroundCollectionStatus:
         """Run content-free preflights without prompting or changing state."""
@@ -202,6 +229,11 @@ class BackgroundCollectionLifecycleService:
             for status in agent_statuses
             if status.loaded and status.manifest_state is not ManifestState.MATCHING
         )
+        problems.extend(
+            f"{status.label}:executable_unavailable"
+            for status in agent_statuses
+            if not status.executable_available
+        )
         expected_labels = {LAUNCH_AGENT_LABEL, PROCESSOR_LAUNCH_AGENT_LABEL}
         observed_labels = tuple(status.label for status in agent_statuses)
         if len(observed_labels) != len(expected_labels) or set(observed_labels) != (
@@ -213,11 +245,27 @@ class BackgroundCollectionLifecycleService:
         except ContxError:
             collection_paused = True
             problems.append("collection_control_unavailable")
+        try:
+            collector_running = self._collector_is_running()
+        except ContxError:
+            collector_running = False
+            problems.append("collector_status_unavailable")
+        collector_agent = next(
+            (status for status in agent_statuses if status.label == LAUNCH_AGENT_LABEL),
+            None,
+        )
+        if collector_running and (
+            collector_agent is None
+            or not collector_agent.loaded
+            or collector_agent.manifest_state is not ManifestState.MATCHING
+        ):
+            problems.append("collector_running_without_managed_host")
         return _status(
             settings,
             agent_statuses,
             tuple(dict.fromkeys(problems)),
             collection_paused=collection_paused,
+            collector_running=collector_running,
         )
 
     def activate(self) -> BackgroundActivationResult:
@@ -234,6 +282,10 @@ class BackgroundCollectionLifecycleService:
                 loaded_agents=(),
                 status=readiness,
             )
+        if self._collector_is_running():
+            raise ConfigurationError(
+                "Refusing activation while an unmanaged collector is running"
+            )
         created: tuple[str, ...] = ()
         loaded: tuple[str, ...] = ()
         mutation = None
@@ -246,6 +298,10 @@ class BackgroundCollectionLifecycleService:
             created = self._agents.stage()
             mutation = set_background_collection_features(self._paths, enabled=True)
             loaded = self._agents.load()
+            if not self._wait_for_collector_start():
+                raise ConfigurationError(
+                    "Native CONTX host did not start the collector while paused"
+                )
             resume_attempted = True
             self._resume_collection()
             status = self._inspect_activation_state()
@@ -302,6 +358,10 @@ class BackgroundCollectionLifecycleService:
             raise ConfigurationError(
                 "Background deactivation did not reach a stopped state"
             )
+        if status.collector_running:
+            raise ConfigurationError(
+                "Background deactivation left the collector running"
+            )
         return BackgroundDeactivationResult(
             unloaded_agents=unloaded,
             removed_manifests=removed,
@@ -315,7 +375,17 @@ class BackgroundCollectionLifecycleService:
             self._agents.inspect(),
             (),
             collection_paused=self._collection_is_paused(),
+            collector_running=self._collector_is_running(),
         )
+
+    def _wait_for_collector_start(self) -> bool:
+        deadline = self._monotonic() + self._collector_start_timeout_seconds
+        while not self._collector_is_running():
+            remaining = deadline - self._monotonic()
+            if remaining <= 0:
+                return False
+            self._sleep(min(self._collector_start_poll_interval_seconds, remaining))
+        return True
 
     def _default_schema_is_current(self) -> bool:
         return (
@@ -333,6 +403,7 @@ def build_background_collection_lifecycle(
     collection_is_paused: Callable[[], bool],
     environ: Mapping[str, str] | None = None,
     executable_directory: Path | None = None,
+    native_host_executable: Path | None = None,
     home: Path | None = None,
     user_id: int | None = None,
 ) -> BackgroundCollectionLifecycleService:
@@ -343,8 +414,10 @@ def build_background_collection_lifecycle(
         if executable_directory is None
         else executable_directory
     )
-    collector_executable = executable_root / COLLECTOR_EXECUTABLE_NAME
     processor_executable = executable_root / PROCESSOR_EXECUTABLE_NAME
+    host_executable = native_host_executable or resolve_native_host_executable(
+        home=home
+    )
     launch_agents_directory = resolve_launch_agents_directory(home=home)
     optmem_executable = resolve_optmem_executable(environment, home=home)
     manifest_environment = _managed_launch_agent_environment(
@@ -355,8 +428,11 @@ def build_background_collection_lifecycle(
         LaunchAgentSpec(
             label=LAUNCH_AGENT_LABEL,
             path=launch_agents_directory / f"{LAUNCH_AGENT_LABEL}.plist",
+            program_executable=host_executable,
             manifest=render_launch_agent(
-                program_arguments=launch_agent_program_arguments(collector_executable),
+                program_arguments=native_host_launch_agent_program_arguments(
+                    host_executable
+                ),
                 paths=paths,
                 environment_variables=manifest_environment,
             ),
@@ -364,6 +440,7 @@ def build_background_collection_lifecycle(
         LaunchAgentSpec(
             label=PROCESSOR_LAUNCH_AGENT_LABEL,
             path=(launch_agents_directory / f"{PROCESSOR_LAUNCH_AGENT_LABEL}.plist"),
+            program_executable=processor_executable,
             manifest=render_processor_launch_agent(
                 program_arguments=processor_launch_agent_program_arguments(
                     processor_executable
@@ -401,7 +478,20 @@ def build_background_collection_lifecycle(
         pause_collection=pause_collection,
         resume_collection=resume_collection,
         collection_is_paused=collection_is_paused,
+        collector_is_running=lambda: (
+            probe_daemon_lease(paths.daemon_lock).running
+            if paths.processing.is_dir()
+            else False
+        ),
     )
+
+
+def resolve_native_host_executable(*, home: Path | None = None) -> Path:
+    """Return the sole supported installed path for the native CONTX host."""
+    home_directory = Path.home() if home is None else home
+    if not home_directory.is_absolute():
+        raise ConfigurationError("Native CONTX host home must be absolute")
+    return home_directory / NATIVE_HOST_RELATIVE_EXECUTABLE
 
 
 def _managed_launch_agent_environment(
@@ -425,6 +515,7 @@ def _status(
     problems: tuple[str, ...],
     *,
     collection_paused: bool,
+    collector_running: bool,
 ) -> BackgroundCollectionStatus:
     collection = settings.collection
     return BackgroundCollectionStatus(
@@ -432,6 +523,7 @@ def _status(
         window_titles_enabled=collection.window_titles_enabled,
         screenshots_enabled=collection.screenshots_enabled,
         collection_paused=collection_paused,
+        collector_running=collector_running,
         agents=agents,
         problems=problems,
     )

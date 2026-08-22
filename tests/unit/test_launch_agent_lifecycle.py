@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import plistlib
 import stat
 from collections.abc import Sequence
 from pathlib import Path
@@ -85,6 +86,49 @@ def test_inspection_is_content_free_and_does_not_create_files(tmp_path: Path) ->
     assert not specs[0].path.parent.exists()
 
 
+def test_missing_program_is_reported_and_blocks_staging(tmp_path: Path) -> None:
+    runner = FakeLaunchctl()
+    lifecycle, specs = _lifecycle(tmp_path, runner)
+    specs[0].program_executable.unlink()
+
+    statuses = lifecycle.inspect()
+
+    assert [status.executable_available for status in statuses] == [False, True]
+    with pytest.raises(ConfigurationError, match=LABELS[0]):
+        lifecycle.stage()
+    assert not specs[0].path.parent.exists()
+
+
+def test_program_with_a_symlinked_parent_blocks_staging(tmp_path: Path) -> None:
+    runner = FakeLaunchctl()
+    lifecycle, specs = _lifecycle(tmp_path, runner)
+    executable_directory = specs[0].program_executable.parent
+    canonical_directory = tmp_path / "canonical-executables"
+    executable_directory.rename(canonical_directory)
+    executable_directory.symlink_to(canonical_directory, target_is_directory=True)
+
+    statuses = lifecycle.inspect()
+
+    assert [status.executable_available for status in statuses] == [False, False]
+    with pytest.raises(ConfigurationError, match=LABELS[0]):
+        lifecycle.stage()
+    assert not specs[0].path.parent.exists()
+
+
+def test_manifest_program_must_match_the_validated_executable(tmp_path: Path) -> None:
+    executable = _executable(tmp_path / "expected")
+
+    with pytest.raises(ValueError, match="does not match"):
+        LaunchAgentSpec(
+            label=LABELS[0],
+            path=tmp_path / f"{LABELS[0]}.plist",
+            manifest=plistlib.dumps(
+                {"ProgramArguments": [str(tmp_path / "different")]}
+            ),
+            program_executable=executable,
+        )
+
+
 def test_stage_is_private_idempotent_and_never_overwrites(tmp_path: Path) -> None:
     runner = FakeLaunchctl()
     lifecycle, specs = _lifecycle(tmp_path, runner)
@@ -158,6 +202,18 @@ def test_loads_both_jobs_together_and_is_idempotent(tmp_path: Path) -> None:
         str(_specs[0].path),
         str(_specs[1].path),
     ) in runner.calls
+
+
+def test_program_is_revalidated_immediately_before_load(tmp_path: Path) -> None:
+    runner = FakeLaunchctl()
+    lifecycle, specs = _lifecycle(tmp_path, runner)
+    lifecycle.stage()
+    specs[0].program_executable.chmod(0o600)
+
+    with pytest.raises(ConfigurationError, match=LABELS[0]):
+        lifecycle.load()
+
+    assert all(call[0] != "bootstrap" for call in runner.calls)
 
 
 def test_partial_bootstrap_failure_rolls_back_every_newly_loaded_job(
@@ -305,11 +361,13 @@ def _lifecycle(
 ) -> tuple[UserLaunchAgentLifecycle, tuple[LaunchAgentSpec, ...]]:
     wait_clock = _FakeWaitClock()
     directory = root / "LaunchAgents"
+    executable_directory = root / "executables"
+    executable_directory.mkdir()
     specs = tuple(
-        LaunchAgentSpec(
+        _spec(
             label=label,
             path=directory / f"{label}.plist",
-            manifest=f"synthetic {label}".encode(),
+            program_executable=_executable(executable_directory / label),
         )
         for label in LABELS
     )
@@ -325,6 +383,29 @@ def _lifecycle(
             sleep=wait_clock.sleep,
         ),
         specs,
+    )
+
+
+def _executable(path: Path) -> Path:
+    path.write_bytes(b"synthetic executable")
+    path.chmod(0o700)
+    return path
+
+
+def _spec(
+    *,
+    label: str,
+    path: Path,
+    program_executable: Path,
+) -> LaunchAgentSpec:
+    return LaunchAgentSpec(
+        label=label,
+        path=path,
+        manifest=plistlib.dumps(
+            {"ProgramArguments": [str(program_executable)]},
+            fmt=plistlib.FMT_XML,
+        ),
+        program_executable=program_executable,
     )
 
 

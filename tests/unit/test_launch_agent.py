@@ -8,7 +8,7 @@ import pytest
 from contx.daemon import (
     LAUNCH_AGENT_LABEL,
     PROCESSOR_LAUNCH_AGENT_LABEL,
-    launch_agent_program_arguments,
+    native_host_launch_agent_program_arguments,
     processor_launch_agent_program_arguments,
     render_launch_agent,
     render_processor_launch_agent,
@@ -22,7 +22,7 @@ def test_manifest_is_deterministic_private_and_bound_to_aqua(
 ) -> None:
     executable = _executable(tmp_path)
     paths = _paths(tmp_path)
-    arguments = launch_agent_program_arguments(executable)
+    arguments = native_host_launch_agent_program_arguments(executable)
 
     first = render_launch_agent(program_arguments=arguments, paths=paths)
     second = render_launch_agent(program_arguments=arguments, paths=paths)
@@ -46,30 +46,22 @@ def test_manifest_is_deterministic_private_and_bound_to_aqua(
     }
 
 
-def test_manifest_rejects_relative_missing_and_symlinked_executables(
+def test_manifest_requires_an_absolute_executable_reference(
     tmp_path: Path,
 ) -> None:
     paths = _paths(tmp_path)
     with pytest.raises(ConfigurationError, match="must be absolute"):
         render_launch_agent(program_arguments=("python",), paths=paths)
-    with pytest.raises(ConfigurationError, match="not a regular file"):
+    missing = tmp_path / "future-CONTX-executable"
+
+    manifest = plistlib.loads(
         render_launch_agent(
-            program_arguments=(str(tmp_path / "missing-python"),),
+            program_arguments=(str(missing),),
             paths=paths,
         )
-    executable = _executable(tmp_path)
-    link = tmp_path / "python-link"
-    link.symlink_to(executable)
-    with pytest.raises(ConfigurationError, match="must not be a symlink"):
-        render_launch_agent(program_arguments=(str(link),), paths=paths)
-    non_executable = tmp_path / "non-executable"
-    non_executable.write_bytes(b"fixture")
-    non_executable.chmod(0o600)
-    with pytest.raises(ConfigurationError, match="not executable"):
-        render_launch_agent(
-            program_arguments=(str(non_executable),),
-            paths=paths,
-        )
+    )
+
+    assert manifest["ProgramArguments"] == [str(missing)]
 
 
 def test_periodic_processor_manifest_is_bounded_and_not_kept_alive(
@@ -121,7 +113,7 @@ def test_manifest_can_propagate_only_explicit_sorted_environment(
     executable = _executable(tmp_path)
     manifest = plistlib.loads(
         render_launch_agent(
-            program_arguments=launch_agent_program_arguments(executable),
+            program_arguments=native_host_launch_agent_program_arguments(executable),
             paths=_paths(tmp_path),
             environment_variables={
                 "CONTX_RUNTIME_ROOT": "/private/runtime",
@@ -137,7 +129,7 @@ def test_manifest_can_propagate_only_explicit_sorted_environment(
 
     with pytest.raises(ConfigurationError, match="environment"):
         render_launch_agent(
-            program_arguments=launch_agent_program_arguments(executable),
+            program_arguments=native_host_launch_agent_program_arguments(executable),
             paths=_paths(tmp_path),
             environment_variables={"UNSAFE=KEY": "value"},
         )

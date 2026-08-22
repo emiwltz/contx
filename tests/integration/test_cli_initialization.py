@@ -87,6 +87,7 @@ def _background_status() -> BackgroundCollectionStatus:
         window_titles_enabled=False,
         screenshots_enabled=False,
         collection_paused=True,
+        collector_running=False,
         agents=tuple(
             LaunchAgentStatus(
                 label=label,
@@ -635,6 +636,7 @@ def test_background_status_is_read_only_and_reports_preflight(
     assert service.activations == service.deactivations == 0
     assert "background configuration: disabled" in result.stdout
     assert "collection control: paused" in result.stdout
+    assert "collector: stopped" in result.stdout
     assert "io.contx.collector: manifest=missing unloaded" in result.stdout
     assert "preflight: ready" in result.stdout
     assert "background: inactive" in result.stdout

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import plistlib
 from pathlib import Path
 
@@ -13,9 +12,11 @@ LAUNCH_AGENT_LABEL = "io.contx.collector"
 PROCESSOR_LAUNCH_AGENT_LABEL = "io.contx.processor"
 
 
-def launch_agent_program_arguments(collector_executable: Path) -> tuple[str, ...]:
-    """Build the stable argv for the dedicated collector entrypoint."""
-    executable = _validate_executable(collector_executable)
+def native_host_launch_agent_program_arguments(
+    native_host_executable: Path,
+) -> tuple[str, ...]:
+    """Build the stable argv for the signed native menu-bar host."""
+    executable = _validate_executable_reference(native_host_executable)
     return (str(executable),)
 
 
@@ -23,7 +24,7 @@ def processor_launch_agent_program_arguments(
     processor_executable: Path,
 ) -> tuple[str, ...]:
     """Build the stable argv for the dedicated periodic processor entrypoint."""
-    executable = _validate_executable(processor_executable)
+    executable = _validate_executable_reference(processor_executable)
     return (str(executable),)
 
 
@@ -38,7 +39,7 @@ def render_launch_agent(
         raise ConfigurationError("LaunchAgent program arguments must not be empty")
     if not paths.logs.is_absolute():
         raise ConfigurationError("LaunchAgent log directory must be absolute")
-    executable = _validate_executable(Path(program_arguments[0]))
+    executable = _validate_executable_reference(Path(program_arguments[0]))
     arguments = (str(executable), *program_arguments[1:])
     if any(not argument or "\x00" in argument for argument in arguments):
         raise ConfigurationError("LaunchAgent arguments contain an invalid value")
@@ -77,7 +78,7 @@ def render_processor_launch_agent(
         )
     if not paths.logs.is_absolute():
         raise ConfigurationError("LaunchAgent log directory must be absolute")
-    executable = _validate_executable(Path(program_arguments[0]))
+    executable = _validate_executable_reference(Path(program_arguments[0]))
     arguments = (str(executable), *program_arguments[1:])
     if any(not argument or "\x00" in argument for argument in arguments):
         raise ConfigurationError("LaunchAgent arguments contain an invalid value")
@@ -112,16 +113,9 @@ def _add_environment(
     manifest["EnvironmentVariables"] = dict(sorted(environment_variables.items()))
 
 
-def _validate_executable(path: Path) -> Path:
+def _validate_executable_reference(path: Path) -> Path:
     if not path.is_absolute():
         raise ConfigurationError("LaunchAgent executable path must be absolute")
-    if path.is_symlink():
-        raise ConfigurationError("LaunchAgent executable must not be a symlink")
-    try:
-        if not path.is_file():
-            raise ConfigurationError("LaunchAgent executable is not a regular file")
-    except OSError as error:
-        raise ConfigurationError("Cannot inspect LaunchAgent executable") from error
-    if not os.access(path, os.X_OK):
-        raise ConfigurationError("LaunchAgent program is not executable")
+    if "\x00" in str(path):
+        raise ConfigurationError("LaunchAgent executable path is invalid")
     return path

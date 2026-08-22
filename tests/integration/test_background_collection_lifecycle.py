@@ -62,6 +62,9 @@ class FakeAgents:
         self.fail_unload = False
         self.fail_activation_inspection = False
         self.paused = False
+        self.collector_running = False
+        self.start_collector_on_load = True
+        self.unavailable_executables: set[str] = set()
 
     def inspect(self) -> tuple[LaunchAgentStatus, ...]:
         return tuple(
@@ -72,6 +75,7 @@ class FakeAgents:
                     label in self.loaded
                     and not (self.fail_activation_inspection and label == LABELS[-1])
                 ),
+                executable_available=label not in self.unavailable_executables,
             )
             for label in LABELS
         )
@@ -96,6 +100,8 @@ class FakeAgents:
             raise ConfigurationError("synthetic load failure")
         loaded = tuple(label for label in LABELS if label not in self.loaded)
         self.loaded.update(loaded)
+        if self.start_collector_on_load:
+            self.collector_running = True
         return loaded
 
     def unload(self) -> tuple[str, ...]:
@@ -108,6 +114,7 @@ class FakeAgents:
             raise ConfigurationError("synthetic unload failure")
         unloaded = tuple(label for label in LABELS if label in self.loaded)
         self.loaded.clear()
+        self.collector_running = False
         return unloaded
 
     def unload_staged(self, labels: tuple[str, ...]) -> tuple[str, ...]:
@@ -115,6 +122,8 @@ class FakeAgents:
         assert self.paused
         for label in labels:
             self.loaded.discard(label)
+        if LABELS[0] in labels:
+            self.collector_running = False
         return labels
 
     def remove(self) -> tuple[str, ...]:
@@ -169,18 +178,68 @@ def test_readiness_checks_desired_features_without_mutating_config(
     assert agents.states == {label: ManifestState.MISSING for label in LABELS}
 
 
+def test_readiness_reports_a_missing_native_host_without_mutation(
+    tmp_path: Path,
+) -> None:
+    paths = _paths(tmp_path)
+    agents = FakeAgents(paths)
+    agents.unavailable_executables.add(LABELS[0])
+
+    status = _service(paths, agents).inspect()
+
+    assert not status.ready_to_activate
+    assert status.problems == (f"{LABELS[0]}:executable_unavailable",)
+    assert agents.states == {label: ManifestState.MISSING for label in LABELS}
+
+
+def test_unmanaged_running_collector_blocks_activation(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    agents = FakeAgents(paths)
+    agents.collector_running = True
+    service = _service(paths, agents)
+
+    status = service.inspect()
+
+    assert status.problems == ("collector_running_without_managed_host",)
+    with pytest.raises(ConfigurationError, match="preflight failed"):
+        service.activate()
+    assert agents.events == []
+
+
 def test_active_status_requires_both_exact_managed_jobs() -> None:
     status = BackgroundCollectionStatus(
         background_enabled=True,
         window_titles_enabled=True,
         screenshots_enabled=True,
         collection_paused=False,
+        collector_running=True,
         agents=(
             LaunchAgentStatus(
                 label=LABELS[0],
                 manifest_state=ManifestState.MATCHING,
                 loaded=True,
             ),
+        ),
+        problems=(),
+    )
+
+    assert not status.active
+
+
+def test_active_status_requires_a_live_collector() -> None:
+    status = BackgroundCollectionStatus(
+        background_enabled=True,
+        window_titles_enabled=True,
+        screenshots_enabled=True,
+        collection_paused=False,
+        collector_running=False,
+        agents=tuple(
+            LaunchAgentStatus(
+                label=label,
+                manifest_state=ManifestState.MATCHING,
+                loaded=True,
+            )
+            for label in LABELS
         ),
         problems=(),
     )
@@ -224,6 +283,7 @@ def test_activation_is_idempotent_when_everything_is_already_active(
     agents = FakeAgents(paths)
     agents.states = {label: ManifestState.MATCHING for label in LABELS}
     agents.loaded.update(LABELS)
+    agents.collector_running = True
     service = _service(paths, agents)
 
     result = service.activate()
@@ -231,6 +291,39 @@ def test_activation_is_idempotent_when_everything_is_already_active(
     assert result.created_manifests == result.loaded_agents == ()
     assert result.status.active
     assert agents.events == []
+
+
+def test_activation_keeps_pause_until_collector_is_live_and_rolls_back_timeout(
+    tmp_path: Path,
+) -> None:
+    paths = _paths(tmp_path)
+    agents = FakeAgents(paths)
+    agents.start_collector_on_load = False
+    wait_clock = _FakeWaitClock()
+    service = _service(
+        paths,
+        agents,
+        collector_start_timeout_seconds=0.5,
+        monotonic=wait_clock.monotonic,
+        sleep=wait_clock.sleep,
+    )
+    original = paths.config_file.read_bytes()
+
+    with pytest.raises(ConfigurationError, match="while paused"):
+        service.activate()
+
+    assert paths.config_file.read_bytes() == original
+    assert agents.loaded == set()
+    assert not agents.collector_running
+    assert not agents.paused
+    assert agents.events == [
+        "pause",
+        "stage",
+        "load",
+        "rollback-unload",
+        "rollback-remove",
+        "resume",
+    ]
 
 
 def test_activation_failure_restores_exact_disabled_state(tmp_path: Path) -> None:
@@ -429,6 +522,9 @@ def _service(
     collection_is_paused: object | None = None,
     capability_detector: object | None = None,
     schema_is_current: object | None = None,
+    collector_start_timeout_seconds: float = 10.0,
+    monotonic: object | None = None,
+    sleep: object | None = None,
 ) -> BackgroundCollectionLifecycleService:
     def default_pause() -> None:
         agents.events.append("pause")
@@ -459,10 +555,25 @@ def _service(
         pause_collection=pause_callable,
         resume_collection=resume_callable,
         collection_is_paused=paused_callable,
+        collector_is_running=lambda: agents.collector_running,
         platform="darwin",
         capability_detector=detector,
         schema_is_current=schema,
+        collector_start_timeout_seconds=collector_start_timeout_seconds,
+        monotonic=(monotonic if callable(monotonic) else lambda: 0.0),
+        sleep=(sleep if callable(sleep) else lambda _seconds: None),
     )
+
+
+class _FakeWaitClock:
+    def __init__(self) -> None:
+        self.current = 0.0
+
+    def monotonic(self) -> float:
+        return self.current
+
+    def sleep(self, seconds: float) -> None:
+        self.current += seconds
 
 
 def _paths(root: Path) -> RuntimePaths:

@@ -8,7 +8,7 @@ from contx.daemon.factory import (
 from contx.daemon.launch_agent import (
     LAUNCH_AGENT_LABEL,
     PROCESSOR_LAUNCH_AGENT_LABEL,
-    launch_agent_program_arguments,
+    native_host_launch_agent_program_arguments,
     processor_launch_agent_program_arguments,
     render_launch_agent,
     render_processor_launch_agent,
@@ -27,7 +27,7 @@ __all__ = [
     "GracefulStopSignalBridge",
     "LAUNCH_AGENT_LABEL",
     "PROCESSOR_LAUNCH_AGENT_LABEL",
-    "launch_agent_program_arguments",
+    "native_host_launch_agent_program_arguments",
     "processor_launch_agent_program_arguments",
     "probe_daemon_lease",
     "render_launch_agent",

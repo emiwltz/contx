@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import plistlib
 import stat
 import subprocess
 import time
@@ -40,6 +41,7 @@ class LaunchAgentSpec:
     label: str
     path: Path
     manifest: bytes
+    program_executable: Path
 
     def __post_init__(self) -> None:
         if not self.label or any(character in self.label for character in "\x00/\r\n"):
@@ -48,6 +50,24 @@ class LaunchAgentSpec:
             raise ValueError("LaunchAgent path must be absolute and label-derived")
         if not self.manifest or len(self.manifest) > MAX_MANIFEST_BYTES:
             raise ValueError("LaunchAgent manifest size is invalid")
+        if not self.program_executable.is_absolute():
+            raise ValueError("LaunchAgent program executable must be absolute")
+        try:
+            payload = plistlib.loads(self.manifest)
+            arguments = payload["ProgramArguments"]
+        except (
+            KeyError,
+            TypeError,
+            ValueError,
+            plistlib.InvalidFileException,
+        ) as error:
+            raise ValueError("LaunchAgent manifest program is invalid") from error
+        if (
+            not isinstance(arguments, list)
+            or not arguments
+            or arguments[0] != str(self.program_executable)
+        ):
+            raise ValueError("LaunchAgent manifest program does not match its spec")
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +77,7 @@ class LaunchAgentStatus:
     label: str
     manifest_state: ManifestState
     loaded: bool
+    executable_available: bool = True
 
 
 class LaunchctlRunner(Protocol):
@@ -142,12 +163,14 @@ class UserLaunchAgentLifecycle:
                 label=spec.label,
                 manifest_state=_manifest_state(spec),
                 loaded=self._is_loaded(spec.label),
+                executable_available=_executable_is_available(spec.program_executable),
             )
             for spec in self._specs
         )
 
     def stage(self) -> tuple[str, ...]:
         """Create only missing exact manifests and never overwrite a file."""
+        self._validate_program_executables()
         _ensure_managed_directory(self._directory)
         created: list[LaunchAgentSpec] = []
         try:
@@ -177,6 +200,7 @@ class UserLaunchAgentLifecycle:
 
     def load(self) -> tuple[str, ...]:
         """Load every staged job and roll back newly loaded jobs on failure."""
+        self._validate_program_executables()
         statuses = self.inspect()
         _require_matching_manifests(statuses)
         missing = tuple(
@@ -278,6 +302,13 @@ class UserLaunchAgentLifecycle:
     def _is_loaded(self, label: str) -> bool:
         return self._runner.run(("print", self._service_target(label))) == 0
 
+    def _validate_program_executables(self) -> None:
+        for spec in self._specs:
+            if not _executable_is_available(spec.program_executable):
+                raise ConfigurationError(
+                    f"LaunchAgent program is unavailable or unsafe: {spec.label}"
+                )
+
     def _wait_until_unloaded(self, label: str) -> bool:
         """Allow launchd's accepted bootout to finish before declaring failure."""
         deadline = self._monotonic() + self._stop_timeout_seconds
@@ -339,6 +370,18 @@ def _manifest_state(spec: LaunchAgentSpec) -> ManifestState:
         if content == spec.manifest
         else ManifestState.CONFLICTING
     )
+
+
+def _executable_is_available(path: Path) -> bool:
+    try:
+        return (
+            path.is_file()
+            and not path.is_symlink()
+            and path.resolve(strict=True) == path
+            and os.access(path, os.X_OK)
+        )
+    except OSError:
+        return False
 
 
 def _require_matching_manifests(statuses: tuple[LaunchAgentStatus, ...]) -> None:

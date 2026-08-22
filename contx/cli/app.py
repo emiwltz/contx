@@ -406,6 +406,7 @@ def background_status() -> None:
     typer.echo(
         "collection control: " + ("paused" if status.collection_paused else "unpaused")
     )
+    typer.echo("collector: " + ("running" if status.collector_running else "stopped"))
     for agent in status.agents:
         loaded = "loaded" if agent.loaded else "unloaded"
         typer.echo(f"{agent.label}: manifest={agent.manifest_state.value} {loaded}")
