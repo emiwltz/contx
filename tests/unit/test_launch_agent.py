@@ -33,8 +33,6 @@ def test_manifest_is_deterministic_private_and_bound_to_aqua(
         "Label": LAUNCH_AGENT_LABEL,
         "ProgramArguments": [
             str(executable),
-            "-m",
-            "contx.daemon.entrypoint",
         ],
         "LimitLoadToSessionType": "Aqua",
         "RunAtLoad": True,
@@ -93,8 +91,6 @@ def test_periodic_processor_manifest_is_bounded_and_not_kept_alive(
         "Label": PROCESSOR_LAUNCH_AGENT_LABEL,
         "ProgramArguments": [
             str(executable),
-            "-m",
-            "contx.processing.entrypoint",
         ],
         "LimitLoadToSessionType": "Aqua",
         "RunAtLoad": True,
@@ -116,6 +112,34 @@ def test_processor_manifest_rejects_an_unbounded_interval(tmp_path: Path) -> Non
             program_arguments=processor_launch_agent_program_arguments(executable),
             paths=_paths(tmp_path),
             interval_seconds=59,
+        )
+
+
+def test_manifest_can_propagate_only_explicit_sorted_environment(
+    tmp_path: Path,
+) -> None:
+    executable = _executable(tmp_path)
+    manifest = plistlib.loads(
+        render_launch_agent(
+            program_arguments=launch_agent_program_arguments(executable),
+            paths=_paths(tmp_path),
+            environment_variables={
+                "CONTX_RUNTIME_ROOT": "/private/runtime",
+                "CONTX_OPTMEM_EXECUTABLE": "/private/optmem/memo",
+            },
+        )
+    )
+
+    assert manifest["EnvironmentVariables"] == {
+        "CONTX_OPTMEM_EXECUTABLE": "/private/optmem/memo",
+        "CONTX_RUNTIME_ROOT": "/private/runtime",
+    }
+
+    with pytest.raises(ConfigurationError, match="environment"):
+        render_launch_agent(
+            program_arguments=launch_agent_program_arguments(executable),
+            paths=_paths(tmp_path),
+            environment_variables={"UNSAFE=KEY": "value"},
         )
 
 

@@ -13,9 +13,18 @@ from typer.testing import CliRunner
 
 import contx.cli.app as cli_module
 from contx.application import ActiveMemoryProjectionResult, ActiveMemoryWakeResult
+from contx.application.background_collection import (
+    BackgroundActivationResult,
+    BackgroundCollectionStatus,
+    BackgroundDeactivationResult,
+)
 from contx.cli.app import app
 from contx.collectors.macos import MacOSPermission, PermissionRequestResult
 from contx.daemon import DaemonLease
+from contx.daemon.launch_agent_lifecycle import (
+    LaunchAgentStatus,
+    ManifestState,
+)
 from contx.db import create_database_engine, session_scope
 from contx.db.models import EventModel, MemoryLinkModel
 from contx.db.repositories import EventCorrectionRepository, PipelineRepository
@@ -42,6 +51,52 @@ from tests.helpers import FixedClock
 
 runner = CliRunner()
 MODEL = DEFAULT_MODEL
+
+
+class RecordingBackgroundLifecycle:
+    def __init__(self, status: BackgroundCollectionStatus) -> None:
+        self.status = status
+        self.inspections = 0
+        self.activations = 0
+        self.deactivations = 0
+
+    def inspect(self) -> BackgroundCollectionStatus:
+        self.inspections += 1
+        return self.status
+
+    def activate(self) -> BackgroundActivationResult:
+        self.activations += 1
+        return BackgroundActivationResult(
+            created_manifests=("io.contx.collector", "io.contx.processor"),
+            loaded_agents=("io.contx.collector", "io.contx.processor"),
+            status=self.status,
+        )
+
+    def deactivate(self) -> BackgroundDeactivationResult:
+        self.deactivations += 1
+        return BackgroundDeactivationResult(
+            unloaded_agents=("io.contx.collector", "io.contx.processor"),
+            removed_manifests=("io.contx.collector", "io.contx.processor"),
+            status=self.status,
+        )
+
+
+def _background_status() -> BackgroundCollectionStatus:
+    return BackgroundCollectionStatus(
+        background_enabled=False,
+        window_titles_enabled=False,
+        screenshots_enabled=False,
+        collection_paused=True,
+        agents=tuple(
+            LaunchAgentStatus(
+                label=label,
+                manifest_state=ManifestState.MISSING,
+                loaded=False,
+            )
+            for label in ("io.contx.collector", "io.contx.processor")
+        ),
+        problems=(),
+    )
 
 
 class RecordingCorrectionComposer:
@@ -565,6 +620,82 @@ def test_permission_request_explains_and_calls_only_selected_native_apis(
     assert "accessibility: permission required" in result.stdout
     assert "Synthetic settings for accessibility" in result.stdout
     assert "screen_recording: granted" in result.stdout
+
+
+def test_background_status_is_read_only_and_reports_preflight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = RecordingBackgroundLifecycle(_background_status())
+    monkeypatch.setattr(cli_module, "_build_background_lifecycle", lambda: service)
+
+    result = runner.invoke(app, ["background", "status"])
+
+    assert result.exit_code == 0
+    assert service.inspections == 1
+    assert service.activations == service.deactivations == 0
+    assert "background configuration: disabled" in result.stdout
+    assert "collection control: paused" in result.stdout
+    assert "io.contx.collector: manifest=missing unloaded" in result.stdout
+    assert "preflight: ready" in result.stdout
+    assert "background: inactive" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("command", "wrong_confirmation"),
+    (
+        ("activate", "ENABLE SOMETHING ELSE"),
+        ("deactivate", "DISABLE SOMETHING ELSE"),
+    ),
+)
+def test_background_mutation_requires_exact_confirmation(
+    command: str,
+    wrong_confirmation: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        cli_module,
+        "_build_background_lifecycle",
+        lambda: pytest.fail("no background mutation expected"),
+    )
+
+    result = runner.invoke(
+        app,
+        ["background", command, "--confirm", wrong_confirmation],
+    )
+
+    assert result.exit_code == 2
+    assert "confirmation must be" in result.stderr
+
+
+def test_background_activate_and_deactivate_call_only_explicit_service_actions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = RecordingBackgroundLifecycle(_background_status())
+    monkeypatch.setattr(cli_module, "_build_background_lifecycle", lambda: service)
+
+    activated = runner.invoke(
+        app,
+        [
+            "background",
+            "activate",
+            "--confirm",
+            cli_module.ENABLE_BACKGROUND_CONFIRMATION,
+        ],
+    )
+    deactivated = runner.invoke(
+        app,
+        [
+            "background",
+            "deactivate",
+            "--confirm",
+            cli_module.DISABLE_BACKGROUND_CONFIRMATION,
+        ],
+    )
+
+    assert activated.exit_code == deactivated.exit_code == 0
+    assert service.activations == service.deactivations == 1
+    assert "background: active" in activated.stdout
+    assert "background: disabled and paused" in deactivated.stdout
 
 
 def test_model_status_preflights_without_sending_user_content(

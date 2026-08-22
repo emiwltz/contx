@@ -44,9 +44,29 @@ Use option 3 for v0.
 
 The collection LaunchAgent remains a continuously supervised AppKit process.
 A second LaunchAgent label, `io.contx.processor`, invokes
-`python -m contx.processing.entrypoint` as a short-lived background job. The
-job is rendered but not installed or loaded without the same action-time
-approval required for persistent real collection.
+the dedicated `contx-processor` console entrypoint as a short-lived background
+job. The continuous job invokes the corresponding `contx-collector`
+entrypoint. Dedicated regular executable scripts avoid relying on the
+environment's symlinked Python launcher and keep each launchd program explicit.
+Neither job is installed or loaded without the same action-time approval
+required for persistent real collection.
+
+The two manifests are managed as one user-scoped lifecycle. A read-only
+preflight checks existing permissions without prompting, the mandatory local
+model, the reviewed OptMem checksum, the current database schema, both
+entrypoints, and existing plist ownership. Activation stages only missing exact
+`0600` manifests without overwrite. It first persists a pause, atomically
+enables background collection, window titles and selective screenshots, and
+then bootstraps both jobs in the current `gui/<uid>` domain. Collection resumes
+only after both jobs and all three flags form a consistent active state. A
+failed or interrupted attempt pauses before rollback, unloads only jobs loaded
+by that attempt, restores exact prior configuration bytes, removes only
+manifests created by that attempt, and restores an initially unpaused control
+only after the rest of rollback succeeds. Deactivation persists an indefinite
+pause before stopping either process, then disables all three feature flags
+and removes only stopped manifests whose bytes still match CONTX's expected
+content. Any modified, symlinked, unsafe, or concurrently changed file causes
+a fail-closed result instead of replacement or deletion.
 
 The processor takes its dedicated process lease before database setup and
 holds it through engine teardown. Manual `contx process` and `contx refresh`
@@ -122,6 +142,9 @@ weakening changed-version replay.
   the literal-loopback local-model boundary.
 - Two LaunchAgent manifests must be installed, stopped, diagnosed, and removed
   together during the real pilot.
+- `contx background status` is non-mutating. `activate` and `deactivate`
+  require distinct exact confirmation phrases; neither confirmation is implied
+  by installing the package or inspecting readiness.
 - Battery/load-aware deferral is not inferred in this ADR; the pilot measures
   resource cost before that policy is added.
 

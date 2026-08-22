@@ -13,24 +13,25 @@ LAUNCH_AGENT_LABEL = "io.contx.collector"
 PROCESSOR_LAUNCH_AGENT_LABEL = "io.contx.processor"
 
 
-def launch_agent_program_arguments(python_executable: Path) -> tuple[str, ...]:
-    """Build the stable argv for the internal module entrypoint."""
-    executable = _validate_executable(python_executable)
-    return (str(executable), "-m", "contx.daemon.entrypoint")
+def launch_agent_program_arguments(collector_executable: Path) -> tuple[str, ...]:
+    """Build the stable argv for the dedicated collector entrypoint."""
+    executable = _validate_executable(collector_executable)
+    return (str(executable),)
 
 
 def processor_launch_agent_program_arguments(
-    python_executable: Path,
+    processor_executable: Path,
 ) -> tuple[str, ...]:
-    """Build the stable argv for the periodic local processor."""
-    executable = _validate_executable(python_executable)
-    return (str(executable), "-m", "contx.processing.entrypoint")
+    """Build the stable argv for the dedicated periodic processor entrypoint."""
+    executable = _validate_executable(processor_executable)
+    return (str(executable),)
 
 
 def render_launch_agent(
     *,
     program_arguments: tuple[str, ...],
     paths: RuntimePaths,
+    environment_variables: dict[str, str] | None = None,
 ) -> bytes:
     """Render a private user-agent plist without writing or loading it."""
     if not program_arguments:
@@ -54,6 +55,7 @@ def render_launch_agent(
         "StandardOutPath": str(paths.logs / "collector.stdout.log"),
         "StandardErrorPath": str(paths.logs / "collector.stderr.log"),
     }
+    _add_environment(manifest, environment_variables)
     return plistlib.dumps(manifest, fmt=plistlib.FMT_XML, sort_keys=False)
 
 
@@ -62,6 +64,7 @@ def render_processor_launch_agent(
     program_arguments: tuple[str, ...],
     paths: RuntimePaths,
     interval_seconds: int,
+    environment_variables: dict[str, str] | None = None,
 ) -> bytes:
     """Render a periodic private processor job without writing or loading it."""
     if not 60 <= interval_seconds <= 3600:
@@ -91,7 +94,22 @@ def render_processor_launch_agent(
         "StandardOutPath": str(paths.logs / "processor.stdout.log"),
         "StandardErrorPath": str(paths.logs / "processor.stderr.log"),
     }
+    _add_environment(manifest, environment_variables)
     return plistlib.dumps(manifest, fmt=plistlib.FMT_XML, sort_keys=False)
+
+
+def _add_environment(
+    manifest: dict[str, object],
+    environment_variables: dict[str, str] | None,
+) -> None:
+    if not environment_variables:
+        return
+    if any(
+        not key or "\x00" in key or "=" in key or not value or "\x00" in value
+        for key, value in environment_variables.items()
+    ):
+        raise ConfigurationError("LaunchAgent environment contains an invalid value")
+    manifest["EnvironmentVariables"] = dict(sorted(environment_variables.items()))
 
 
 def _validate_executable(path: Path) -> Path:

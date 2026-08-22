@@ -101,6 +101,10 @@ class OptMemAdapter:
     def memory_directory(self) -> Path:
         return self._memory_directory
 
+    def validate_executable(self) -> None:
+        """Verify only the reviewed executable identity without touching memory."""
+        self._validate_executable()
+
     def initialize(self) -> None:
         self._memory_directory.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         result = self._run(("init",), allow_uninitialized=True)

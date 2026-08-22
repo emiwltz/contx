@@ -134,6 +134,9 @@ contx init                              # initialize paths and database, collect
 contx status                            # inspect initialization and safe defaults
 contx capabilities                      # inspect collection permissions without prompting
 contx permissions request --accessibility --screen-recording # explicit macOS prompts
+contx background status                 # read-only model/permission/job preflight
+contx background activate --confirm "ENABLE CONTX BACKGROUND COLLECTION"
+contx background deactivate --confirm "DISABLE CONTX BACKGROUND COLLECTION"
 contx pause --for 15m                   # stop collection through persisted control state
 contx resume                            # resume collection explicitly
 contx run-once --source synthetic       # deterministic end-to-end proof
@@ -220,7 +223,16 @@ exactly deduplicated focused-window-only screenshots through ScreenCaptureKit
 with no display-wide fallback, a minimal AppKit menu, an audited
 single-process collection daemon, graceful shutdown, and deterministic
 collector and periodic-processor LaunchAgent manifests. Both jobs remain
-disabled by default; no LaunchAgent or real-data pilot has been activated. One
+disabled by default. A fail-closed user lifecycle now preflights permissions,
+the local model, OptMem, the database schema and existing plist ownership,
+holds collection paused while it atomically enables the three accepted v0
+collection flags and loads both jobs together, resumes only after the complete
+active state is verified, and rolls back only its own changes on failure.
+Interruptions use the same fail-closed rollback. Deactivation pauses first,
+unloads both jobs, disables all three flags and
+removes only unchanged CONTX-owned manifests. Both mutating commands require
+exact confirmation phrases; no LaunchAgent or real-data pilot has been
+activated. One
 explicitly authorized target-Mac smoke used only two synthetic CONTX windows to
 confirm Accessibility title access, exact-window ScreenCaptureKit capture, and
 same-process focus-race rejection without changing configuration or starting

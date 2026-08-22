@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+import sqlite3
+from datetime import datetime, timedelta
+from pathlib import Path
+from urllib.parse import quote
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from pydantic import ValidationError
@@ -10,13 +13,14 @@ from sqlalchemy import Engine
 
 from contx.db import session_scope
 from contx.db.repositories import CollectionRepository
-from contx.errors import ConfigurationError
+from contx.errors import ConfigurationError, DatabaseError
 from contx.models import (
     Clock,
     CollectionControl,
     ExclusionRule,
     ExclusionRuleType,
 )
+from contx.models.common import parse_utc
 
 _BUILT_IN_RULES: tuple[tuple[ExclusionRuleType, str], ...] = (
     (ExclusionRuleType.APP_BUNDLE_ID, "com.1password.1password"),
@@ -137,6 +141,47 @@ class CollectionControlService:
     def delete_rule(self, rule_id: UUID) -> None:
         with session_scope(self._engine) as session:
             CollectionRepository(session).delete_exclusion_rule(rule_id)
+
+
+def read_collection_pause_state(database_path: Path, *, at: datetime) -> bool:
+    """Read the effective pause state without updating persisted control state."""
+    if not database_path.is_file() or database_path.is_symlink():
+        raise DatabaseError("CONTX collection control database is unavailable")
+    uri = f"file:{quote(str(database_path), safe='/')}?mode=ro"
+    try:
+        connection = sqlite3.connect(uri, uri=True)
+        try:
+            row = connection.execute(
+                "SELECT paused_at, pause_until, updated_at "
+                "FROM collection_control WHERE id = 1"
+            ).fetchone()
+        finally:
+            connection.close()
+    except sqlite3.Error as error:
+        raise DatabaseError("CONTX collection control is unreadable") from error
+    if row is None:
+        raise DatabaseError("CONTX collection control is not initialized")
+    try:
+        control = CollectionControl(
+            paused_at=_optional_timestamp(row[0]),
+            pause_until=_optional_timestamp(row[1]),
+            updated_at=_required_timestamp(row[2]),
+        )
+        return control.is_paused(at=at)
+    except (TypeError, ValueError, ValidationError) as error:
+        raise DatabaseError("CONTX collection control is invalid") from error
+
+
+def _optional_timestamp(value: object) -> datetime | None:
+    if value is None:
+        return None
+    return _required_timestamp(value)
+
+
+def _required_timestamp(value: object) -> datetime:
+    if not isinstance(value, str):
+        raise TypeError("persisted timestamp must be text")
+    return parse_utc(value)
 
 
 def _built_in_identifier(rule_type: ExclusionRuleType, pattern: str) -> UUID:

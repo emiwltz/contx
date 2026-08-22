@@ -25,7 +25,10 @@ from contx.collection.screenshots import (
     ScreenshotTrigger,
     SelectiveScreenshotPlanner,
 )
-from contx.collection.service import CollectionControlService
+from contx.collection.service import (
+    CollectionControlService,
+    read_collection_pause_state,
+)
 
 __all__ = [
     "ActivitySample",
@@ -44,4 +47,5 @@ __all__ = [
     "SelectiveScreenshotPlanner",
     "SelectiveScreenshotService",
     "WindowTitleProbe",
+    "read_collection_pause_state",
 ]

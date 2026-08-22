@@ -30,12 +30,17 @@ from contx.application import (
     PipelineService,
     RawPurgeService,
 )
+from contx.application.background_collection import (
+    BackgroundCollectionLifecycleService,
+    build_background_collection_lifecycle,
+)
 from contx.candidates import PatternCandidateProducer
 from contx.candidates.rules import VerticalSliceCandidateProducer
 from contx.collection import (
     CollectionControlService,
     CollectionPolicy,
     ControlledMetadataCollector,
+    read_collection_pause_state,
 )
 from contx.collectors import Collector
 from contx.collectors.macos import (
@@ -124,6 +129,7 @@ memory_app = typer.Typer(help="Inspect and maintain final semantic memory.")
 proposals_app = typer.Typer(help="Review and explicitly decide agent proposals.")
 pilot_app = typer.Typer(help="Prepare and score the controlled real-data pilot.")
 permissions_app = typer.Typer(help="Inspect or explicitly request macOS access.")
+background_app = typer.Typer(help="Inspect or explicitly manage background jobs.")
 app.add_typer(exclusions_app, name="exclusions")
 app.add_typer(model_app, name="model")
 app.add_typer(timeline_app, name="timeline")
@@ -131,6 +137,10 @@ app.add_typer(memory_app, name="memory")
 app.add_typer(proposals_app, name="proposals")
 app.add_typer(pilot_app, name="pilot")
 app.add_typer(permissions_app, name="permissions")
+app.add_typer(background_app, name="background")
+
+ENABLE_BACKGROUND_CONFIRMATION = "ENABLE CONTX BACKGROUND COLLECTION"
+DISABLE_BACKGROUND_CONFIRMATION = "DISABLE CONTX BACKGROUND COLLECTION"
 
 
 class RunSource(StrEnum):
@@ -373,6 +383,94 @@ def request_permissions(
         typer.echo(f"{result.permission.value}: {state}")
         if not result.granted:
             typer.echo(f"  settings: {result.settings_path}")
+
+
+@background_app.command("status")
+def background_status() -> None:
+    """Inspect readiness and user jobs without prompting or changing state."""
+    try:
+        service = _build_background_lifecycle()
+        status = service.inspect()
+    except ContxError as error:
+        _abort(error)
+    typer.echo(
+        "background configuration: "
+        + ("enabled" if status.background_enabled else "disabled")
+    )
+    typer.echo(
+        "window titles: " + ("enabled" if status.window_titles_enabled else "disabled")
+    )
+    typer.echo(
+        "screenshots: " + ("enabled" if status.screenshots_enabled else "disabled")
+    )
+    typer.echo(
+        "collection control: " + ("paused" if status.collection_paused else "unpaused")
+    )
+    for agent in status.agents:
+        loaded = "loaded" if agent.loaded else "unloaded"
+        typer.echo(f"{agent.label}: manifest={agent.manifest_state.value} {loaded}")
+    if status.problems:
+        for problem in status.problems:
+            typer.echo(f"preflight: {problem}")
+    else:
+        typer.echo("preflight: ready")
+    typer.echo("background: " + ("active" if status.active else "inactive"))
+
+
+@background_app.command("activate")
+def activate_background_collection(
+    confirmation: Annotated[
+        str,
+        typer.Option(
+            "--confirm",
+            help=f"Exact confirmation phrase: {ENABLE_BACKGROUND_CONFIRMATION}",
+        ),
+    ],
+) -> None:
+    """Enable titles/screenshots and load both user jobs as one explicit action."""
+    if confirmation != ENABLE_BACKGROUND_CONFIRMATION:
+        raise typer.BadParameter(
+            f"confirmation must be {ENABLE_BACKGROUND_CONFIRMATION}"
+        )
+    try:
+        result = _build_background_lifecycle().activate()
+    except ContxError as error:
+        _abort(error)
+    typer.echo(
+        "manifests created: "
+        + (", ".join(result.created_manifests) or "none (already staged)")
+    )
+    typer.echo(
+        "agents loaded: " + (", ".join(result.loaded_agents) or "none (already loaded)")
+    )
+    typer.echo("background: active")
+
+
+@background_app.command("deactivate")
+def deactivate_background_collection(
+    confirmation: Annotated[
+        str,
+        typer.Option(
+            "--confirm",
+            help=f"Exact confirmation phrase: {DISABLE_BACKGROUND_CONFIRMATION}",
+        ),
+    ],
+) -> None:
+    """Pause collection, unload both user jobs, disable features, and remove plists."""
+    if confirmation != DISABLE_BACKGROUND_CONFIRMATION:
+        raise typer.BadParameter(
+            f"confirmation must be {DISABLE_BACKGROUND_CONFIRMATION}"
+        )
+    try:
+        result = _build_background_lifecycle().deactivate()
+    except ContxError as error:
+        _abort(error)
+    typer.echo(
+        "agents unloaded: "
+        + (", ".join(result.unloaded_agents) or "none (already stopped)")
+    )
+    typer.echo("manifests removed: " + (", ".join(result.removed_manifests) or "none"))
+    typer.echo("background: disabled and paused")
 
 
 @app.command()
@@ -1795,6 +1893,39 @@ def _build_local_model_provider(settings: ModelSettings) -> OllamaModelProvider:
         max_output_tokens=settings.max_output_tokens,
         max_image_bytes=settings.max_image_mb * 1024 * 1024,
         max_response_bytes=settings.max_response_kb * 1024,
+    )
+
+
+def _build_background_lifecycle() -> BackgroundCollectionLifecycleService:
+    paths = resolve_runtime_paths()
+    settings = load_settings(paths)
+    clock = SystemClock()
+
+    def pause_collection() -> None:
+        engine = create_database_engine(paths.database_file)
+        try:
+            controls = CollectionControlService(engine=engine, clock=clock)
+            controls.pause()
+        finally:
+            engine.dispose()
+
+    def resume_collection() -> None:
+        engine = create_database_engine(paths.database_file)
+        try:
+            controls = CollectionControlService(engine=engine, clock=clock)
+            controls.resume()
+        finally:
+            engine.dispose()
+
+    def collection_is_paused() -> bool:
+        return read_collection_pause_state(paths.database_file, at=clock.now())
+
+    return build_background_collection_lifecycle(
+        paths=paths,
+        settings=settings,
+        pause_collection=pause_collection,
+        resume_collection=resume_collection,
+        collection_is_paused=collection_is_paused,
     )
 
 

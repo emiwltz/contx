@@ -93,6 +93,22 @@ else:
 """
 
 
+def test_executable_preflight_does_not_initialize_or_run_optmem(
+    tmp_path: Path,
+) -> None:
+    executable, checksum = _write_executable(tmp_path, FAKE_OPTMEM)
+    memory = tmp_path / "memory"
+    adapter = OptMemAdapter(
+        executable=executable,
+        memory_directory=memory,
+        expected_sha256=checksum,
+    )
+
+    adapter.validate_executable()
+
+    assert not memory.exists()
+
+
 def test_append_replay_and_crash_recovery_are_idempotent(tmp_path: Path) -> None:
     executable, checksum = _write_executable(tmp_path, FAKE_OPTMEM)
     memory = tmp_path / "memory"
