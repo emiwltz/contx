@@ -193,9 +193,11 @@ explicit user instruction.
 supervision and resource evidence, then run the content-minimized v0.9 real
 pilot. The native `CONTX` menu host (`io.contx.desktop`) is implemented and has
 passed compile-only Apple Development signature verification. It has not been
-installed or launched. Runtime packaging, final permission wording,
-installation, attribution verification, collector/processor LaunchAgent
-activation, and the pilot start remain separately action-time gated (§37 and the
+installed or launched. A temporary disabled native-menu smoke is the next gate.
+Runtime packaging is then required before any collector-child test, followed by
+final permission wording, installation, attribution verification,
+collector/processor LaunchAgent activation, and the pilot start; all remain
+separately action-time gated (§37 and the
 [implementation plan](./docs/implementation-plan.md)).
 
 ---
