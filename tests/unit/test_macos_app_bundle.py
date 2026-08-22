@@ -186,6 +186,14 @@ def test_native_source_is_menu_and_process_only() -> None:
     validate_native_source()
 
     assert "NSStatusBar.system.statusItem" in CONTX_APP_SWIFT_SOURCE
+    assert (
+        'statusItemAutosaveName = "io.contx.desktop.status-item"'
+        in CONTX_APP_SWIFT_SOURCE
+    )
+    assert "item.autosaveName = NSStatusItem.AutosaveName" in CONTX_APP_SWIFT_SOURCE
+    assert "item.isVisible = true" in CONTX_APP_SWIFT_SOURCE
+    assert "guard item.statusBar != nil, item.isVisible" in CONTX_APP_SWIFT_SOURCE
+    assert "NSStatusBar.system.removeStatusItem(item)" in CONTX_APP_SWIFT_SOURCE
     assert "activationPolicy() == .accessory" in CONTX_APP_SWIFT_SOURCE
     assert 'button.title = "●"' in CONTX_APP_SWIFT_SOURCE
     assert 'arguments: ["status"]' in CONTX_APP_SWIFT_SOURCE

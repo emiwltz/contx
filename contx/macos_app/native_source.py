@@ -12,6 +12,8 @@ private let controlSchemaVersion = 1
 private let controlTimeoutSeconds: TimeInterval = 5.0
 private let collectorStopTimeoutSeconds: TimeInterval = 10.0
 private let maximumControlOutputBytes = 32 * 1024
+private let statusItemAutosaveName = "io.contx.desktop.status-item"
+private let statusItemIdentifier = "io.contx.desktop.status-item.button"
 
 private struct RuntimeCommand: Decodable {
     let path: String
@@ -60,6 +62,7 @@ private enum HostFailure: Error {
     case commandFailed
     case commandTimedOut
     case invalidControlResponse
+    case unavailableStatusItem
 }
 
 private enum HostViewState {
@@ -120,10 +123,15 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var timer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        buildMenu()
         NSApplication.shared.setActivationPolicy(.accessory)
         guard NSApplication.shared.activationPolicy() == .accessory else {
-            apply(viewState: .error, status: nil)
+            NSApplication.shared.terminate(nil)
+            return
+        }
+        do {
+            try buildMenu()
+        } catch {
+            NSApplication.shared.terminate(nil)
             return
         }
         apply(viewState: .starting, status: nil)
@@ -198,10 +206,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func buildMenu() {
+    private func buildMenu() throws {
         let item = NSStatusBar.system.statusItem(
             withLength: NSStatusItem.squareLength
         )
+        item.autosaveName = NSStatusItem.AutosaveName(statusItemAutosaveName)
+        item.length = NSStatusItem.squareLength
+        item.isVisible = true
+        guard item.statusBar != nil, item.isVisible, let button = item.button else {
+            NSStatusBar.system.removeStatusItem(item)
+            throw HostFailure.unavailableStatusItem
+        }
+        button.identifier = NSUserInterfaceItemIdentifier(statusItemIdentifier)
         let menu = NSMenu()
         let status = NSMenuItem(
             title: "Collection status",

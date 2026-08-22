@@ -80,7 +80,17 @@ configuration, pause, and content-free process-health state. It delegates
 pause and resume to the existing `CollectionControlService`. Resume fails
 closed unless background collection is enabled and the collector lease proves
 that the daemon is running. It never requests a privacy permission or reads
-user activity.
+user activity. Disabled configuration is itself treated as an effective pause,
+so rendering that stronger state does not open SQLite or touch its WAL
+shared-memory sidecar. Enabled states still read the durable pause contract.
+
+The host gives its single compact `NSStatusItem` a stable autosave name and
+accessibility identifier, explicitly sets its square length and visibility,
+and refuses to remain running unless AppKit provides both a system-status-bar
+attachment and a real button. This is a fail-closed programmatic availability
+check, not a substitute for direct user observation: Apple documents that
+`isVisible` may remain true while an item is temporarily hidden for lack of
+menu-bar space.
 
 When the collector sees the exact `CONTX_NATIVE_HOST=1` environment marker, it
 keeps its AppKit run loop but uses a non-visible accessory controller instead
@@ -134,6 +144,8 @@ LaunchAgent context.
 
 - Native menu state and Python collection run in separate processes, so their
   contract and failure behavior are explicit.
+- A running native host proves that AppKit accepted its status item, while a
+  separately authorized target-Mac smoke must still prove optical visibility.
 - The Python daemon still owns the audited session, exclusions, capture source,
   retention, purge, and lease.
 - A development bundle can be compiled and signed before a packaging tool is

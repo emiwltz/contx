@@ -66,18 +66,30 @@ class NativeHostControlService:
     def status(self) -> NativeHostControlStatus:
         """Read configuration, pause, and live lease state without mutation."""
         settings = load_settings(self._paths, environ={})
-        paused = read_collection_pause_state(
-            self._paths.database_file,
-            at=self._clock.now(),
-        )
+        background_enabled = settings.collection.background_collection_enabled
         collector_running = (
             probe_daemon_lease(self._paths.daemon_lock).running
             if self._paths.processing.is_dir()
             else False
         )
-        if not settings.collection.background_collection_enabled:
-            state = NativeHostState.DISABLED
-        elif not collector_running:
+
+        # Disabled collection is already an effective fail-closed pause. Avoid
+        # opening the WAL database merely to render that stronger state: even a
+        # read-only SQLite connection can update its shared-memory sidecar.
+        if not background_enabled:
+            return NativeHostControlStatus(
+                schema_version=CONTROL_SCHEMA_VERSION,
+                state=NativeHostState.DISABLED,
+                background_enabled=False,
+                collection_paused=True,
+                collector_running=collector_running,
+            )
+
+        paused = read_collection_pause_state(
+            self._paths.database_file,
+            at=self._clock.now(),
+        )
+        if not collector_running:
             state = NativeHostState.STOPPED
         elif paused:
             state = NativeHostState.PAUSED
@@ -86,7 +98,7 @@ class NativeHostControlService:
         return NativeHostControlStatus(
             schema_version=CONTROL_SCHEMA_VERSION,
             state=state,
-            background_enabled=settings.collection.background_collection_enabled,
+            background_enabled=background_enabled,
             collection_paused=paused,
             collector_running=collector_running,
         )

@@ -111,6 +111,11 @@ guaranteed.
 
 ### Changed
 
+- Native `CONTX` disabled-state polling now avoids opening SQLite entirely,
+  reports the stronger effective paused state, and leaves every runtime file
+  unchanged. The AppKit host gives its compact status item a stable identity,
+  explicitly requests visibility, and exits instead of running invisibly when
+  AppKit cannot attach a real button to the system status bar.
 - Replaced display-wide CoreGraphics screenshots with a fail-closed
   ScreenCaptureKit source that binds each authorized sample to one frontmost
   layer-0 window by a process and window ID sampled before policy evaluation,

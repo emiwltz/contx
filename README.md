@@ -193,9 +193,14 @@ explicit user instruction.
 supervision and resource evidence, then run the content-minimized v0.9 real
 pilot. The native `CONTX` menu host (`io.contx.desktop`) is implemented and has
 passed compile-only Apple Development signature verification. It has not been
-installed or launched. A temporary disabled native-menu smoke is the next gate.
-Runtime packaging is then required before any collector-child test, followed by
-final permission wording, installation, attribution verification,
+installed or activated. A first authorized disabled direct-execution smoke
+started no child and collected nothing, but its menu item was not optically
+observable and its status polling touched SQLite's shared-memory sidecar. The
+resulting non-mutating disabled-status and fail-closed status-item corrections
+are implemented; a separately authorized, normally registered temporary smoke
+is the next live gate. Runtime packaging is then required before any
+collector-child test, followed by final permission wording, installation,
+attribution verification,
 collector/processor LaunchAgent activation, and the pilot start; all remain
 separately action-time gated (§37 and the
 [implementation plan](./docs/implementation-plan.md)).

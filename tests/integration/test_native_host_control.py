@@ -14,6 +14,7 @@ from contx.daemon import DaemonLease
 from contx.db import create_database_engine, upgrade_database
 from contx.errors import ConfigurationError
 from contx.macos_app import NativeHostControlService, NativeHostState
+from contx.macos_app import control as native_control
 from contx.macos_app.control import run_native_host_control
 from contx.settings import RuntimePaths, initialize_runtime_paths
 from tests.helpers import FixedClock
@@ -43,6 +44,44 @@ def test_status_distinguishes_disabled_stopped_paused_and_active(
         assert not resumed.collection_paused
     finally:
         lease.release()
+
+
+def test_disabled_status_does_not_open_collection_database(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _initialized_paths(tmp_path)
+
+    def unexpected_pause_read(_database_path: Path, *, at: datetime) -> bool:
+        raise AssertionError("disabled native status must not open SQLite")
+
+    monkeypatch.setattr(
+        native_control,
+        "read_collection_pause_state",
+        unexpected_pause_read,
+    )
+
+    status = NativeHostControlService(
+        paths=paths,
+        clock=FixedClock(NOW),
+    ).status()
+
+    assert status.state is NativeHostState.DISABLED
+    assert status.collection_paused
+    assert not status.collector_running
+
+
+def test_repeated_disabled_status_does_not_mutate_runtime_files(
+    tmp_path: Path,
+) -> None:
+    paths = _initialized_paths(tmp_path)
+    service = NativeHostControlService(paths=paths, clock=FixedClock(NOW))
+    before = _runtime_file_snapshot(paths)
+
+    statuses = [service.status() for _ in range(3)]
+
+    assert all(status.state is NativeHostState.DISABLED for status in statuses)
+    assert _runtime_file_snapshot(paths) == before
 
 
 def test_resume_fails_closed_without_enabled_live_collector(tmp_path: Path) -> None:
@@ -137,3 +176,21 @@ def _enable_background(paths: RuntimePaths) -> None:
     )
     paths.config_file.write_text(configured, encoding="utf-8")
     paths.config_file.chmod(0o600)
+
+
+def _runtime_file_snapshot(
+    paths: RuntimePaths,
+) -> dict[str, tuple[bytes, int, int]]:
+    snapshot: dict[str, tuple[bytes, int, int]] = {}
+    for root in (paths.application_support, paths.caches, paths.logs):
+        for path in sorted(root.rglob("*")):
+            if not path.is_file():
+                continue
+            file_status = path.stat()
+            relative = path.relative_to(root)
+            snapshot[f"{root.name}/{relative}"] = (
+                path.read_bytes(),
+                file_status.st_mtime_ns,
+                file_status.st_ctime_ns,
+            )
+    return snapshot
