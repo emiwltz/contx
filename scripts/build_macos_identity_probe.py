@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 BUNDLE_IDENTIFIER = "io.contx.identity-probe"
@@ -143,11 +144,27 @@ _FORBIDDEN_SWIFT_TOKENS = (
 )
 
 
-class IdentityProbeBuildError(RuntimeError):
-    """Report a bounded prototype build failure."""
+class MacOSProbeBuildError(RuntimeError):
+    """Report a bounded macOS prototype build failure."""
+
+
+IdentityProbeBuildError = MacOSProbeBuildError
 
 
 CommandRunner = Callable[[Sequence[str]], None]
+
+
+@dataclass(frozen=True, slots=True)
+class ProbeBundleSpec:
+    """Describe one private, disposable macOS probe bundle."""
+
+    bundle_identifier: str
+    bundle_name: str
+    executable_name: str
+    swift_source: str
+    frameworks: tuple[str, ...]
+    resources: tuple[tuple[str, bytes], ...] = ()
+    info_plist_values: tuple[tuple[str, object], ...] = ()
 
 
 def build_identity_probe_bundle(
@@ -157,12 +174,33 @@ def build_identity_probe_bundle(
     run_command: CommandRunner | None = None,
 ) -> Path:
     """Build one new private app bundle without launching or registering it."""
-    if platform != "darwin":
-        raise IdentityProbeBuildError(
-            "The CONTX identity probe can be built only on macOS"
-        )
-    destination = _validate_destination(output)
     _validate_swift_source()
+    return build_macos_probe_bundle(
+        output,
+        spec=ProbeBundleSpec(
+            bundle_identifier=BUNDLE_IDENTIFIER,
+            bundle_name=BUNDLE_NAME,
+            executable_name=EXECUTABLE_NAME,
+            swift_source=IDENTITY_PROBE_SWIFT_SOURCE,
+            frameworks=("AppKit", "Foundation"),
+        ),
+        platform=platform,
+        run_command=run_command,
+    )
+
+
+def build_macos_probe_bundle(
+    output: Path,
+    *,
+    spec: ProbeBundleSpec,
+    platform: str = sys.platform,
+    run_command: CommandRunner | None = None,
+) -> Path:
+    """Atomically build and ad-hoc sign one private macOS probe bundle."""
+    if platform != "darwin":
+        raise MacOSProbeBuildError("A macOS probe can be built only on macOS")
+    _validate_bundle_spec(spec)
+    destination = _validate_destination(output)
     runner = run_command or _run_command
     temporary_root = Path(
         tempfile.mkdtemp(
@@ -179,30 +217,23 @@ def build_identity_probe_bundle(
     os.chmod(contents, PRIVATE_DIRECTORY_MODE)
     os.chmod(executable_directory, PRIVATE_DIRECTORY_MODE)
     source_file = temporary_root / "IdentityProbe.swift"
-    executable = executable_directory / EXECUTABLE_NAME
+    executable = executable_directory / spec.executable_name
     info_plist = contents / "Info.plist"
     try:
-        source_file.write_text(IDENTITY_PROBE_SWIFT_SOURCE, encoding="utf-8")
+        source_file.write_text(spec.swift_source, encoding="utf-8")
         os.chmod(source_file, PRIVATE_FILE_MODE)
-        runner(
-            (
-                "xcrun",
-                "swiftc",
-                str(source_file),
-                "-framework",
-                "AppKit",
-                "-framework",
-                "Foundation",
-                "-o",
-                str(executable),
-            )
-        )
+        compiler_command = ["xcrun", "swiftc", str(source_file)]
+        for framework in spec.frameworks:
+            compiler_command.extend(("-framework", framework))
+        compiler_command.extend(("-o", str(executable)))
+        runner(tuple(compiler_command))
         if not executable.is_file():
-            raise IdentityProbeBuildError(
-                "Swift did not create the CONTX identity probe executable"
+            raise MacOSProbeBuildError(
+                "Swift did not create the macOS probe executable"
             )
         os.chmod(executable, PRIVATE_EXECUTABLE_MODE)
-        _write_info_plist(info_plist)
+        _write_resources(contents, spec.resources)
+        _write_info_plist(info_plist, spec)
         runner(
             (
                 "/usr/bin/codesign",
@@ -211,7 +242,7 @@ def build_identity_probe_bundle(
                 "-",
                 "--timestamp=none",
                 "--identifier",
-                BUNDLE_IDENTIFIER,
+                spec.bundle_identifier,
                 str(staged_app),
             )
         )
@@ -227,13 +258,48 @@ def build_identity_probe_bundle(
         os.replace(staged_app, destination)
     except Exception:
         if destination.exists():
-            raise IdentityProbeBuildError(
-                "Identity probe build unexpectedly touched the destination"
+            raise MacOSProbeBuildError(
+                "macOS probe build unexpectedly touched the destination"
             ) from None
         raise
     finally:
         shutil.rmtree(temporary_root, ignore_errors=True)
     return destination
+
+
+def _validate_bundle_spec(spec: ProbeBundleSpec) -> None:
+    text_values = (
+        spec.bundle_identifier,
+        spec.bundle_name,
+        spec.executable_name,
+        *spec.frameworks,
+    )
+    if any(
+        not value or any(character in value for character in "\r\n\0")
+        for value in text_values
+    ):
+        raise MacOSProbeBuildError("macOS probe specification contains invalid text")
+    if not spec.swift_source.strip() or "\0" in spec.swift_source:
+        raise MacOSProbeBuildError("macOS probe Swift source is invalid")
+    if any(character in spec.executable_name for character in "/:"):
+        raise MacOSProbeBuildError("macOS probe executable name is invalid")
+    if any(character in spec.bundle_identifier for character in "/:"):
+        raise MacOSProbeBuildError("macOS probe bundle identifier is invalid")
+    resource_names = [name for name, _content in spec.resources]
+    if len(resource_names) != len(set(resource_names)):
+        raise MacOSProbeBuildError("macOS probe resource names must be unique")
+    if any(
+        not name or name != Path(name).name or name.startswith(".")
+        for name in resource_names
+    ):
+        raise MacOSProbeBuildError("macOS probe resource name is invalid")
+    info_keys = [key for key, _value in spec.info_plist_values]
+    if len(info_keys) != len(set(info_keys)):
+        raise MacOSProbeBuildError("macOS probe Info.plist keys must be unique")
+    if any(
+        not key or any(character in key for character in "\r\n\0") for key in info_keys
+    ):
+        raise MacOSProbeBuildError("macOS probe Info.plist key is invalid")
 
 
 def _validate_destination(output: Path) -> Path:
@@ -275,14 +341,29 @@ def _validate_swift_source() -> None:
         )
 
 
-def _write_info_plist(path: Path) -> None:
+def _write_resources(
+    contents: Path,
+    resources: tuple[tuple[str, bytes], ...],
+) -> None:
+    if not resources:
+        return
+    resources_directory = contents / "Resources"
+    resources_directory.mkdir(mode=PRIVATE_DIRECTORY_MODE)
+    os.chmod(resources_directory, PRIVATE_DIRECTORY_MODE)
+    for name, content in resources:
+        resource = resources_directory / name
+        resource.write_bytes(content)
+        os.chmod(resource, PRIVATE_FILE_MODE)
+
+
+def _write_info_plist(path: Path, spec: ProbeBundleSpec) -> None:
     payload: dict[str, object] = {
         "CFBundleDevelopmentRegion": "en",
-        "CFBundleDisplayName": BUNDLE_NAME,
-        "CFBundleExecutable": EXECUTABLE_NAME,
-        "CFBundleIdentifier": BUNDLE_IDENTIFIER,
+        "CFBundleDisplayName": spec.bundle_name,
+        "CFBundleExecutable": spec.executable_name,
+        "CFBundleIdentifier": spec.bundle_identifier,
         "CFBundleInfoDictionaryVersion": "6.0",
-        "CFBundleName": BUNDLE_NAME,
+        "CFBundleName": spec.bundle_name,
         "CFBundlePackageType": "APPL",
         "CFBundleShortVersionString": "0.0.1",
         "CFBundleVersion": "1",
@@ -291,6 +372,10 @@ def _write_info_plist(path: Path) -> None:
         "NSHighResolutionCapable": True,
         "NSPrincipalClass": "NSApplication",
     }
+    for key, value in spec.info_plist_values:
+        if key in payload:
+            raise MacOSProbeBuildError(f"macOS probe Info.plist cannot override {key}")
+        payload[key] = value
     with path.open("wb") as file:
         plistlib.dump(payload, file, fmt=plistlib.FMT_BINARY, sort_keys=True)
     os.chmod(path, PRIVATE_FILE_MODE)
