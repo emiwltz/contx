@@ -5,5 +5,11 @@ from contx.controller.menu_bar import (
     MenuBarSnapshot,
     NativeMenuBarController,
 )
+from contx.controller.native_host_child import NativeHostChildController
 
-__all__ = ["MenuBarModel", "MenuBarSnapshot", "NativeMenuBarController"]
+__all__ = [
+    "MenuBarModel",
+    "MenuBarSnapshot",
+    "NativeHostChildController",
+    "NativeMenuBarController",
+]

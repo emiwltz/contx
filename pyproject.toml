@@ -28,6 +28,7 @@ dependencies = [
 [project.scripts]
 contx = "contx.cli.app:main"
 contx-collector = "contx.daemon.entrypoint:main"
+contx-native-control = "contx.macos_app.control:main"
 contx-processor = "contx.processing.entrypoint:main"
 
 [dependency-groups]

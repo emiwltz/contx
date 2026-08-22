@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable, Mapping
 from datetime import timedelta
 
@@ -33,7 +34,11 @@ from contx.collectors.macos import (
     WorkspaceApplicationProbe,
     WorkspaceNotificationMonitor,
 )
-from contx.controller import MenuBarModel, NativeMenuBarController
+from contx.controller import (
+    MenuBarModel,
+    NativeHostChildController,
+    NativeMenuBarController,
+)
 from contx.daemon.appkit_loop import (
     AppKitDaemonRunner,
     ApplicationLoop,
@@ -57,6 +62,8 @@ from contx.settings import (
     load_settings,
     resolve_runtime_paths,
 )
+
+NATIVE_HOST_ENV = "CONTX_NATIVE_HOST"
 
 
 class ConfiguredMacOSCollectionDaemon:
@@ -122,6 +129,7 @@ def build_macos_collection_daemon(
     signal_api: SignalApi | None = None,
 ) -> ConfiguredMacOSCollectionDaemon:
     """Build but do not start one daemon after an explicit configuration gate."""
+    environment = os.environ if environ is None else environ
     runtime_paths = paths or resolve_runtime_paths(environ)
     initialize_runtime_paths(runtime_paths)
     settings = load_settings(runtime_paths, environ)
@@ -224,11 +232,15 @@ def build_macos_collection_daemon(
             lease=lease or DaemonLease(runtime_paths.daemon_lock),
             notifications=notifications or WorkspaceNotificationMonitor(signals),
             menu=menu
-            or NativeMenuBarController(
-                MenuBarModel(
-                    controls=controls,
-                    clock=daemon_clock,
-                    collection_enabled=True,
+            or (
+                NativeHostChildController()
+                if environment.get(NATIVE_HOST_ENV) == "1"
+                else NativeMenuBarController(
+                    MenuBarModel(
+                        controls=controls,
+                        clock=daemon_clock,
+                        collection_enabled=True,
+                    )
                 )
             ),
             session=session,

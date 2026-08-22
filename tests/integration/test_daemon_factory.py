@@ -252,6 +252,60 @@ def test_enabled_screenshot_factory_uses_the_native_screencapturekit_source(
     daemon.close()
 
 
+def test_native_host_child_uses_no_python_status_item(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _paths(tmp_path)
+    initialize_runtime_paths(paths)
+    configured = paths.config_file.read_text().replace(
+        "background_collection_enabled = false",
+        "background_collection_enabled = true",
+    )
+    paths.config_file.write_text(configured)
+    child_controller = RecordingComponent()
+    python_menu_constructed = False
+
+    def build_child_controller() -> RecordingComponent:
+        return child_controller
+
+    def refuse_python_menu(*_arguments: object, **_keywords: object) -> object:
+        nonlocal python_menu_constructed
+        python_menu_constructed = True
+        raise AssertionError("Python menu must not be built under the native host")
+
+    monkeypatch.setattr(
+        factory_module,
+        "NativeHostChildController",
+        build_child_controller,
+    )
+    monkeypatch.setattr(factory_module, "NativeMenuBarController", refuse_python_menu)
+    scheduler = FakeScheduler()
+    application = FakeApplication()
+    daemon = build_macos_collection_daemon(
+        paths=paths,
+        environ={"CONTX_NATIVE_HOST": "1"},
+        clock=MutableClock(),
+        sampler=FixedSampler(),
+        notifications=RecordingComponent(),
+        lease=RecordingLease(),
+        application=application,
+        scheduler=scheduler,
+        stop_event_factory=object,
+        signal_api=FakeSignalApi(),
+    )
+
+    def stop_without_collecting() -> None:
+        daemon.request_stop()
+        scheduler.fire()
+
+    application.on_run = stop_without_collecting
+    daemon.run()
+
+    assert not python_menu_constructed
+    assert child_controller.started == child_controller.stopped == 1
+
+
 def _paths(root: Path) -> RuntimePaths:
     return RuntimePaths(
         application_support=root / "application-support",
