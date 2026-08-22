@@ -16,6 +16,8 @@ from contx.macos_app.bundle import (
     BUNDLE_NAME,
     EXECUTABLE_NAME,
     RUNTIME_CONTRACT_NAME,
+    STATUS_ITEM_TEXT_DIAGNOSTIC_COMPILER_FLAG,
+    STATUS_ITEM_TEXT_DIAGNOSTIC_INFO_KEY,
     MacOSAppBuildError,
     build_contx_app_bundle,
 )
@@ -103,6 +105,7 @@ def test_builds_private_signed_native_host_atomically(tmp_path: Path) -> None:
     assert stat.S_IMODE(info_plist.stat().st_mode) == 0o600
     assert stat.S_IMODE(runtime_contract.stat().st_mode) == 0o600
     assert toolchain.swift_source == CONTX_APP_SWIFT_SOURCE
+    assert STATUS_ITEM_TEXT_DIAGNOSTIC_COMPILER_FLAG not in toolchain.commands[0]
     assert toolchain.commands[1][0:8] == (
         "/usr/bin/codesign",
         "--force",
@@ -120,6 +123,37 @@ def test_builds_private_signed_native_host_atomically(tmp_path: Path) -> None:
         "--strict",
         "--verbose=2",
     )
+    assert list(tmp_path.glob(".*-build-*")) == []
+
+
+def test_builds_explicitly_marked_status_item_text_diagnostic(
+    tmp_path: Path,
+) -> None:
+    os.chmod(tmp_path, 0o700)
+    collector = _executable(tmp_path / "contx-collector", b"collector")
+    control = _executable(tmp_path / "contx-native-control", b"control")
+    output = tmp_path / "CONTX.app"
+    toolchain = _FakeToolchain()
+
+    result = build_contx_app_bundle(
+        output,
+        collector_executable=collector,
+        control_executable=control,
+        signing_identity="Apple Development",
+        screen_recording_usage_description=USAGE_DESCRIPTION,
+        status_item_text_diagnostic=True,
+        run_command=toolchain,
+    )
+
+    assert result == output
+    compile_command = toolchain.commands[0]
+    compiler_flag_index = compile_command.index("-D")
+    assert compile_command[compiler_flag_index + 1] == (
+        STATUS_ITEM_TEXT_DIAGNOSTIC_COMPILER_FLAG
+    )
+    with (output / "Contents/Info.plist").open("rb") as file:
+        metadata = plistlib.load(file)
+    assert metadata[STATUS_ITEM_TEXT_DIAGNOSTIC_INFO_KEY] is True
     assert list(tmp_path.glob(".*-build-*")) == []
 
 
@@ -194,6 +228,10 @@ def test_native_source_is_menu_and_process_only() -> None:
     assert "item.isVisible = true" in CONTX_APP_SWIFT_SOURCE
     assert "guard item.statusBar != nil, item.isVisible" in CONTX_APP_SWIFT_SOURCE
     assert "NSStatusBar.system.removeStatusItem(item)" in CONTX_APP_SWIFT_SOURCE
+    assert "#if CONTX_STATUS_ITEM_TEXT_DIAGNOSTIC" in CONTX_APP_SWIFT_SOURCE
+    assert 'statusItemTextDiagnosticLabel = "CONTX TEST"' in CONTX_APP_SWIFT_SOURCE
+    assert "NSStatusItem.variableLength" in CONTX_APP_SWIFT_SOURCE
+    assert "button.title = statusItemTextDiagnosticLabel" in CONTX_APP_SWIFT_SOURCE
     assert "activationPolicy() == .accessory" in CONTX_APP_SWIFT_SOURCE
     assert 'button.title = "●"' in CONTX_APP_SWIFT_SOURCE
     assert 'arguments: ["status"]' in CONTX_APP_SWIFT_SOURCE

@@ -14,6 +14,12 @@ private let collectorStopTimeoutSeconds: TimeInterval = 10.0
 private let maximumControlOutputBytes = 32 * 1024
 private let statusItemAutosaveName = "io.contx.desktop.status-item"
 private let statusItemIdentifier = "io.contx.desktop.status-item.button"
+#if CONTX_STATUS_ITEM_TEXT_DIAGNOSTIC
+private let statusItemLength = NSStatusItem.variableLength
+private let statusItemTextDiagnosticLabel = "CONTX TEST"
+#else
+private let statusItemLength = NSStatusItem.squareLength
+#endif
 
 private struct RuntimeCommand: Decodable {
     let path: String
@@ -208,10 +214,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func buildMenu() throws {
         let item = NSStatusBar.system.statusItem(
-            withLength: NSStatusItem.squareLength
+            withLength: statusItemLength
         )
         item.autosaveName = NSStatusItem.AutosaveName(statusItemAutosaveName)
-        item.length = NSStatusItem.squareLength
+        item.length = statusItemLength
         item.isVisible = true
         guard item.statusBar != nil, item.isVisible, let button = item.button else {
             NSStatusBar.system.removeStatusItem(item)
@@ -509,6 +515,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let item = statusItem, let button = item.button else {
             return
         }
+#if CONTX_STATUS_ITEM_TEXT_DIAGNOSTIC
+        button.image = nil
+        button.title = statusItemTextDiagnosticLabel
+#else
         let image = NSImage(
             systemSymbolName: viewState.symbolName,
             accessibilityDescription: "CONTX — \(viewState.statusText)"
@@ -521,6 +531,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             button.image = nil
             button.title = "●"
         }
+#endif
         button.toolTip = "CONTX — \(viewState.statusText)"
         statusLine?.title = viewState.statusText
 

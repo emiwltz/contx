@@ -10,6 +10,9 @@ guaranteed.
 
 ### Added
 
+- An explicit build-only native status-item text diagnostic that renders
+  `CONTX TEST` at variable width, marks the signed bundle as diagnostic, and
+  leaves the normal compact-symbol build unchanged.
 - An explicitly confirmed macOS focused-window smoke harness that creates only
   two harmless AppKit windows, proves that an intra-process focus change is
   rejected, writes one exclusive `0600` PNG for review, requests no permission,
@@ -115,7 +118,9 @@ guaranteed.
   reports the stronger effective paused state, and leaves every runtime file
   unchanged. The AppKit host gives its compact status item a stable identity,
   explicitly requests visibility, and exits instead of running invisibly when
-  AppKit cannot attach a real button to the system status bar.
+  AppKit cannot attach a real button to the system status bar. A subsequent
+  normally registered disabled smoke passed every process, identity, and
+  no-mutation gate but still failed human menu-bar observation.
 - Replaced display-wide CoreGraphics screenshots with a fail-closed
   ScreenCaptureKit source that binds each authorized sample to one frontmost
   layer-0 window by a process and window ID sampled before policy evaluation,

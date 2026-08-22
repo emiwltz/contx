@@ -197,8 +197,11 @@ installed or activated. A first authorized disabled direct-execution smoke
 started no child and collected nothing, but its menu item was not optically
 observable and its status polling touched SQLite's shared-memory sidecar. The
 resulting non-mutating disabled-status and fail-closed status-item corrections
-are implemented; a separately authorized, normally registered temporary smoke
-is the next live gate. Runtime packaging is then required before any
+were implemented. A second normally registered disabled smoke proved the
+correct signed identity, live host, zero child, zero runtime mutation, and exact
+cleanup, but its compact symbol was still not optically observable. An explicit
+build-only `CONTX TEST` text diagnostic is now prepared but has not been
+launched. Runtime packaging is then required before any
 collector-child test, followed by final permission wording, installation,
 attribution verification,
 collector/processor LaunchAgent activation, and the pilot start; all remain
