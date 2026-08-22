@@ -189,11 +189,13 @@ explicit user instruction.
 | **v0.9** | **J7 real pilot** | 7–14 day pilot, ground truth, with/without CONTX comparison, error analysis, OptMem decision. |
 | **v1.0** | **J8 hardening** | Fixes, optimization, install/upgrade/uninstall, recovery, distribution, licensing, and documentation. |
 
-**Active goal:** complete the remaining J1 supervision and resource evidence,
-then run the content-minimized v0.9 real pilot. The authorized macOS permission
-UX and synthetic native title/screenshot smoke are complete. Real collector
-activation, collector/processor LaunchAgent installation, and the pilot start
-remain separately action-time gated (§37 and the
+**Active goal:** finish the signed native macOS runtime and the remaining J1
+supervision and resource evidence, then run the content-minimized v0.9 real
+pilot. The native `CONTX` menu host (`io.contx.desktop`) is implemented and has
+passed compile-only Apple Development signature verification. It has not been
+installed or launched. Runtime packaging, final permission wording,
+installation, attribution verification, collector/processor LaunchAgent
+activation, and the pilot start remain separately action-time gated (§37 and the
 [implementation plan](./docs/implementation-plan.md)).
 
 ---
@@ -221,9 +223,12 @@ restart-safe purge, duration and system-state segmentation, non-prompting
 permission preflights, optional privacy-gated window titles, selective and
 exactly deduplicated focused-window-only screenshots through ScreenCaptureKit
 with no display-wide fallback, a minimal AppKit menu, an audited
-single-process collection daemon, graceful shutdown, and deterministic
-collector and periodic-processor LaunchAgent manifests. Both jobs remain
-disabled by default. A fail-closed user lifecycle now preflights permissions,
+single-process collection daemon, graceful shutdown, and deterministic native
+host and periodic-processor LaunchAgent manifests. The continuous manifest now
+targets only `~/Applications/CONTX.app/Contents/MacOS/CONTX`; the signed native
+host owns the menu and launches the digest-pinned Python collector without a
+second status item. Both jobs remain disabled by default. A fail-closed user
+lifecycle now preflights permissions,
 the local model, OptMem, the database schema and existing plist ownership,
 holds collection paused while it atomically enables the three accepted v0
 collection flags and loads both jobs together, resumes only after the complete
@@ -231,8 +236,8 @@ active state is verified, and rolls back only its own changes on failure.
 Interruptions use the same fail-closed rollback. Deactivation pauses first,
 unloads both jobs, disables all three flags and
 removes only unchanged CONTX-owned manifests. Both mutating commands require
-exact confirmation phrases; no LaunchAgent or real-data pilot has been
-activated. One
+exact confirmation phrases; no native application or LaunchAgent is installed,
+and no real-data pilot has been activated. One
 explicitly authorized target-Mac smoke used only two synthetic CONTX windows to
 confirm Accessibility title access, exact-window ScreenCaptureKit capture, and
 same-process focus-race rejection without changing configuration or starting
