@@ -1,6 +1,6 @@
 # ADR 0007: Keep the v0.1 macOS controller in Python and add Quartz
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR 0020](0020-native-macos-host.md)
 - **Date:** 2026-08-02
 - **Decision owner:** Emi
 
