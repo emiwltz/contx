@@ -12,6 +12,15 @@ from typing import Any, Protocol, cast
 from contx.errors import CollectorUnavailableError
 from contx.models import Clock, CollectionControl
 
+ACTIVE_STATUS_SYMBOL = "record.circle.fill"
+PAUSED_STATUS_SYMBOL = "pause.circle.fill"
+DISABLED_STATUS_SYMBOL = "circle.slash"
+STATUS_SYMBOL_DESCRIPTIONS = {
+    ACTIVE_STATUS_SYMBOL: "CONTX collection active",
+    PAUSED_STATUS_SYMBOL: "CONTX collection paused",
+    DISABLED_STATUS_SYMBOL: "CONTX collection disabled",
+}
+
 
 class MenuCollectionControls(Protocol):
     def control(self) -> CollectionControl: ...
@@ -23,7 +32,7 @@ class MenuCollectionControls(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class MenuBarSnapshot:
-    button_title: str
+    button_symbol_name: str
     status_text: str
     pause_enabled: bool
     resume_enabled: bool
@@ -46,7 +55,7 @@ class MenuBarModel:
     def snapshot(self) -> MenuBarSnapshot:
         if not self._collection_enabled:
             return MenuBarSnapshot(
-                button_title="CONTX ○",
+                button_symbol_name=DISABLED_STATUS_SYMBOL,
                 status_text="Collection disabled",
                 pause_enabled=False,
                 resume_enabled=False,
@@ -54,7 +63,9 @@ class MenuBarModel:
         control = self._controls.control()
         paused = control.is_paused(at=self._clock.now())
         return MenuBarSnapshot(
-            button_title="CONTX Ⅱ" if paused else "CONTX ●",
+            button_symbol_name=(
+                PAUSED_STATUS_SYMBOL if paused else ACTIVE_STATUS_SYMBOL
+            ),
             status_text="Collection paused" if paused else "Collection active",
             pause_enabled=not paused,
             resume_enabled=paused,
@@ -90,6 +101,7 @@ class NativeMenuBarController:
         self._pause_indefinitely: Any | None = None
         self._resume: Any | None = None
         self._target: Any | None = None
+        self._status_images: dict[str, Any] | None = None
 
     def start(self) -> None:
         if self._status_item is not None:
@@ -99,14 +111,19 @@ class NativeMenuBarController:
         status_item: Any | None = None
         try:
             application = appkit.NSApplication.sharedApplication()
-            application.setActivationPolicy_(
-                appkit.NSApplicationActivationPolicyAccessory
-            )
+            accessory_policy = appkit.NSApplicationActivationPolicyAccessory
+            application.setActivationPolicy_(accessory_policy)
+            if application.activationPolicy() != accessory_policy:
+                raise CollectorUnavailableError(
+                    "macOS rejected the CONTX accessory application policy"
+                )
+            status_images = _load_status_images(appkit)
             status_bar = appkit.NSStatusBar.systemStatusBar()
             status_item = status_bar.statusItemWithLength_(
-                appkit.NSVariableStatusItemLength
+                appkit.NSSquareStatusItemLength
             )
-            if status_item.button() is None:
+            button = status_item.button()
+            if button is None:
                 raise CollectorUnavailableError(
                     "macOS did not provide a menu-bar status button"
                 )
@@ -138,6 +155,19 @@ class NativeMenuBarController:
             menu.addItem_(pause_indefinitely)
             menu.addItem_(resume)
             status_item.setMenu_(menu)
+            _apply_snapshot(
+                self._model.snapshot(),
+                status_item=status_item,
+                status_line=status_line,
+                pause_fifteen=pause_fifteen,
+                pause_indefinitely=pause_indefinitely,
+                resume=resume,
+                status_images=status_images,
+            )
+            if not status_item.isVisible():
+                raise CollectorUnavailableError(
+                    "macOS did not make the CONTX menu-bar control visible"
+                )
         except Exception as error:
             cleanup_failed = _remove_partial_status_item(status_bar, status_item)
             if isinstance(error, CollectorUnavailableError):
@@ -157,7 +187,7 @@ class NativeMenuBarController:
         self._pause_indefinitely = pause_indefinitely
         self._resume = resume
         self._target = target
-        self.refresh()
+        self._status_images = status_images
 
     def refresh(self) -> MenuBarSnapshot:
         if self._status_item is None or self._status_line is None:
@@ -165,13 +195,17 @@ class NativeMenuBarController:
         assert self._pause_fifteen is not None
         assert self._pause_indefinitely is not None
         assert self._resume is not None
+        assert self._status_images is not None
         snapshot = self._model.snapshot()
-        self._status_item.button().setTitle_(snapshot.button_title)
-        self._status_item.button().setToolTip_(snapshot.status_text)
-        self._status_line.setTitle_(snapshot.status_text)
-        self._pause_fifteen.setEnabled_(snapshot.pause_enabled)
-        self._pause_indefinitely.setEnabled_(snapshot.pause_enabled)
-        self._resume.setEnabled_(snapshot.resume_enabled)
+        _apply_snapshot(
+            snapshot,
+            status_item=self._status_item,
+            status_line=self._status_line,
+            pause_fifteen=self._pause_fifteen,
+            pause_indefinitely=self._pause_indefinitely,
+            resume=self._resume,
+            status_images=self._status_images,
+        )
         return snapshot
 
     def stop(self) -> None:
@@ -185,6 +219,7 @@ class NativeMenuBarController:
         self._pause_indefinitely = None
         self._resume = None
         self._target = None
+        self._status_images = None
 
     def pause_for_fifteen_minutes(self) -> None:
         self._model.pause_for_fifteen_minutes()
@@ -212,6 +247,50 @@ def _menu_item(
     )
     item.setTarget_(target)
     return item
+
+
+def _apply_snapshot(
+    snapshot: MenuBarSnapshot,
+    *,
+    status_item: Any,
+    status_line: Any,
+    pause_fifteen: Any,
+    pause_indefinitely: Any,
+    resume: Any,
+    status_images: dict[str, Any],
+) -> None:
+    button = status_item.button()
+    if button is None:
+        raise CollectorUnavailableError("The CONTX menu-bar button disappeared")
+    try:
+        image = status_images[snapshot.button_symbol_name]
+    except KeyError as error:
+        raise CollectorUnavailableError(
+            "The CONTX menu-bar status image is unavailable"
+        ) from error
+    button.setTitle_("")
+    button.setImage_(image)
+    button.setToolTip_(f"CONTX — {snapshot.status_text}")
+    status_line.setTitle_(snapshot.status_text)
+    pause_fifteen.setEnabled_(snapshot.pause_enabled)
+    pause_indefinitely.setEnabled_(snapshot.pause_enabled)
+    resume.setEnabled_(snapshot.resume_enabled)
+
+
+def _load_status_images(appkit: ModuleType) -> dict[str, Any]:
+    images: dict[str, Any] = {}
+    for symbol_name, description in STATUS_SYMBOL_DESCRIPTIONS.items():
+        image = appkit.NSImage.imageWithSystemSymbolName_accessibilityDescription_(
+            symbol_name,
+            description,
+        )
+        if image is None:
+            raise CollectorUnavailableError(
+                f"macOS did not provide the CONTX status symbol: {symbol_name}"
+            )
+        image.setTemplate_(True)
+        images[symbol_name] = image
+    return images
 
 
 def _remove_partial_status_item(status_bar: Any, status_item: Any) -> bool:
