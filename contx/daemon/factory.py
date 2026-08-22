@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import timedelta
 
 from sqlalchemy import Engine
@@ -118,6 +118,7 @@ def build_macos_collection_daemon(
     lease: ProcessLease | None = None,
     application: ApplicationLoop | None = None,
     scheduler: CallbackScheduler | None = None,
+    stop_event_factory: Callable[[], object] | None = None,
     signal_api: SignalApi | None = None,
 ) -> ConfiguredMacOSCollectionDaemon:
     """Build but do not start one daemon after an explicit configuration gate."""
@@ -237,6 +238,7 @@ def build_macos_collection_daemon(
             poll_interval=timedelta(seconds=collection.poll_interval_seconds),
             application=application,
             scheduler=scheduler,
+            stop_event_factory=stop_event_factory,
         )
     except Exception:
         if engine is not None:

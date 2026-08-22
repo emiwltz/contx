@@ -5,7 +5,8 @@ from __future__ import annotations
 import os
 import stat
 import subprocess
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
@@ -19,6 +20,8 @@ PRIVATE_MANIFEST_MODE = 0o600
 PRIVATE_DIRECTORY_MODE = 0o700
 MAX_MANIFEST_BYTES = 64 * 1024
 DEFAULT_LAUNCHCTL_TIMEOUT_SECONDS = 10.0
+DEFAULT_STOP_TIMEOUT_SECONDS = 5.0
+DEFAULT_STOP_POLL_INTERVAL_SECONDS = 0.1
 
 
 class ManifestState(StrEnum):
@@ -108,6 +111,10 @@ class UserLaunchAgentLifecycle:
         launch_agents_directory: Path,
         user_id: int,
         runner: LaunchctlRunner | None = None,
+        stop_timeout_seconds: float = DEFAULT_STOP_TIMEOUT_SECONDS,
+        stop_poll_interval_seconds: float = DEFAULT_STOP_POLL_INTERVAL_SECONDS,
+        monotonic: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         if not specs or len({spec.label for spec in specs}) != len(specs):
             raise ValueError("LaunchAgent specs must have unique labels")
@@ -117,10 +124,16 @@ class UserLaunchAgentLifecycle:
             raise ValueError("LaunchAgent directory must be absolute")
         if any(spec.path.parent != launch_agents_directory for spec in specs):
             raise ValueError("LaunchAgent specs must share the managed directory")
+        if stop_timeout_seconds <= 0 or stop_poll_interval_seconds <= 0:
+            raise ValueError("LaunchAgent stop wait durations must be positive")
         self._specs = specs
         self._directory = launch_agents_directory
         self._domain = f"gui/{user_id}"
         self._runner = runner or SubprocessLaunchctlRunner()
+        self._stop_timeout_seconds = stop_timeout_seconds
+        self._stop_poll_interval_seconds = stop_poll_interval_seconds
+        self._monotonic = monotonic
+        self._sleep = sleep
 
     def inspect(self) -> tuple[LaunchAgentStatus, ...]:
         """Read exact manifest and loaded states without changing either."""
@@ -219,7 +232,7 @@ class UserLaunchAgentLifecycle:
             return_code = self._runner.run(
                 ("bootout", self._service_target(status.label))
             )
-            if self._is_loaded(status.label):
+            if not self._wait_until_unloaded(status.label):
                 raise ConfigurationError(
                     f"LaunchAgent did not stop: {status.label} (code {return_code})"
                 )
@@ -265,12 +278,22 @@ class UserLaunchAgentLifecycle:
     def _is_loaded(self, label: str) -> bool:
         return self._runner.run(("print", self._service_target(label))) == 0
 
+    def _wait_until_unloaded(self, label: str) -> bool:
+        """Allow launchd's accepted bootout to finish before declaring failure."""
+        deadline = self._monotonic() + self._stop_timeout_seconds
+        while self._is_loaded(label):
+            remaining = deadline - self._monotonic()
+            if remaining <= 0:
+                return False
+            self._sleep(min(self._stop_poll_interval_seconds, remaining))
+        return True
+
     def _rollback_loaded(self, labels: set[str]) -> None:
         rollback_incomplete: list[str] = []
         for label in sorted(labels):
             try:
                 self._runner.run(("bootout", self._service_target(label)))
-                if self._is_loaded(label):
+                if not self._wait_until_unloaded(label):
                     rollback_incomplete.append(label)
             except BaseException:
                 rollback_incomplete.append(label)

@@ -75,7 +75,12 @@ class FakeScheduler:
 class FakeApplication:
     def __init__(self) -> None:
         self.on_run: object | None = None
+        self.finish_calls = 0
         self.stop_calls = 0
+        self.posted_events: list[tuple[object, bool]] = []
+
+    def finishLaunching(self) -> None:
+        self.finish_calls += 1
 
     def run(self) -> None:
         assert callable(self.on_run)
@@ -85,16 +90,21 @@ class FakeApplication:
         assert sender is None
         self.stop_calls += 1
 
+    def postEvent_atStart_(self, event: object, at_start: bool) -> None:
+        self.posted_events.append((event, at_start))
+
 
 def test_loop_ticks_stops_on_request_and_cleans_up() -> None:
     lifecycle = FakeLifecycle()
     scheduler = FakeScheduler()
     application = FakeApplication()
+    stop_event = object()
     runner = AppKitDaemonRunner(
         lifecycle=lifecycle,
         poll_interval=timedelta(seconds=2),
         application=application,
         scheduler=scheduler,
+        stop_event_factory=lambda: stop_event,
     )
 
     def run_callbacks() -> None:
@@ -107,9 +117,11 @@ def test_loop_ticks_stops_on_request_and_cleans_up() -> None:
     result = runner.run()
 
     assert result is not None
+    assert application.finish_calls == 1
     assert scheduler.interval == 2.0
     assert scheduler.timer.invalidated
     assert application.stop_calls == 1
+    assert application.posted_events == [(stop_event, True)]
     assert lifecycle.events == ["start", "tick", "stop"]
 
 
@@ -117,18 +129,22 @@ def test_tick_failure_stops_appkit_and_is_raised_after_cleanup() -> None:
     lifecycle = FakeLifecycle(fail_tick=True)
     scheduler = FakeScheduler()
     application = FakeApplication()
+    stop_event = object()
     runner = AppKitDaemonRunner(
         lifecycle=lifecycle,
         poll_interval=timedelta(seconds=1),
         application=application,
         scheduler=scheduler,
+        stop_event_factory=lambda: stop_event,
     )
     application.on_run = scheduler.fire
 
     with pytest.raises(PipelineError, match="synthetic tick failure"):
         runner.run()
 
+    assert application.finish_calls == 1
     assert application.stop_calls == 1
+    assert application.posted_events == [(stop_event, True)]
     assert scheduler.timer.invalidated
     assert lifecycle.events == ["start", "tick", "stop"]
 
@@ -141,6 +157,7 @@ def test_timer_setup_failure_still_stops_started_lifecycle() -> None:
         poll_interval=timedelta(seconds=1),
         application=FakeApplication(),
         scheduler=scheduler,
+        stop_event_factory=object,
     )
 
     with pytest.raises(PipelineError, match="scheduler failure"):

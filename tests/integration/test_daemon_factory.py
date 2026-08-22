@@ -97,7 +97,12 @@ class FakeScheduler:
 class FakeApplication:
     def __init__(self) -> None:
         self.on_run: Callable[[], None] | None = None
+        self.finish_calls = 0
         self.stops = 0
+        self.posted_events: list[tuple[object, bool]] = []
+
+    def finishLaunching(self) -> None:
+        self.finish_calls += 1
 
     def run(self) -> None:
         assert self.on_run is not None
@@ -106,6 +111,9 @@ class FakeApplication:
     def stop_(self, sender: object | None) -> None:
         assert sender is None
         self.stops += 1
+
+    def postEvent_atStart_(self, event: object, at_start: bool) -> None:
+        self.posted_events.append((event, at_start))
 
 
 class FakeSignalApi:
@@ -150,6 +158,7 @@ def test_enabled_factory_runs_one_isolated_synthetic_cycle(tmp_path: Path) -> No
     menu = RecordingComponent()
     lease = RecordingLease()
     signal_api = FakeSignalApi()
+    stop_event = object()
     daemon = build_macos_collection_daemon(
         paths=paths,
         clock=clock,
@@ -159,6 +168,7 @@ def test_enabled_factory_runs_one_isolated_synthetic_cycle(tmp_path: Path) -> No
         lease=lease,
         application=application,
         scheduler=scheduler,
+        stop_event_factory=lambda: stop_event,
         signal_api=signal_api,
     )
 
@@ -175,7 +185,9 @@ def test_enabled_factory_runs_one_isolated_synthetic_cycle(tmp_path: Path) -> No
     assert result.cycles == 1
     assert result.observations == 2
     assert scheduler.timer.invalidated
+    assert application.finish_calls == 1
     assert application.stops == 1
+    assert application.posted_events == [(stop_event, True)]
     assert notifications.started == notifications.stopped == 1
     assert menu.started == menu.stopped == 1
     assert lease.acquired == lease.released == 1

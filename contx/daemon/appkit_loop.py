@@ -27,9 +27,13 @@ class DaemonLifecycle(Protocol):
 
 
 class ApplicationLoop(Protocol):
+    def finishLaunching(self) -> None: ...
+
     def run(self) -> None: ...
 
     def stop_(self, sender: object | None) -> None: ...
+
+    def postEvent_atStart_(self, event: object, at_start: bool) -> None: ...
 
 
 class ScheduledCallback(Protocol):
@@ -94,6 +98,7 @@ class AppKitDaemonRunner:
         poll_interval: timedelta,
         application: ApplicationLoop | None = None,
         scheduler: CallbackScheduler | None = None,
+        stop_event_factory: Callable[[], object] | None = None,
     ) -> None:
         if poll_interval <= timedelta(0):
             raise ValueError("collection poll interval must be positive")
@@ -101,6 +106,8 @@ class AppKitDaemonRunner:
         self._poll_interval = poll_interval
         self._application = application
         self._scheduler = scheduler
+        self._stop_event_factory = stop_event_factory
+        self._stop_event: object | None = None
         self._stop_requested = Event()
         self._failure: Exception | None = None
         self._running = False
@@ -120,6 +127,9 @@ class AppKitDaemonRunner:
         timer: ScheduledCallback | None = None
         result: ContinuousCollectionResult | None = None
         primary_error: Exception | None = None
+        application.finishLaunching()
+        stop_event_factory = self._stop_event_factory or _build_stop_event
+        self._stop_event = stop_event_factory()
         self._lifecycle.start()
         self._running = True
         try:
@@ -160,13 +170,19 @@ class AppKitDaemonRunner:
     def _timer_fired(self) -> None:
         application = self._application or _load_application()
         if self._stop_requested.is_set():
-            application.stop_(None)
+            self._stop_application(application)
             return
         try:
             self._lifecycle.tick()
         except Exception as error:
             self._failure = error
-            application.stop_(None)
+            self._stop_application(application)
+
+    def _stop_application(self, application: ApplicationLoop) -> None:
+        if self._stop_event is None:
+            raise RuntimeError("AppKit stop event is unavailable")
+        application.stop_(None)
+        application.postEvent_atStart_(self._stop_event, True)
 
 
 def _build_timer_target(callback: Callable[[], None]) -> Any:
@@ -199,18 +215,50 @@ def _build_timer_target(callback: Callable[[], None]) -> Any:
 
 
 def _load_application() -> ApplicationLoop:
+    appkit = _load_appkit()
+    try:
+        application = appkit.NSApplication.sharedApplication()
+    except AttributeError as error:
+        raise CollectorUnavailableError(
+            "The macOS Cocoa application API is unavailable"
+        ) from error
+    return cast(ApplicationLoop, application)
+
+
+def _build_stop_event() -> object:
+    appkit = _load_appkit()
+    try:
+        event = appkit.NSEvent.otherEventWithType_location_modifierFlags_timestamp_windowNumber_context_subtype_data1_data2_(  # noqa: E501
+            appkit.NSEventTypeApplicationDefined,
+            (0.0, 0.0),
+            0,
+            0.0,
+            0,
+            None,
+            0,
+            0,
+            0,
+        )
+    except (AttributeError, TypeError) as error:
+        raise CollectorUnavailableError(
+            "Cannot create the CONTX AppKit stop event"
+        ) from error
+    if event is None:
+        raise CollectorUnavailableError("macOS did not create an AppKit stop event")
+    return cast(object, event)
+
+
+def _load_appkit() -> ModuleType:
     if sys.platform != "darwin":
         raise CollectorUnavailableError(
             "The AppKit daemon loop is available only on macOS"
         )
     try:
-        appkit = import_module("AppKit")
-        application = appkit.NSApplication.sharedApplication()
-    except (ImportError, AttributeError) as error:
+        return import_module("AppKit")
+    except ImportError as error:
         raise CollectorUnavailableError(
             "The macOS Cocoa bridge is not installed or unavailable"
         ) from error
-    return cast(ApplicationLoop, application)
 
 
 def _load_foundation() -> ModuleType:

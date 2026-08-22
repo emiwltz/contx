@@ -29,13 +29,26 @@ class FakeLaunchctl:
         self.bootstrap_load_count: int | None = None
         self.bootstrap_interrupt = False
         self.stuck_bootout: set[str] = set()
+        self.delayed_bootout_prints: dict[str, int] = {}
+        self.pending_bootout: set[str] = set()
 
     def run(self, arguments: Sequence[str]) -> int:
         call = tuple(arguments)
         self.calls.append(call)
         operation = call[0]
         if operation == "print":
-            return 0 if call[1].rsplit("/", 1)[-1] in self.loaded else 113
+            label = call[1].rsplit("/", 1)[-1]
+            remaining = self.delayed_bootout_prints.get(label)
+            if (
+                label in self.pending_bootout
+                and remaining is not None
+                and remaining > 0
+            ):
+                self.delayed_bootout_prints[label] = remaining - 1
+                if remaining == 1:
+                    self.loaded.discard(label)
+                    self.pending_bootout.discard(label)
+            return 0 if label in self.loaded else 113
         if operation == "bootstrap":
             labels = tuple(Path(path).stem for path in call[2:])
             limit = (
@@ -49,7 +62,9 @@ class FakeLaunchctl:
             return self.bootstrap_return_code
         if operation == "bootout":
             label = call[1].rsplit("/", 1)[-1]
-            if label not in self.stuck_bootout:
+            if label in self.delayed_bootout_prints:
+                self.pending_bootout.add(label)
+            elif label not in self.stuck_bootout:
                 self.loaded.discard(label)
             return 0
         raise AssertionError(f"unexpected launchctl operation: {operation}")
@@ -203,6 +218,18 @@ def test_unload_then_remove_deletes_only_exact_manifests(tmp_path: Path) -> None
     assert all(not spec.path.exists() for spec in specs)
 
 
+def test_unload_waits_for_an_accepted_bootout_to_finish(tmp_path: Path) -> None:
+    runner = FakeLaunchctl()
+    lifecycle, _specs = _lifecycle(tmp_path, runner)
+    lifecycle.stage()
+    lifecycle.load()
+    runner.delayed_bootout_prints[LABELS[0]] = 2
+
+    assert lifecycle.unload() == LABELS
+    assert runner.loaded == set()
+    assert runner.calls.count(("print", f"gui/{USER_ID}/{LABELS[0]}")) >= 3
+
+
 def test_selected_rollback_removes_only_newly_staged_manifest(tmp_path: Path) -> None:
     runner = FakeLaunchctl()
     lifecycle, specs = _lifecycle(tmp_path, runner)
@@ -276,6 +303,7 @@ def _lifecycle(
     root: Path,
     runner: FakeLaunchctl,
 ) -> tuple[UserLaunchAgentLifecycle, tuple[LaunchAgentSpec, ...]]:
+    wait_clock = _FakeWaitClock()
     directory = root / "LaunchAgents"
     specs = tuple(
         LaunchAgentSpec(
@@ -291,6 +319,21 @@ def _lifecycle(
             launch_agents_directory=directory,
             user_id=USER_ID,
             runner=runner,
+            stop_timeout_seconds=0.5,
+            stop_poll_interval_seconds=0.1,
+            monotonic=wait_clock.monotonic,
+            sleep=wait_clock.sleep,
         ),
         specs,
     )
+
+
+class _FakeWaitClock:
+    def __init__(self) -> None:
+        self.current = 0.0
+
+    def monotonic(self) -> float:
+        return self.current
+
+    def sleep(self, seconds: float) -> None:
+        self.current += seconds
