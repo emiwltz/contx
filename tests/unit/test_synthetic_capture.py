@@ -1,5 +1,6 @@
 """Synthetic capture authorization and dispatch boundaries."""
 
+import json
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -35,7 +36,9 @@ def test_refuses_before_reading_content(monkeypatch, tmp_path, host, status, cap
     monkeypatch.setattr(synthetic_capture, "run_focused_window_smoke", capture)
     assert synthetic_capture.run_synthetic_capture(tmp_path / "image.png") == 2
     assert list(tmp_path.iterdir()) == []
-    assert capsys.readouterr().out == ""
+    assert json.loads(capsys.readouterr().out)["failure_site"].startswith(
+        "synthetic_capture:"
+    )
 
 
 def test_success_reports_only_synthetic_result(monkeypatch, tmp_path, capsys):

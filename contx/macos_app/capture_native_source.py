@@ -10,6 +10,15 @@ private struct SyntheticCaptureResult: Decodable {
     let focus_race_reason: String
 }
 
+private struct SyntheticCaptureFailure: Decodable {
+    let schema_version: Int
+    let failure_site: String
+}
+
+private enum SyntheticCaptureError: Error {
+    case child(String)
+}
+
 extension AppDelegate {
     @objc private func testSyntheticCapture(_ sender: Any?) {
         guard permissionSetupAvailable, !permissionBusy, !integrityFailed,
@@ -21,8 +30,10 @@ extension AppDelegate {
             + "Laissez-la au premier plan. Capture limitée à 40 secondes."
         worker.async { [weak self] in
             guard let self else { return }
+            var stage = "vérification de CONTX"
             do {
                 try self.verifyRuntime(hashAll: true)
+                stage = "vérification de l’arrêt de la collecte"
                 try Self.requireDisabledSetup(self.readControlStatus())
                 guard self.collector == nil else { throw HostFailure.commandFailed }
                 let directory = FileManager.default.temporaryDirectory
@@ -34,11 +45,21 @@ extension AppDelegate {
                     attributes: [.posixPermissions: 0o700])
                 let image: NSImage
                 do {
+                    stage = "exécution du test"
                     let target = directory.appendingPathComponent("synthetic.png")
                     let command = try self.runBoundedCommand(
                         module: "contx.daemon.entrypoint",
                         arguments: ["--synthetic-capture", target.path],
                         nativeHostChild: true, timeout: 40.0)
+                    if command.status != 0,
+                       let failure = try? JSONDecoder().decode(
+                        SyntheticCaptureFailure.self, from: command.stdout),
+                       failure.schema_version == 1,
+                       failure.failure_site.range(
+                        of: "^[a-z_]+:[0-9]+$", options: .regularExpression) != nil {
+                        throw SyntheticCaptureError.child(failure.failure_site)
+                    }
+                    stage = "validation du résultat"
                     guard command.status == 0,
                           let result = try? JSONDecoder().decode(
                             SyntheticCaptureResult.self, from: command.stdout),
@@ -57,6 +78,7 @@ extension AppDelegate {
                         throw HostFailure.invalidControlResponse
                     }
                     let data = try Data(contentsOf: target)
+                    stage = "chargement de l’image"
                     let digest = SHA256.hash(data: data)
                         .map { String(format: "%02x", $0) }.joined()
                     guard digest == result.content_hash,
@@ -94,9 +116,13 @@ extension AppDelegate {
                     if let window = self.window { alert.beginSheetModal(for: window) }
                 }
             } catch {
+                if case SyntheticCaptureError.child(let site) = error {
+                    stage = "test interne — " + site
+                }
                 self.finishPermissionAction(
-                    "Capture fictive impossible ou interrompue. Vérifiez les "
-                    + "autorisations et laissez la fenêtre de test au premier plan. "
+                    "Capture fictive impossible ou interrompue (\(stage)). "
+                    + "Vérifiez les autorisations et laissez la fenêtre fictive "
+                    + "au premier plan. "
                     + "La collecte reste désactivée.")
             }
         }

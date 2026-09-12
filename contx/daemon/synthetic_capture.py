@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import traceback
 from dataclasses import asdict
 from pathlib import Path
 
@@ -32,7 +33,14 @@ def run_synthetic_capture(output: Path) -> int:
         result = run_focused_window_smoke(output)
         print(json.dumps({"schema_version": 1, **asdict(result)}, default=str))
         return 0
-    except Exception:
+    except Exception as error:
         # Never expose a real foreground title or native exception in the UI.
+        frames = traceback.extract_tb(error.__traceback__)
+        sites = [
+            f"{Path(frame.filename).stem}:{frame.lineno}"
+            for frame in frames
+            if "/contx/" in frame.filename
+        ]
+        print(json.dumps({"schema_version": 1, "failure_site": sites[-1]}))
         sys.stderr.write("CONTX synthetic capture failed.\n")
         return 2
