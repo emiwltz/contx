@@ -17,7 +17,7 @@ Passing this checkpoint does not establish controlled-day J1 acceptance,
 | Visible disabled application | Emi sees the control and opens its disabled-state menu; no collector or runtime mutation | Passed: visible disabled window and Dock, red-close exit, unchanged runtime |
 | Stable private runtime | Accepted packaging decision covers Python, modules, native dependencies and OptMem | Passed in isolation: sealed release, native corruption refusal and signed dispatch |
 | Installation and permissions | Verified signed installation and unchanged host/child permission attribution | Installed disabled launch and close passed; native and child granted preflight observed |
-| Short collection | Controlled metadata, one capture, then 15 minutes; exclusions, pause and stop verified | Metadata pause/resume and UI close observed; automated app-switch comparison inconclusive; capture and 15-minute session pending |
+| Short collection | Controlled metadata, one capture, then 15 minutes; exclusions, pause and stop verified | Metadata pause/resume, UI close and manual Finder/Zen sequence observed; capture and 15-minute session pending |
 | One-hour session | Inspectable complete pipeline, independent activity reference, resource measurements and defect review | Pending |
 
 ## Operating agreement
@@ -125,3 +125,12 @@ Timed pause and resume also passed. The automated foreground-app comparison is
 inconclusive: targeting Finder/Spotify through accessibility did not produce the
 expected segments. No captures or model processing were enabled. Both trials
 ended disabled with unchanged normal data.
+
+## Manual foreground follow-up
+
+With no Computer Use interactions during the session, the expected main Finder
+then Zen sequence appeared as approximately 26-second and 30-second segments.
+Pause and user closure stopped the collector before cleanup; normal data remained
+unchanged, with no titles/images or model processing. See the
+[metadata trial](v0.1-metadata-only-trial.md). Prepare a controlled synthetic-window
+capture next; the automated foreground mismatch remains unexplained.
