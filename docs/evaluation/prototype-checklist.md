@@ -103,5 +103,7 @@ and verified through synthetic/native validation, including signed dispatch.
 The approved [installation plan](v0.1-installation-plan.md) has been executed
 through the first disabled launch. The final signature and inventory pass and
 runtime data is unchanged. Emi confirmed visibility and red-close disappearance; exact host exit and
-unchanged runtime state passed. Prepare the unchanged-host/child permission
-attribution experiment next. No real collection or installed LaunchAgent has been started.
+unchanged runtime state passed. Accepted ADR 0023 adds explicit permission setup. The updated signed app is
+installed with previous versions retained; its disabled state and unchanged
+data checks pass. The first user-triggered, content-free native/child permission
+verification is pending. See [setup validation](v0.1-native-permission-setup-validation.md). No real collection or installed LaunchAgent has been started.
