@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Protocol
 
 from contx.daemon.factory import (
     ConfiguredMacOSCollectionDaemon,
     build_macos_collection_daemon,
 )
+from contx.daemon.permission_preflight import run_permission_preflight
 from contx.errors import ContxError
 
 
@@ -44,8 +45,18 @@ def _write_standard_error(message: str) -> int:
     return sys.stderr.write(message)
 
 
+def run_entrypoint(arguments: Sequence[str]) -> int:
+    """Reject unknown modes before constructing a collection runtime."""
+    if list(arguments) == ["--permission-preflight"]:
+        return run_permission_preflight()
+    if arguments:
+        _write_standard_error("CONTX collector received invalid arguments.\n")
+        return 64
+    return run_collection_daemon()
+
+
 def main() -> None:
-    raise SystemExit(run_collection_daemon())
+    raise SystemExit(run_entrypoint(sys.argv[1:]))
 
 
 if __name__ == "__main__":

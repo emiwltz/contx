@@ -5,6 +5,9 @@
 - **Decision owner:** Emi
 - **Amends:** ADR 0020 control surface and collector LaunchAgent restart policy
 
+
+Permission setup is amended by accepted [ADR 0023](0023-explicit-native-permission-setup.md).
+
 ## Context and problem
 
 Two disabled symbol-menu tests and one disabled text-label test failed human

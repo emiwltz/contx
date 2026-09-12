@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from contx.macos_app.permission_native_source import PERMISSION_SWIFT_SOURCE
 from contx.macos_app.runtime_native_source import RUNTIME_VERIFY_SWIFT_SOURCE
 
 CONTX_APP_SWIFT_SOURCE = r"""import AppKit
+import ApplicationServices
+import CoreGraphics
 import CryptoKit
 import Darwin
 import Foundation
@@ -94,6 +97,24 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
     private var resumeItem: NSButton?
     private var restartItem: NSButton?
     private var timer: Timer?
+    private var permissionButtons: [NSButton] = []
+    private var permissionStatusLine: NSTextField?
+    private var permissionBusy = false
+    private var permissionSetupAvailable = false
+    private var nativePermissionAccess: () -> PermissionAccess = PermissionAccess.native
+    private var nativePermissionRequest: (PermissionAction) -> Void = { action in
+        switch action {
+        case .screenRecording: _ = CGRequestScreenCaptureAccess()
+        case .accessibility:
+            _ = AXIsProcessTrustedWithOptions(
+                [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
+                as CFDictionary)
+        case .verify: break
+        }
+    }
+    private let commandLock = NSLock()
+    private var boundedCommand: Process?
+    private var commandsCancelled = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.regular)
@@ -123,6 +144,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
         timer?.invalidate()
         timer = nil
         shuttingDown = true
+        cancelBoundedCommand()
         worker.sync {
             stopCollector()
         }
@@ -184,7 +206,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
 
     private func buildWindow() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 400),
+            contentRect: NSRect(x: 0, y: 0, width: 660, height: 580),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -217,12 +239,36 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
                             action: #selector(NSApplication.terminate(_:)))
         quit.bezelStyle = .rounded
 
+        let permissionExplanation = NSTextField(wrappingLabelWithString:
+            "Autorisations macOS : l’écran permet les captures ponctuelles ; "
+            + "l’accessibilité permet les titres de fenêtres. Autoriser ne démarre "
+            + "pas la collecte. Ces commandes nécessitent une collecte désactivée.")
+        permissionExplanation.textColor = .secondaryLabelColor
+        let screenPermission = controlButton(title: "Autoriser les captures…",
+            action: #selector(requestScreenPermission(_:)))
+        let accessibilityPermission = controlButton(title: "Autoriser les titres…",
+            action: #selector(requestAccessibilityPermission(_:)))
+        let verifyPermission = controlButton(title: "Vérifier les autorisations",
+            action: #selector(verifyPermissions(_:)))
+        let permissionRow = NSStackView(
+            views: [screenPermission, accessibilityPermission])
+        permissionRow.spacing = 8
+        let permissionStatus = NSTextField(wrappingLabelWithString:
+            "Autorisations non vérifiées. "
+            + "Aucun contenu n’est lu pendant la vérification.")
+        permissionStatus.setAccessibilityIdentifier("io.contx.desktop.permissions")
+        permissionStatusLine = permissionStatus
+        permissionButtons = [
+            screenPermission, accessibilityPermission, verifyPermission]
+
         let firstRow = NSStackView(views: [pauseFifteen, pauseIndefinitely])
         let secondRow = NSStackView(views: [resume, restart])
         firstRow.spacing = 8
         secondRow.spacing = 8
         let stack = NSStackView(views: [
-            heading, status, explanation, firstRow, secondRow, quit,
+            heading, status, explanation, firstRow, secondRow,
+            permissionExplanation, permissionRow, verifyPermission,
+            permissionStatus, quit,
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -448,10 +494,23 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
         process.environment = minimalEnvironment(nativeHostChild: nativeHostChild)
         process.standardOutput = standardOutput
         process.standardError = standardError
+        commandLock.lock()
+        guard !commandsCancelled else {
+            commandLock.unlock()
+            throw HostFailure.commandFailed
+        }
         do {
             try process.run()
+            boundedCommand = process
+            commandLock.unlock()
         } catch {
+            commandLock.unlock()
             throw HostFailure.commandFailed
+        }
+        defer {
+            commandLock.lock()
+            if boundedCommand === process { boundedCommand = nil }
+            commandLock.unlock()
         }
         guard waitForExit(process, timeout: controlTimeoutSeconds) else {
             process.terminate()
@@ -467,6 +526,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
             throw HostFailure.invalidControlResponse
         }
         return CommandResult(status: process.terminationStatus, stdout: output)
+    }
+
+    private func cancelBoundedCommand() {
+        commandLock.lock()
+        commandsCancelled = true
+        if let process = boundedCommand, process.isRunning { process.terminate() }
+        commandLock.unlock()
     }
 
     private func waitForExit(_ process: Process, timeout: TimeInterval) -> Bool {
@@ -519,6 +585,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
 
     private func apply(viewState: HostViewState, status: ControlStatus?) {
         statusLine?.stringValue = viewState.statusText
+        permissionSetupAvailable = status?.state == .disabled
+            && status?.backgroundEnabled == false && status?.collectorRunning == false
+        updatePermissionButtons()
+        if status == nil {
+            permissionStatusLine?.stringValue =
+                "CONTX est indisponible. Aucun accès n’est confirmé."
+        }
 
         let enabled = status?.backgroundEnabled == true
         let running = status?.collectorRunning == true
@@ -615,18 +688,24 @@ application.run()
 
 CONTX_APP_SWIFT_SOURCE = CONTX_APP_SWIFT_SOURCE.replace(
     "private enum ControlState",
-    RUNTIME_VERIFY_SWIFT_SOURCE + "\nprivate enum ControlState",
+    RUNTIME_VERIFY_SWIFT_SOURCE
+    + PERMISSION_SWIFT_SOURCE
+    + "\nprivate enum ControlState",
 )
 
 ALLOWED_SWIFT_IMPORTS = frozenset(
-    {"AppKit", "CryptoKit", "Darwin", "Foundation", "Security"}
+    {
+        "AppKit",
+        "ApplicationServices",
+        "CoreGraphics",
+        "CryptoKit",
+        "Darwin",
+        "Foundation",
+        "Security",
+    }
 )
 FORBIDDEN_SWIFT_TOKENS = (
-    "ApplicationServices",
-    "AXIsProcessTrusted",
     "AXUIElement",
-    "CGPreflightScreenCaptureAccess",
-    "CGRequestScreenCaptureAccess",
     "CGWindowList",
     "NSWorkspace",
     "NWConnection",
@@ -636,7 +715,7 @@ FORBIDDEN_SWIFT_TOKENS = (
 
 
 def validate_native_source() -> None:
-    """Reject accidental permission, capture, observation, or network scope."""
+    """Reject capture, observation, or network scope beyond permission setup."""
     imports = {
         line.removeprefix("import ").strip()
         for line in CONTX_APP_SWIFT_SOURCE.splitlines()

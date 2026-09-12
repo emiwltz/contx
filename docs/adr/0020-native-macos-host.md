@@ -4,6 +4,9 @@
 - **Date:** 2026-08-22
 - **Decision owner:** Emi
 
+
+Permission setup is amended by accepted [ADR 0023](0023-explicit-native-permission-setup.md).
+
 ## Context
 
 ADR 0007 kept the menu-bar controller in the Python collector until target-Mac

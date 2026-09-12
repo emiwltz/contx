@@ -101,6 +101,10 @@ def build_contx_app_bundle(
                 "Foundation",
                 "-framework",
                 "Security",
+                "-framework",
+                "ApplicationServices",
+                "-framework",
+                "CoreGraphics",
                 "-o",
                 str(executable),
             )
