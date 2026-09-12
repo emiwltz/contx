@@ -21,11 +21,11 @@ def native_host_launch_agent_program_arguments(
 
 
 def processor_launch_agent_program_arguments(
-    processor_executable: Path,
+    native_host_executable: Path,
 ) -> tuple[str, ...]:
-    """Build the stable argv for the dedicated periodic processor entrypoint."""
-    executable = _validate_executable_reference(processor_executable)
-    return (str(executable),)
+    """Verify the signed runtime before replacing the launcher with Python."""
+    executable = _validate_executable_reference(native_host_executable)
+    return (str(executable), "--process-once")
 
 
 def render_launch_agent(

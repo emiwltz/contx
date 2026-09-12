@@ -45,4 +45,4 @@ Every ADR records:
 - [0019 — Capture only the policy-authorized focused window](0019-capture-only-focused-window.md)
 - [0020 — Put the collector behind a signed native macOS host](0020-native-macos-host.md)
 - [0021 — Use a native window for supervised prototype control](0021-native-window-control.md)
-- [0022 — Build a private versioned prototype runtime (proposed)](0022-private-versioned-runtime.md)
+- [0022 — Build a private versioned prototype runtime](0022-private-versioned-runtime.md)

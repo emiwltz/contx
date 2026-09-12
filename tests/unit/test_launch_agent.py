@@ -83,6 +83,7 @@ def test_periodic_processor_manifest_is_bounded_and_not_kept_alive(
         "Label": PROCESSOR_LAUNCH_AGENT_LABEL,
         "ProgramArguments": [
             str(executable),
+            "--process-once",
         ],
         "LimitLoadToSessionType": "Aqua",
         "RunAtLoad": True,

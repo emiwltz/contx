@@ -45,7 +45,6 @@ from contx.settings import (
     set_background_collection_features,
 )
 
-PROCESSOR_EXECUTABLE_NAME = "contx-processor"
 NATIVE_HOST_RELATIVE_EXECUTABLE = Path("Applications/CONTX.app/Contents/MacOS/CONTX")
 DEFAULT_COLLECTOR_START_TIMEOUT_SECONDS = 10.0
 DEFAULT_COLLECTOR_START_POLL_INTERVAL_SECONDS = 0.1
@@ -402,19 +401,12 @@ def build_background_collection_lifecycle(
     resume_collection: Callable[[], object],
     collection_is_paused: Callable[[], bool],
     environ: Mapping[str, str] | None = None,
-    executable_directory: Path | None = None,
     native_host_executable: Path | None = None,
     home: Path | None = None,
     user_id: int | None = None,
 ) -> BackgroundCollectionLifecycleService:
     """Compose real preflights and exact user LaunchAgent manifests."""
     environment = os.environ if environ is None else environ
-    executable_root = (
-        Path(sys.executable).parent
-        if executable_directory is None
-        else executable_directory
-    )
-    processor_executable = executable_root / PROCESSOR_EXECUTABLE_NAME
     host_executable = native_host_executable or resolve_native_host_executable(
         home=home
     )
@@ -440,10 +432,10 @@ def build_background_collection_lifecycle(
         LaunchAgentSpec(
             label=PROCESSOR_LAUNCH_AGENT_LABEL,
             path=(launch_agents_directory / f"{PROCESSOR_LAUNCH_AGENT_LABEL}.plist"),
-            program_executable=processor_executable,
+            program_executable=host_executable,
             manifest=render_processor_launch_agent(
                 program_arguments=processor_launch_agent_program_arguments(
-                    processor_executable
+                    host_executable
                 ),
                 paths=paths,
                 interval_seconds=settings.processing.model_interval_seconds,

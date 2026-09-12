@@ -10,6 +10,7 @@ import re
 import selectors
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 from collections.abc import Iterator, Mapping, Sequence
@@ -365,7 +366,7 @@ class OptMemAdapter:
         }
         try:
             process = subprocess.Popen(
-                (str(self._executable), *arguments),
+                (sys.executable, "-I", "-B", str(self._executable), *arguments),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

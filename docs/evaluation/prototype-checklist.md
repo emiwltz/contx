@@ -15,7 +15,7 @@ Passing this checkpoint does not establish controlled-day J1 acceptance,
 | Checkpoint | Acceptance evidence | Status |
 | --- | --- | --- |
 | Visible disabled application | Emi sees the control and opens its disabled-state menu; no collector or runtime mutation | Passed: visible disabled window and Dock, red-close exit, unchanged runtime |
-| Stable private runtime | Accepted packaging decision covers Python, modules, native dependencies and OptMem | Isolated feasibility passed; ADR 0022 proposed, implementation pending |
+| Stable private runtime | Accepted packaging decision covers Python, modules, native dependencies and OptMem | ADR 0022 accepted; implementation under validation |
 | Installation and permissions | Verified signed installation and unchanged host/child permission attribution | Pending runtime checkpoint and explicit authorization |
 | Short collection | Controlled metadata, one capture, then 15 minutes; exclusions, pause and stop verified | Pending |
 | One-hour session | Inspectable complete pipeline, independent activity reference, resource measurements and defect review | Pending |
@@ -95,11 +95,13 @@ text-diagnostic build option.
 An isolated private Python plus non-editable production install passed import,
 web-asset, disabled-control and synthetic OptMem checks. See
 [v0.1-private-runtime-feasibility.md](v0.1-private-runtime-feasibility.md).
-The durable runtime contract is proposed in ADR 0022, not implemented or accepted.
+Emi accepted ADR 0022. Full inventory signing, private Python/OptMem launch,
+periodic processor verification and immutable version construction are implemented
+and undergoing synthetic/native validation.
 
 ## Next action
 
-Obtain the packaging decision on proposed ADR 0022, then implement and test the
-complete runtime verification and launch wiring. The visible control checkpoint
-has passed for disabled operation. Real collector shutdown, loaded-LaunchAgent
-restart behavior and permission attribution remain unverified on the target Mac.
+Finish a clean-source temporary release build and signed native verification;
+measure full and cached validation cost, inspect native library dependencies and
+record evidence before planning installation. No real collection, permission
+request or installed LaunchAgent is authorized by runtime construction alone.

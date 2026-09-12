@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
 import plistlib
 import shutil
@@ -11,19 +10,19 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
 from pathlib import Path
 
 from contx.macos_app.native_source import (
     CONTX_APP_SWIFT_SOURCE,
     validate_native_source,
 )
+from contx.macos_app.runtime_release import load_manifest
 
 BUNDLE_IDENTIFIER = "io.contx.desktop"
 BUNDLE_NAME = "CONTX"
 EXECUTABLE_NAME = "CONTX"
 RUNTIME_CONTRACT_NAME = "RuntimeContract.plist"
-RUNTIME_CONTRACT_SCHEMA_VERSION = 1
+RUNTIME_CONTRACT_SCHEMA_VERSION = 2
 PRIVATE_DIRECTORY_MODE = 0o700
 PRIVATE_FILE_MODE = 0o600
 PRIVATE_EXECUTABLE_MODE = 0o700
@@ -36,22 +35,10 @@ class MacOSAppBuildError(RuntimeError):
 CommandRunner = Callable[[Sequence[str]], None]
 
 
-@dataclass(frozen=True, slots=True)
-class RuntimeCommandRecord:
-    """One exact external development command pinned into the signed bundle."""
-
-    path: Path
-    sha256: str
-
-    def as_plist(self) -> dict[str, str]:
-        return {"path": str(self.path), "sha256": self.sha256}
-
-
 def build_contx_app_bundle(
     output: Path,
     *,
-    collector_executable: Path,
-    control_executable: Path,
+    runtime_manifest: Path,
     signing_identity: str,
     screen_recording_usage_description: str,
     platform: str = sys.platform,
@@ -62,8 +49,7 @@ def build_contx_app_bundle(
         raise MacOSAppBuildError("CONTX.app can be built only on macOS")
     validate_native_source()
     destination = _validate_destination(output)
-    collector = _runtime_command(collector_executable, name="collector")
-    control = _runtime_command(control_executable, name="control")
+    manifest = load_manifest(runtime_manifest)
     identity = _validate_single_line(
         signing_identity,
         name="signing identity",
@@ -121,11 +107,9 @@ def build_contx_app_bundle(
         if not executable.is_file() or executable.is_symlink():
             raise MacOSAppBuildError("Swift did not create the CONTX app executable")
         os.chmod(executable, PRIVATE_EXECUTABLE_MODE)
-        _write_runtime_contract(
-            runtime_contract,
-            collector=collector,
-            control=control,
-        )
+        with runtime_contract.open("wb") as stream:
+            plistlib.dump(manifest.model_dump(), stream, fmt=plistlib.FMT_BINARY)
+        os.chmod(runtime_contract, PRIVATE_FILE_MODE)
         _write_info_plist(
             info_plist,
             screen_recording_usage_description=usage_description,
@@ -166,38 +150,6 @@ def build_contx_app_bundle(
     return destination
 
 
-def _runtime_command(path: Path, *, name: str) -> RuntimeCommandRecord:
-    if not path.is_absolute():
-        raise MacOSAppBuildError(f"CONTX {name} executable must be absolute")
-    if any(character in str(path) for character in "\r\n\0"):
-        raise MacOSAppBuildError(f"CONTX {name} executable path is invalid")
-    try:
-        file_status = path.lstat()
-        canonical = path.resolve(strict=True)
-    except OSError as error:
-        raise MacOSAppBuildError(f"CONTX {name} executable is unavailable") from error
-    if path.is_symlink() or not stat.S_ISREG(file_status.st_mode):
-        raise MacOSAppBuildError(
-            f"CONTX {name} executable must be a regular non-symlink file"
-        )
-    if canonical != path:
-        raise MacOSAppBuildError(f"CONTX {name} executable path must be canonical")
-    if not os.access(path, os.X_OK):
-        raise MacOSAppBuildError(f"CONTX {name} executable is not executable")
-    return RuntimeCommandRecord(path=path, sha256=_sha256(path))
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    try:
-        with path.open("rb") as file:
-            while chunk := file.read(1024 * 1024):
-                digest.update(chunk)
-    except OSError as error:
-        raise MacOSAppBuildError("Cannot hash a CONTX runtime executable") from error
-    return digest.hexdigest()
-
-
 def _validate_destination(output: Path) -> Path:
     if not output.is_absolute():
         raise MacOSAppBuildError("CONTX app output must be absolute")
@@ -235,22 +187,6 @@ def _validate_single_line(
             f"CONTX {name} must contain {minimum} to {maximum} safe characters"
         )
     return normalized
-
-
-def _write_runtime_contract(
-    path: Path,
-    *,
-    collector: RuntimeCommandRecord,
-    control: RuntimeCommandRecord,
-) -> None:
-    payload: dict[str, object] = {
-        "schemaVersion": RUNTIME_CONTRACT_SCHEMA_VERSION,
-        "collector": collector.as_plist(),
-        "control": control.as_plist(),
-    }
-    with path.open("wb") as file:
-        plistlib.dump(payload, file, fmt=plistlib.FMT_BINARY, sort_keys=True)
-    os.chmod(path, PRIVATE_FILE_MODE)
 
 
 def _write_info_plist(

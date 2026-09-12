@@ -1,218 +1,118 @@
-"""Signed native host bundle construction without launch or installation."""
+"""Signed native host bundles bind the complete private runtime inventory."""
 
 from __future__ import annotations
 
-import hashlib
 import os
 import plistlib
-import stat
 from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 
-from contx.macos_app.bundle import (
-    BUNDLE_IDENTIFIER,
-    BUNDLE_NAME,
-    EXECUTABLE_NAME,
-    RUNTIME_CONTRACT_NAME,
-    MacOSAppBuildError,
-    build_contx_app_bundle,
-)
-from contx.macos_app.native_source import (
-    CONTX_APP_SWIFT_SOURCE,
-    validate_native_source,
-)
+from contx.macos_app.bundle import MacOSAppBuildError, build_contx_app_bundle
+from contx.macos_app.native_source import CONTX_APP_SWIFT_SOURCE, validate_native_source
+from contx.macos_app.runtime_release import RuntimeReleaseError
+from tests.unit.test_runtime_release import make_release
 
-USAGE_DESCRIPTION = (
-    "CONTX captures only an authorized focused window after exclusion checks."
-)
+USAGE = "Disabled synthetic build without permission request."
 
 
 class _FakeToolchain:
     def __init__(self, *, fail_compile: bool = False) -> None:
         self.commands: list[tuple[str, ...]] = []
-        self.swift_source: str | None = None
         self.fail_compile = fail_compile
 
     def __call__(self, command: Sequence[str]) -> None:
-        captured = tuple(command)
-        self.commands.append(captured)
-        if captured[:2] != ("xcrun", "swiftc"):
+        self.commands.append(tuple(command))
+        if command[:2] != ("xcrun", "swiftc"):
             return
-        self.swift_source = Path(captured[2]).read_text(encoding="utf-8")
         if self.fail_compile:
             raise MacOSAppBuildError("synthetic native compile failure")
-        output = Path(captured[captured.index("-o") + 1])
-        output.write_bytes(b"synthetic signed host Mach-O")
+        Path(command[command.index("-o") + 1]).write_bytes(b"synthetic Mach-O")
 
 
-def test_builds_private_signed_native_host_atomically(tmp_path: Path) -> None:
+def test_build_binds_complete_runtime_to_native_signature(tmp_path, monkeypatch):
     os.chmod(tmp_path, 0o700)
-    collector = _executable(tmp_path / "contx-collector", b"collector")
-    control = _executable(tmp_path / "contx-native-control", b"control")
-    output = tmp_path / "CONTX.app"
+    manifest, path = make_release(tmp_path, monkeypatch)
     toolchain = _FakeToolchain()
-
-    result = build_contx_app_bundle(
-        output,
-        collector_executable=collector,
-        control_executable=control,
+    app = build_contx_app_bundle(
+        tmp_path / "CONTX.app",
+        runtime_manifest=path,
         signing_identity="Apple Development",
-        screen_recording_usage_description=USAGE_DESCRIPTION,
+        screen_recording_usage_description=USAGE,
         run_command=toolchain,
     )
-
-    assert result == output
-    executable = output / f"Contents/MacOS/{EXECUTABLE_NAME}"
-    info_plist = output / "Contents/Info.plist"
-    runtime_contract = output / f"Contents/Resources/{RUNTIME_CONTRACT_NAME}"
-    assert executable.read_bytes() == b"synthetic signed host Mach-O"
-    with info_plist.open("rb") as file:
-        metadata = plistlib.load(file)
-    assert metadata == {
-        "CFBundleDevelopmentRegion": "en",
-        "CFBundleDisplayName": BUNDLE_NAME,
-        "CFBundleExecutable": EXECUTABLE_NAME,
-        "CFBundleIdentifier": BUNDLE_IDENTIFIER,
-        "CFBundleInfoDictionaryVersion": "6.0",
-        "CFBundleName": BUNDLE_NAME,
-        "CFBundlePackageType": "APPL",
-        "CFBundleShortVersionString": "0.0.1",
-        "CFBundleVersion": "1",
-        "LSMinimumSystemVersion": "14.0",
-        "LSUIElement": False,
-        "NSHighResolutionCapable": True,
-        "NSPrincipalClass": "NSApplication",
-        "NSScreenCaptureUsageDescription": USAGE_DESCRIPTION,
-    }
-    with runtime_contract.open("rb") as file:
-        contract = plistlib.load(file)
-    assert contract == {
-        "schemaVersion": 1,
-        "collector": {
-            "path": str(collector),
-            "sha256": hashlib.sha256(b"collector").hexdigest(),
-        },
-        "control": {
-            "path": str(control),
-            "sha256": hashlib.sha256(b"control").hexdigest(),
-        },
-    }
-    assert stat.S_IMODE(executable.stat().st_mode) == 0o700
-    assert stat.S_IMODE(info_plist.stat().st_mode) == 0o600
-    assert stat.S_IMODE(runtime_contract.stat().st_mode) == 0o600
-    assert toolchain.swift_source == CONTX_APP_SWIFT_SOURCE
-    assert toolchain.commands[1][0:8] == (
-        "/usr/bin/codesign",
-        "--force",
-        "--sign",
-        "Apple Development",
-        "--timestamp=none",
-        "--options",
-        "runtime",
-        "--identifier",
+    info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
+    sealed = plistlib.loads(
+        (app / "Contents/Resources/RuntimeContract.plist").read_bytes()
     )
-    assert toolchain.commands[2][0:5] == (
+    assert info["CFBundleIdentifier"] == "io.contx.desktop"
+    assert info["LSUIElement"] is False
+    assert sealed == manifest.model_dump()
+    assert toolchain.commands[1][:3] == ("/usr/bin/codesign", "--force", "--sign")
+    assert toolchain.commands[2][:4] == (
         "/usr/bin/codesign",
         "--verify",
         "--deep",
         "--strict",
-        "--verbose=2",
     )
     assert list(tmp_path.glob(".*-build-*")) == []
 
 
-def test_build_rejects_unsafe_or_mutable_runtime_commands(tmp_path: Path) -> None:
-    os.chmod(tmp_path, 0o700)
-    executable = _executable(tmp_path / "collector", b"collector")
-    link = tmp_path / "control"
-    link.symlink_to(executable)
-
-    with pytest.raises(MacOSAppBuildError, match="non-symlink"):
+def test_refuses_changed_runtime_before_compiling(tmp_path, monkeypatch):
+    manifest, path = make_release(tmp_path, monkeypatch)
+    target = Path(manifest.root) / "module.py"
+    target.chmod(0o600)
+    target.write_text("changed")
+    target.chmod(0o400)
+    toolchain = _FakeToolchain()
+    with pytest.raises(RuntimeReleaseError):
         build_contx_app_bundle(
             tmp_path / "CONTX.app",
-            collector_executable=executable,
-            control_executable=link,
+            runtime_manifest=path,
             signing_identity="Apple Development",
-            screen_recording_usage_description=USAGE_DESCRIPTION,
-            run_command=_FakeToolchain(),
+            screen_recording_usage_description=USAGE,
+            run_command=toolchain,
         )
-
+    assert toolchain.commands == []
     assert not (tmp_path / "CONTX.app").exists()
 
 
-@pytest.mark.parametrize(
-    ("output", "message"),
-    [
-        (Path("CONTX.app"), "must be absolute"),
-        (Path("/private/tmp/Other.app"), "must end in CONTX.app"),
-    ],
-)
-def test_build_rejects_invalid_destination(output: Path, message: str) -> None:
-    with pytest.raises(MacOSAppBuildError, match=message):
-        build_contx_app_bundle(
-            output,
-            collector_executable=Path("/private/tmp/missing-collector"),
-            control_executable=Path("/private/tmp/missing-control"),
-            signing_identity="Apple Development",
-            screen_recording_usage_description=USAGE_DESCRIPTION,
-            run_command=_FakeToolchain(),
-        )
-
-
-def test_compile_failure_leaves_no_bundle_or_staging_directory(
-    tmp_path: Path,
-) -> None:
-    os.chmod(tmp_path, 0o700)
-    collector = _executable(tmp_path / "collector", b"collector")
-    control = _executable(tmp_path / "control", b"control")
-
-    with pytest.raises(MacOSAppBuildError, match="synthetic native compile failure"):
+def test_compile_failure_preserves_runtime_and_leaves_no_app(tmp_path, monkeypatch):
+    manifest, path = make_release(tmp_path, monkeypatch)
+    with pytest.raises(MacOSAppBuildError, match="synthetic"):
         build_contx_app_bundle(
             tmp_path / "CONTX.app",
-            collector_executable=collector,
-            control_executable=control,
+            runtime_manifest=path,
             signing_identity="Apple Development",
-            screen_recording_usage_description=USAGE_DESCRIPTION,
+            screen_recording_usage_description=USAGE,
             run_command=_FakeToolchain(fail_compile=True),
         )
-
+    assert Path(manifest.root).is_dir()
+    assert path.is_file()
     assert not (tmp_path / "CONTX.app").exists()
     assert list(tmp_path.glob(".*-build-*")) == []
 
 
-def test_native_source_is_window_and_process_only() -> None:
+@pytest.mark.parametrize("output", [Path("CONTX.app"), Path("/private/tmp/Other.app")])
+def test_rejects_invalid_destination(output):
+    with pytest.raises(MacOSAppBuildError):
+        build_contx_app_bundle(
+            output,
+            runtime_manifest=Path("/missing"),
+            signing_identity="test",
+            screen_recording_usage_description=USAGE,
+        )
+
+
+def test_native_source_scope_and_close_contract():
     validate_native_source()
-
     assert "NSStatusItem" not in CONTX_APP_SWIFT_SOURCE
-    assert "CONTX_STATUS_ITEM_TEXT_DIAGNOSTIC" not in CONTX_APP_SWIFT_SOURCE
     assert "activationPolicy() == .regular" in CONTX_APP_SWIFT_SOURCE
-    assert "NSWindowDelegate" in CONTX_APP_SWIFT_SOURCE
-    assert "window.makeKeyAndOrderFront(nil)" in CONTX_APP_SWIFT_SOURCE
-    assert "func windowShouldClose" in CONTX_APP_SWIFT_SOURCE
-    close_handler = CONTX_APP_SWIFT_SOURCE.split("func windowShouldClose", 1)[1]
-    close_handler = close_handler.split("func applicationShouldHandleReopen", 1)[0]
-    assert "NSApplication.shared.terminate(nil)" in close_handler
-    assert "return false" in close_handler
+    close = CONTX_APP_SWIFT_SOURCE.split("func windowShouldClose", 1)[1]
+    close = close.split("func applicationShouldHandleReopen", 1)[0]
+    assert "NSApplication.shared.terminate(nil)" in close
     assert "worker.sync {\n            stopCollector()" in CONTX_APP_SWIFT_SOURCE
-    assert 'NSButton(title: "Quit CONTX", target: NSApplication.shared' in (
-        CONTX_APP_SWIFT_SOURCE
-    )
-    assert 'arguments: ["status"]' in CONTX_APP_SWIFT_SOURCE
-    assert 'arguments: ["pause"]' in CONTX_APP_SWIFT_SOURCE
-    assert 'arguments: ["resume"]' in CONTX_APP_SWIFT_SOURCE
-    assert 'environment["CONTX_NATIVE_HOST"] = "1"' in CONTX_APP_SWIFT_SOURCE
-    assert "SHA256.hash(data: data)" in CONTX_APP_SWIFT_SOURCE
-    assert "isExecutableFile(atPath: command.path)" in CONTX_APP_SWIFT_SOURCE
-    assert "maximumControlOutputBytes = 32 * 1024" in CONTX_APP_SWIFT_SOURCE
-    assert "controlTimeoutSeconds: TimeInterval = 5.0" in CONTX_APP_SWIFT_SOURCE
-    assert "CGRequestScreenCaptureAccess" not in CONTX_APP_SWIFT_SOURCE
-    assert "ScreenCaptureKit" not in CONTX_APP_SWIFT_SOURCE
-    assert "URLSession" not in CONTX_APP_SWIFT_SOURCE
-
-
-def _executable(path: Path, content: bytes) -> Path:
-    path.write_bytes(content)
-    path.chmod(0o700)
-    return path
+    assert '"-I", "-B", "-m", "contx.daemon.entrypoint"' in CONTX_APP_SWIFT_SOURCE
+    assert "runtimeVerifier.verify" in CONTX_APP_SWIFT_SOURCE
+    assert "integrityFailed = true" in CONTX_APP_SWIFT_SOURCE

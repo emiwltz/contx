@@ -365,3 +365,20 @@ def _write_executable(tmp_path: Path, body: str) -> tuple[Path, str]:
     executable.write_bytes(payload)
     executable.chmod(0o700)
     return executable, hashlib.sha256(payload).hexdigest()
+
+
+def test_optmem_uses_current_interpreter_instead_of_env_shebang(tmp_path: Path) -> None:
+    executable = tmp_path / "memo"
+    # The old direct execution fails because python3 cannot be found on this PATH.
+    payload = ("#!/usr/bin/env python3\n" + FAKE_OPTMEM).encode()
+    executable.write_bytes(payload)
+    executable.chmod(0o700)
+    adapter = OptMemAdapter(
+        executable=executable,
+        memory_directory=tmp_path / "memory",
+        expected_sha256=hashlib.sha256(payload).hexdigest(),
+        environ={"PATH": str(tmp_path / "absent"), "HOME": str(tmp_path)},
+    )
+    adapter.initialize()
+    adapter.append("Private Python only.", idempotency_key="private-python")
+    assert "Private Python only." in adapter.wake().content

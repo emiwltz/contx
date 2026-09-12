@@ -2,27 +2,18 @@
 
 from __future__ import annotations
 
+from contx.macos_app.runtime_native_source import RUNTIME_VERIFY_SWIFT_SOURCE
+
 CONTX_APP_SWIFT_SOURCE = r"""import AppKit
 import CryptoKit
 import Darwin
 import Foundation
 
-private let contractSchemaVersion = 1
+private let contractSchemaVersion = 2
 private let controlSchemaVersion = 1
 private let controlTimeoutSeconds: TimeInterval = 5.0
 private let collectorStopTimeoutSeconds: TimeInterval = 10.0
 private let maximumControlOutputBytes = 32 * 1024
-private struct RuntimeCommand: Decodable {
-    let path: String
-    let sha256: String
-}
-
-private struct RuntimeContract: Decodable {
-    let schemaVersion: Int
-    let collector: RuntimeCommand
-    let control: RuntimeCommand
-}
-
 private enum ControlState: String, Decodable {
     case disabled
     case stopped
@@ -90,6 +81,8 @@ private enum HostViewState {
 private final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let worker = DispatchQueue(label: "io.contx.desktop.runtime")
     private var contract: RuntimeContract?
+    private let runtimeVerifier = RuntimeVerifier()
+    private var integrityFailed = false
     private var collector: Process?
     private var shuttingDown = false
     private var refreshPending = false
@@ -307,7 +300,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
     }
 
     private func refreshStatus() {
-        guard !refreshPending else {
+        guard !refreshPending, !integrityFailed else {
             return
         }
         refreshPending = true
@@ -339,6 +332,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
                 return
             }
             do {
+                try self.verifyRuntime(hashAll: true)
                 let status = try self.runControl(arguments: arguments)
                 DispatchQueue.main.async {
                     self.apply(status: status)
@@ -356,11 +350,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
     }
 
     private func runControl(arguments: [String]) throws -> ControlStatus {
-        guard let contract else {
+        guard contract != nil else {
             throw HostFailure.invalidContract
         }
         let result = try runBoundedCommand(
-            contract.control,
+            module: "contx.macos_app.control",
             arguments: arguments,
             nativeHostChild: false
         )
@@ -383,10 +377,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
         guard collector == nil, let contract else {
             throw HostFailure.invalidContract
         }
-        try verify(command: contract.collector)
+        try verifyRuntime(hashAll: true)
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: contract.collector.path)
-        process.arguments = []
+        process.executableURL = URL(
+            fileURLWithPath: contract.root + "/" + contract.python)
+        process.arguments = ["-I", "-B", "-m", "contx.daemon.entrypoint"]
         process.environment = minimalEnvironment(nativeHostChild: true)
         process.standardOutput = FileHandle.standardOutput
         process.standardError = FileHandle.standardError
@@ -437,16 +432,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
     }
 
     private func runBoundedCommand(
-        _ command: RuntimeCommand,
+        module: String,
         arguments: [String],
         nativeHostChild: Bool
     ) throws -> CommandResult {
-        try verify(command: command)
+        try verifyRuntime()
         let process = Process()
         let standardOutput = Pipe()
         let standardError = Pipe()
-        process.executableURL = URL(fileURLWithPath: command.path)
-        process.arguments = arguments
+        guard let contract else { throw HostFailure.invalidContract }
+        process.executableURL = URL(
+            fileURLWithPath: contract.root + "/" + contract.python)
+        process.arguments = ["-I", "-B", "-m", module] + arguments
         process.environment = minimalEnvironment(nativeHostChild: nativeHostChild)
         process.standardOutput = standardOutput
         process.standardError = standardError
@@ -488,6 +485,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
             "PYTHONUNBUFFERED": "1",
             "TMPDIR": NSTemporaryDirectory(),
         ]
+        if let contract {
+            environment["CONTX_OPTMEM_EXECUTABLE"] =
+                contract.root + "/" + contract.optmem
+        }
         if nativeHostChild {
             environment["CONTX_NATIVE_HOST"] = "1"
         }
@@ -542,56 +543,69 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
         else {
             throw HostFailure.invalidBundle
         }
-        try verify(command: contract.collector)
-        try verify(command: contract.control)
+        try runtimeVerifier.verify(contract, hashAll: true)
         return contract
     }
 
-    private func verify(command: RuntimeCommand) throws {
-        guard
-            command.path.hasPrefix("/"),
-            command.sha256.count == 64,
-            command.sha256.allSatisfy({ $0.isHexDigit && !$0.isUppercase })
-        else {
-            throw HostFailure.invalidContract
-        }
-        let url = URL(fileURLWithPath: command.path)
-        let values: URLResourceValues
+    private func verifyRuntime(hashAll: Bool = false) throws {
+        guard let contract else { throw HostFailure.invalidContract }
         do {
-            values = try url.resourceValues(
-                forKeys: [.isRegularFileKey, .isSymbolicLinkKey]
-            )
+            try runtimeVerifier.verify(contract, hashAll: hashAll)
         } catch {
-            throw HostFailure.invalidExecutable
-        }
-        guard
-            values.isRegularFile == true,
-            values.isSymbolicLink != true,
-            FileManager.default.isExecutableFile(atPath: command.path)
-        else {
-            throw HostFailure.invalidExecutable
-        }
-        let data: Data
-        do {
-            data = try Data(contentsOf: url, options: .mappedIfSafe)
-        } catch {
-            throw HostFailure.invalidExecutable
-        }
-        let digest = SHA256.hash(data: data).map {
-            String(format: "%02x", $0)
-        }.joined()
-        guard digest == command.sha256 else {
-            throw HostFailure.changedExecutable
+            stopCollector()
+            DispatchQueue.main.async { [weak self] in
+                self?.integrityFailed = true
+                self?.apply(viewState: .error, status: nil)
+            }
+            throw error
         }
     }
+
+    static func processOnce() -> Int32 {
+        let host = AppDelegate()
+        do {
+            host.contract = try host.loadRuntimeContract()
+            guard let contract = host.contract else {
+                throw HostFailure.invalidContract
+            }
+            // Replace the verified native launcher with the exact private interpreter.
+            // launchd owns this PID and delivers shutdown signals directly.
+            let arguments = [contract.root + "/" + contract.python,
+                             "-I", "-B", "-m", "contx.processing.entrypoint"]
+            let environment = host.minimalEnvironment(nativeHostChild: false)
+                .map { "\($0.key)=\($0.value)" }
+            let argv = arguments.map { strdup($0) } + [nil]
+            let envp = environment.map { strdup($0) } + [nil]
+            defer { argv.forEach { free($0) }; envp.forEach { free($0) } }
+            argv.withUnsafeBufferPointer { args in
+                envp.withUnsafeBufferPointer { env in
+                    _ = execve(arguments[0], args.baseAddress!, env.baseAddress!)
+                }
+            }
+            throw HostFailure.commandFailed
+        } catch {
+            fputs("CONTX processor refused an invalid runtime or launch.\n", stderr)
+            return 2
+        }
+    }
+
 }
 
+if CommandLine.arguments.count == 2 && CommandLine.arguments[1] == "--process-once" {
+    exit(AppDelegate.processOnce())
+}
+guard CommandLine.arguments.count == 1 else { exit(64) }
 let application = NSApplication.shared
 private let delegate = AppDelegate()
 application.delegate = delegate
 application.setActivationPolicy(.regular)
 application.run()
 """
+
+CONTX_APP_SWIFT_SOURCE = CONTX_APP_SWIFT_SOURCE.replace(
+    "private enum ControlState",
+    RUNTIME_VERIFY_SWIFT_SOURCE + "\nprivate enum ControlState",
+)
 
 ALLOWED_SWIFT_IMPORTS = frozenset({"AppKit", "CryptoKit", "Darwin", "Foundation"})
 FORBIDDEN_SWIFT_TOKENS = (

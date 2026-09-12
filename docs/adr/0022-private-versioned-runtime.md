@@ -1,6 +1,6 @@
 # ADR 0022: Build a private versioned prototype runtime
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-12
 - **Decision owner:** Emi
 
@@ -28,12 +28,12 @@ See `docs/evaluation/v0.1-private-runtime-feasibility.md` for limits.
    evaluation of native frameworks, signing, resources and process attribution.
    This option has not been experimentally compared in this checkpoint.
 
-## Proposed decision
+## Decision
 
-Use option 2 for the private supervised prototype. No new production dependency
+Emi approved option 2 in this task. Use it for the private supervised prototype. No new production dependency
 or shared Python modification is needed. Do not treat this as a public installer.
 
-Proposed installed layout:
+Accepted target layout:
 
 - `~/Applications/CONTX.app`: signed window host and sealed runtime manifest.
 - `~/Library/Application Support/CONTXRuntime/releases/<build-id>/python/`:
@@ -92,3 +92,43 @@ Until installation, discard only the isolated generated runtime. After a future
 authorized installation, stop owned processes before selecting a prior verified
 release. Keep all data. A future self-contained packager may replace this build
 layer while retaining the native host/control and memory contracts.
+
+## Implemented verification contract
+
+The version-2 inventory is embedded inside the native signed resources. All
+runtime files, directories and internal symlinks are enumerated; regular files
+are SHA-256 checked, permissions and ownership checked, and external links
+rejected. Python and OptMem paths are fixed relative to the release root.
+The old entrypoint-only version-1 contract is removed.
+
+The native host hashes the full release before its first Python call, before
+collector start/restart and before explicit control actions. Each one-second
+status iteration enumerates all nodes and compares device, inode, size, mode,
+mtime and ctime against that process's initial verified baseline. Additions,
+removals or stamp changes latch a failure, stop the owned collector and disable
+further control execution. Repairing disk contents does not clear the latch;
+a fresh verified host is required. This does not protect against a hostile
+account owner who races mutations between checks or replaces the trusted app.
+Runtime releases must not be modified while in use.
+
+Native canonicalization uses POSIX realpath, matching Python's canonical paths.
+Foundation's URL resolution was observed to rewrite /private/var to /var and
+incorrectly reject a valid synthetic release; the native regression probe covers
+that target-Mac path behavior.
+
+The periodic LaunchAgent now invokes the same signed host with the sole internal
+`--process-once` argument. It verifies the inventory, then execs private Python
+with `-I -B -m contx.processing.entrypoint`, preserving launchd's owned PID and
+signal delivery. It opens no AppKit window. Its bounded process assumes the
+read-only release remains unchanged for that run; the next run verifies again.
+OptMem is invoked explicitly with the current isolated Python interpreter,
+ignoring its env-python shebang. The native environment fixes the OptMem path.
+
+The builder requires a clean committed checkout, builds from git archive,
+installs hash-locked production dependencies by copy and CONTX as a wheel,
+seals release permissions and atomically publishes the complete manifest.
+The release is built at its final version path; there is no relocation or
+in-place overwrite. Any failed build removes only its newly created release.
+Existing releases and all user data remain untouched. Selection of an installed
+app/release is a later explicit installation action, performed with processes
+stopped; this build tool has no live switching or deletion command.
