@@ -15,8 +15,8 @@ Passing this checkpoint does not establish controlled-day J1 acceptance,
 | Checkpoint | Acceptance evidence | Status |
 | --- | --- | --- |
 | Visible disabled application | Emi sees the control and opens its disabled-state menu; no collector or runtime mutation | Passed: visible disabled window and Dock, red-close exit, unchanged runtime |
-| Stable private runtime | Accepted packaging decision covers Python, modules, native dependencies and OptMem | ADR 0022 accepted; implementation under validation |
-| Installation and permissions | Verified signed installation and unchanged host/child permission attribution | Pending runtime checkpoint and explicit authorization |
+| Stable private runtime | Accepted packaging decision covers Python, modules, native dependencies and OptMem | Passed in isolation: sealed release, native corruption refusal and signed dispatch |
+| Installation and permissions | Verified signed installation and unchanged host/child permission attribution | Prepared installation and explicit authorization remain |
 | Short collection | Controlled metadata, one capture, then 15 minutes; exclusions, pause and stop verified | Pending |
 | One-hour session | Inspectable complete pipeline, independent activity reference, resource measurements and defect review | Pending |
 
@@ -25,9 +25,8 @@ Passing this checkpoint does not establish controlled-day J1 acceptance,
 - Prepare implementation, synthetic tests and exact recovery before a live step.
 - Obtain user observation for visible controls; process liveness is insufficient.
 - Do not proceed through an unresolved privacy, lifecycle or control failure.
-- If the prepared text diagnostic provides no useful new evidence, present a
-  small native window/Dock alternative for approval instead of repeating menu
-  variants. This alternative is not yet an accepted product change.
+- Use the accepted ADR 0021 window/Dock control; its disabled visibility and
+  close behavior have passed direct user observation.
 - Keep installation, permissions and collection separate from the disabled
   visual diagnostic. Existing ADR 0020 runtime packaging gates still apply.
 - After each checkpoint, record observed results, remaining uncertainty and the
@@ -97,11 +96,12 @@ web-asset, disabled-control and synthetic OptMem checks. See
 [v0.1-private-runtime-feasibility.md](v0.1-private-runtime-feasibility.md).
 Emi accepted ADR 0022. Full inventory signing, private Python/OptMem launch,
 periodic processor verification and immutable version construction are implemented
-and undergoing synthetic/native validation.
+and verified through synthetic/native validation, including signed dispatch.
 
 ## Next action
 
-Finish a clean-source temporary release build and signed native verification;
-measure full and cached validation cost, inspect native library dependencies and
-record evidence before planning installation. No real collection, permission
-request or installed LaunchAgent is authorized by runtime construction alone.
+Prepare a concrete final installation location, permission wording and recovery
+procedure for approval. Rebuild the release at that final absolute path; do not
+relocate the temporary environment. See [v0.1-private-runtime-validation.md](v0.1-private-runtime-validation.md)
+for completed evidence and limits. No real collection or installed LaunchAgent
+has been started.

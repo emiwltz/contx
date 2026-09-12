@@ -189,7 +189,10 @@ explicit user instruction.
 | **v0.9** | **J7 real pilot** | 7–14 day pilot, ground truth, with/without CONTX comparison, error analysis, OptMem decision. |
 | **v1.0** | **J8 hardening** | Fixes, optimization, install/upgrade/uninstall, recovery, distribution, licensing, and documentation. |
 
-**Active goal:** prepare a stable private runtime before collector-child activation.
+**Active goal:** prepare final installation and permission verification before
+collector-child activation. The private versioned runtime and signed dispatch
+passed isolated validation; see the
+[validation report](docs/evaluation/v0.1-private-runtime-validation.md).
 The native window passed disabled human visibility, Dock and red-close checks
 on 2026-09-12; the host exited and runtime files remained unchanged.
 The three disabled native menu tests failed human visibility, including a text
@@ -198,7 +201,7 @@ a regular window and Dock presence: closing quits the app and stops its owned
 collector, and successful exits are not immediately restarted by launchd.
 The signed identity and existing Python collection/control boundaries remain.
 The current checkpoint and next action are tracked in the
-[prototype checklist](docs/evaluation/prototype-checklist.md). Runtime packaging,
+[prototype checklist](docs/evaluation/prototype-checklist.md). Final-path rebuilding,
 installation, permissions, collection, the controlled day and the real pilot
 remain separate validation gates.
 

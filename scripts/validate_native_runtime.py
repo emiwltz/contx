@@ -13,6 +13,27 @@ from contx.macos_app.native_source import CONTX_APP_SWIFT_SOURCE
 from contx.macos_app.runtime_release import inventory, remove_generated_tree, seal_tree
 
 PROBE = r"""
+extension AppDelegate {
+    static func syntheticRuntimeHost(
+        _ contract: RuntimeContract
+    ) throws -> AppDelegate {
+        let host = AppDelegate()
+        host.contract = contract
+        try host.verifyRuntime()
+        let child = Process()
+        child.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        child.arguments = ["30"]
+        try child.run()
+        host.collector = child
+        return host
+    }
+
+    func verifySyntheticShutdown() {
+        let child = collector!
+        do { try verifyRuntime(); preconditionFailure("Corruption was accepted") }
+        catch { precondition(!child.isRunning && collector == nil) }
+    }
+}
 private let contract = try JSONDecoder().decode(RuntimeContract.self,
     from: Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1])))
 private let verifier = RuntimeVerifier()
@@ -24,13 +45,17 @@ let polling = Date()
 for _ in 0..<10 { try verifier.verify(contract) }
 print("full=\(full) seconds; poll=\(Date().timeIntervalSince(polling) / 10) seconds")
 if CommandLine.arguments.count > 2 {
+    let host = try AppDelegate.syntheticRuntimeHost(contract)
     print("READY")
     fflush(stdout)
     _ = readLine()
     do {
         try verifier.verify(contract)
         exit(21)
-    } catch { print("REJECTED"); fflush(stdout) }
+    } catch {
+        host.verifySyntheticShutdown()
+        print("REJECTED"); fflush(stdout)
+    }
     _ = readLine()
     do { try verifier.verify(contract); exit(22) }
     catch { print("LATCHED") }
