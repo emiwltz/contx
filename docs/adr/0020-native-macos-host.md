@@ -1,6 +1,6 @@
 # ADR 0020: Put the collector behind a signed native macOS host
 
-- **Status:** Accepted
+- **Status:** Accepted; control surface and restart policy amended by ADR 0021
 - **Date:** 2026-08-22
 - **Decision owner:** Emi
 

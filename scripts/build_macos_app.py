@@ -24,14 +24,6 @@ def main() -> int:
     parser.add_argument("--control-executable", required=True, type=Path)
     parser.add_argument("--signing-identity", required=True)
     parser.add_argument("--screen-recording-usage-description", required=True)
-    parser.add_argument(
-        "--status-item-text-diagnostic",
-        action="store_true",
-        help=(
-            "Build an explicitly marked visual diagnostic that renders "
-            "CONTX TEST instead of the normal status-item symbol."
-        ),
-    )
     arguments = parser.parse_args()
     try:
         bundle = build_contx_app_bundle(
@@ -42,14 +34,11 @@ def main() -> int:
             screen_recording_usage_description=(
                 arguments.screen_recording_usage_description
             ),
-            status_item_text_diagnostic=arguments.status_item_text_diagnostic,
         )
     except (MacOSAppBuildError, OSError, ValueError) as error:
         parser.exit(2, f"CONTX app build failed: {error}\n")
     print(f"CONTX app bundle: {bundle}")
     print(f"bundle identifier: {BUNDLE_IDENTIFIER}")
-    diagnostic = "CONTX TEST" if arguments.status_item_text_diagnostic else "no"
-    print(f"status-item text diagnostic: {diagnostic}")
     print("application launched: no")
     print("permissions requested: no")
     print("collection started: no")

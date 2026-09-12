@@ -189,24 +189,18 @@ explicit user instruction.
 | **v0.9** | **J7 real pilot** | 7–14 day pilot, ground truth, with/without CONTX comparison, error analysis, OptMem decision. |
 | **v1.0** | **J8 hardening** | Fixes, optimization, install/upgrade/uninstall, recovery, distribution, licensing, and documentation. |
 
-**Active goal:** finish the signed native macOS runtime and the remaining J1
-supervision and resource evidence, then run the content-minimized v0.9 real
-pilot. The native `CONTX` menu host (`io.contx.desktop`) is implemented and has
-passed compile-only Apple Development signature verification. It has not been
-installed or activated. A first authorized disabled direct-execution smoke
-started no child and collected nothing, but its menu item was not optically
-observable and its status polling touched SQLite's shared-memory sidecar. The
-resulting non-mutating disabled-status and fail-closed status-item corrections
-were implemented. A second normally registered disabled smoke proved the
-correct signed identity, live host, zero child, zero runtime mutation, and exact
-cleanup, but its compact symbol was still not optically observable. An explicit
-build-only `CONTX TEST` text diagnostic is now prepared but has not been
-launched. Runtime packaging is then required before any
-collector-child test, followed by final permission wording, installation,
-attribution verification,
-collector/processor LaunchAgent activation, and the pilot start; all remain
-separately action-time gated (§37 and the
-[implementation plan](./docs/implementation-plan.md)).
+**Active goal:** prepare a stable private runtime before collector-child activation.
+The native window passed disabled human visibility, Dock and red-close checks
+on 2026-09-12; the host exited and runtime files remained unchanged.
+The three disabled native menu tests failed human visibility, including a text
+label with Hidden Bar disabled. ADR 0021 replaces the native status item with
+a regular window and Dock presence: closing quits the app and stops its owned
+collector, and successful exits are not immediately restarted by launchd.
+The signed identity and existing Python collection/control boundaries remain.
+The current checkpoint and next action are tracked in the
+[prototype checklist](docs/evaluation/prototype-checklist.md). Runtime packaging,
+installation, permissions, collection, the controlled day and the real pilot
+remain separate validation gates.
 
 ---
 
@@ -232,11 +226,11 @@ adds database-backed pause and exclusions, bounded raw artifacts and
 restart-safe purge, duration and system-state segmentation, non-prompting
 permission preflights, optional privacy-gated window titles, selective and
 exactly deduplicated focused-window-only screenshots through ScreenCaptureKit
-with no display-wide fallback, a minimal AppKit menu, an audited
+with no display-wide fallback, a native AppKit control window, an audited
 single-process collection daemon, graceful shutdown, and deterministic native
 host and periodic-processor LaunchAgent manifests. The continuous manifest now
 targets only `~/Applications/CONTX.app/Contents/MacOS/CONTX`; the signed native
-host owns the menu and launches the digest-pinned Python collector without a
+host owns the window and launches the digest-pinned Python collector without a
 second status item. Both jobs remain disabled by default. A fail-closed user
 lifecycle now preflights permissions,
 the local model, OptMem, the database schema and existing plist ownership,

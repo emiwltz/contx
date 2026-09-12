@@ -24,8 +24,6 @@ BUNDLE_NAME = "CONTX"
 EXECUTABLE_NAME = "CONTX"
 RUNTIME_CONTRACT_NAME = "RuntimeContract.plist"
 RUNTIME_CONTRACT_SCHEMA_VERSION = 1
-STATUS_ITEM_TEXT_DIAGNOSTIC_COMPILER_FLAG = "CONTX_STATUS_ITEM_TEXT_DIAGNOSTIC"
-STATUS_ITEM_TEXT_DIAGNOSTIC_INFO_KEY = "CONTXStatusItemTextDiagnostic"
 PRIVATE_DIRECTORY_MODE = 0o700
 PRIVATE_FILE_MODE = 0o600
 PRIVATE_EXECUTABLE_MODE = 0o700
@@ -56,7 +54,6 @@ def build_contx_app_bundle(
     control_executable: Path,
     signing_identity: str,
     screen_recording_usage_description: str,
-    status_item_text_diagnostic: bool = False,
     platform: str = sys.platform,
     run_command: CommandRunner | None = None,
 ) -> Path:
@@ -108,8 +105,6 @@ def build_contx_app_bundle(
         source_file.write_text(CONTX_APP_SWIFT_SOURCE, encoding="utf-8")
         os.chmod(source_file, PRIVATE_FILE_MODE)
         compile_command = ["xcrun", "swiftc", str(source_file)]
-        if status_item_text_diagnostic:
-            compile_command.extend(("-D", STATUS_ITEM_TEXT_DIAGNOSTIC_COMPILER_FLAG))
         compile_command.extend(
             (
                 "-framework",
@@ -134,7 +129,6 @@ def build_contx_app_bundle(
         _write_info_plist(
             info_plist,
             screen_recording_usage_description=usage_description,
-            status_item_text_diagnostic=status_item_text_diagnostic,
         )
         runner(
             (
@@ -263,7 +257,6 @@ def _write_info_plist(
     path: Path,
     *,
     screen_recording_usage_description: str,
-    status_item_text_diagnostic: bool,
 ) -> None:
     payload: dict[str, object] = {
         "CFBundleDevelopmentRegion": "en",
@@ -276,13 +269,11 @@ def _write_info_plist(
         "CFBundleShortVersionString": "0.0.1",
         "CFBundleVersion": "1",
         "LSMinimumSystemVersion": "14.0",
-        "LSUIElement": True,
+        "LSUIElement": False,
         "NSHighResolutionCapable": True,
         "NSPrincipalClass": "NSApplication",
         "NSScreenCaptureUsageDescription": screen_recording_usage_description,
     }
-    if status_item_text_diagnostic:
-        payload[STATUS_ITEM_TEXT_DIAGNOSTIC_INFO_KEY] = True
     with path.open("wb") as file:
         plistlib.dump(payload, file, fmt=plistlib.FMT_BINARY, sort_keys=True)
     os.chmod(path, PRIVATE_FILE_MODE)

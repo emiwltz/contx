@@ -14,7 +14,7 @@ Passing this checkpoint does not establish controlled-day J1 acceptance,
 
 | Checkpoint | Acceptance evidence | Status |
 | --- | --- | --- |
-| Visible disabled application | Emi sees the control and opens its disabled-state menu; no collector or runtime mutation | Text diagnostic failed human observation; native window proposal pending |
+| Visible disabled application | Emi sees the control and opens its disabled-state menu; no collector or runtime mutation | Passed: visible disabled window and Dock, red-close exit, unchanged runtime |
 | Stable private runtime | Accepted packaging decision covers Python, modules, native dependencies and OptMem | Pending decision and implementation |
 | Installation and permissions | Verified signed installation and unchanged host/child permission attribution | Pending runtime checkpoint and explicit authorization |
 | Short collection | Controlled metadata, one capture, then 15 minutes; exclusions, pause and stop verified | Pending |
@@ -63,16 +63,36 @@ The temporary LaunchServices registration was verified absent and the generated
 application was removed. Only private diagnostic evidence remains in temporary
 storage. Hidden Bar was changed by Emi, not by the harness.
 
+## 2026-09-12 accepted window implementation
+
+Emi approved a normal window, Dock presence and close-as-quit. ADR 0021 records
+that decision. The native status-item path and its text-diagnostic build option
+are removed. Existing controls now live in a regular AppKit window. Red close,
+Quit and Cmd-Q terminate the app through its existing owned-child shutdown hook.
+The collector LaunchAgent restarts abnormal exits but not successful voluntary
+exits, avoiding an immediate restart after closing the window.
+
+A compiled probe using the actual Swift termination hook stopped a disposable
+`/bin/sleep` child, tolerated repeated shutdown, and cleared an already-exited
+child. It opened no window, read no CONTX data and launched no real collector.
+
+The signed temporary app launched in disabled state with no runtime mutation.
+Emi confirmed seeing the window and supplied a screenshot showing the complete
+layout, `Collection disabled`, disabled collection buttons and an enabled Quit
+button. Emi also confirmed Dock presence and that the red close button made the
+window disappear. The harness observed host exit before its own termination
+step, then verified disabled state, no live collector lease and unchanged runtime
+contents/metadata. The temporary LaunchServices registration was verified absent
+and the generated application was removed. No user screenshot is stored in Git.
+
+Repository validation: 479 pytest tests passed (one existing third-party
+Starlette/httpx deprecation warning); Ruff checks and formatting passed; mypy
+reported no errors in 127 source files. The removed test covered only the removed
+text-diagnostic build option.
+
 ## Next action
 
-Seek approval for an ordinary native window with Dock presence, retaining
-`io.contx.desktop`, the Python control contract and existing collection logic.
-The proposed first implementation displays state and existing pause/resume
-controls, supports a clear quit action, and defines close as quit for the
-supervised prototype so collection cannot be hidden by closing its window.
-Replace the menu-only user surface rather than maintain two competing control
-surfaces. This is a user-visible lifecycle decision, not yet accepted.
-
-First validate the proposed window with collection disabled. Runtime packaging
-still precedes any collector-child test. No installation, permission request
-or real-data test is authorized by the diagnostic alone.
+Prepare the runtime packaging decision for the next checkpoint. The visible
+control checkpoint has passed for disabled operation. Real collector shutdown,
+loaded-LaunchAgent restart behavior and permission attribution remain unverified
+on the target Mac; synthetic tests do not authorize or replace those gates.

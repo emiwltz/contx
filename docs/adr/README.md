@@ -44,3 +44,4 @@ Every ADR records:
 - [0018 — Run semantic refreshes as bounded periodic local jobs](0018-bounded-periodic-context-refresh.md)
 - [0019 — Capture only the policy-authorized focused window](0019-capture-only-focused-window.md)
 - [0020 — Put the collector behind a signed native macOS host](0020-native-macos-host.md)
+- [0021 — Use a native window for supervised prototype control](0021-native-window-control.md)

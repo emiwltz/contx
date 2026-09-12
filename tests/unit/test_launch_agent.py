@@ -36,7 +36,7 @@ def test_manifest_is_deterministic_private_and_bound_to_aqua(
         ],
         "LimitLoadToSessionType": "Aqua",
         "RunAtLoad": True,
-        "KeepAlive": True,
+        "KeepAlive": {"SuccessfulExit": False},
         "ProcessType": "Interactive",
         "ThrottleInterval": 30,
         "ExitTimeOut": 10,

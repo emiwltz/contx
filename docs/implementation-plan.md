@@ -17,7 +17,7 @@
 | Phase 0 decision baseline | Complete | ADRs 0001–0006, aligned specification and architecture, Apache-2.0 baseline, OptMem provenance gate |
 | J0 engineering foundation | Complete | Locked Python 3.12 package, private runtime paths, Alembic/SQLite WAL, strict schemas and repositories |
 | v0.0.1 vertical slice | Complete | Synthetic and live one-shot collectors, candidate decision, OptMem persistence, provenance, direct `contx wake`, replay/failure tests |
-| v0.1 / J1 | In progress | Controlled metadata and screenshot policy, focused-window-only ScreenCaptureKit capture under ADR 0019, 43 active exclusion rules, bounded raw storage, restart-safe purge, permission preflights, and transactional background lifecycle are implemented. Two 2026-08-22 supervised raw-Python activations exposed and then isolated a macOS Screen Recording attribution gap; both were rolled back with zero raw usage and zero backlog. A later disposable identity probe proved that one unchanged native bundle and its sealed Python child share the dedicated permission attribution, without reading a title or pixel or collecting activity, then removed all experimental state. Xcode 26.6, an Apple Development identity, and the official WWDR intermediate are now available. ADR 0020's native `CONTX` host (`io.contx.desktop`) is implemented: it owns the single menu, digest-pins the existing Python collector and content-free control command, suppresses the child menu, and replaces the raw collector LaunchAgent target. A hardened arm64 development bundle passed compile-only signature verification. The first authorized disabled direct-execution smoke started no child and collected nothing, but failed optical menu observation, implicitly registered with LaunchServices, and touched SQLite's shared-memory sidecar. Disabled status is now non-mutating and the native status item fails closed when AppKit cannot attach it. A second normally registered corrected smoke passed identity, lifecycle, zero-child, zero-mutation, and cleanup gates but still failed human menu observation. A default-off signed `CONTX TEST` text diagnostic is prepared as the next separately authorized live gate; runtime packaging is required before any collector-child test, followed by final permission wording, installation, attribution, supervised activation, the controlled day, and target-Mac baselines. |
+| v0.1 / J1 | In progress | Collection, exclusions, focused-window capture, raw retention and transactional lifecycle are implemented. Three disabled native menu tests failed human visibility. Accepted ADR 0021 replaces the native status item with a normal window and Dock entry; close quits and stops the owned collector, and successful exits do not trigger immediate launchd restart. Disabled window visibility, Dock and red-close exit passed on 2026-09-12 with unchanged runtime files. Runtime packaging, installation, permission attribution, supervised activation, the controlled day and resource baselines remain tracked in `docs/evaluation/prototype-checklist.md`. |
 | v0.2 / J2 | Complete | Gemma 4 E4B QAT with prompt v9 passed the fixed 16/16 privacy and quality matrix, bounded cold/warm resource measurements were recorded, the persistent local model-to-event proof passed, and sensitive or forbidden output is blocked from durable memory |
 | v0.3 / J3 | Complete | Frozen-day sessionization produces a deterministic readable timeline; same-version replay is idempotent, changed versions coexist, and append-only corrections survive compatible evidence-lineage rebuilds |
 | v0.4 / J4 | Complete | Multi-day pattern detection, fused candidates, explicit scoring, rejection/deferral reasons, validity, and side-by-side rule and threshold replays passed the synthetic exit gate |
@@ -648,13 +648,10 @@ All of the following must be true:
 ### 9.2 Control surface
 
 A persistent collector is not enabled until the user can see and control its
-real state. The preferred v0.1 control is a minimal menu-bar surface backed by
-the same application service used by the CLI.
-
-Before implementing a native helper, run a focused prototype to determine
-whether Python/PyObjC is sufficient or whether a small Swift component and
-full Xcode are justified. Choosing the helper technology is an ADR because it
-affects packaging, permissions, signing, and long-term maintenance.
+real state. Accepted ADR 0021 selects a normal native window and Dock presence
+for the supervised prototype, backed by ADR 0020's content-free control service.
+Closing the window quits the host and stops its owned collector. The collector
+LaunchAgent restarts abnormal exits, but not successful voluntary exits.
 
 ### 9.3 Privacy order
 

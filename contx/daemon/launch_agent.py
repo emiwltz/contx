@@ -15,7 +15,7 @@ PROCESSOR_LAUNCH_AGENT_LABEL = "io.contx.processor"
 def native_host_launch_agent_program_arguments(
     native_host_executable: Path,
 ) -> tuple[str, ...]:
-    """Build the stable argv for the signed native menu-bar host."""
+    """Build the stable argv for the signed native window host."""
     executable = _validate_executable_reference(native_host_executable)
     return (str(executable),)
 
@@ -48,7 +48,7 @@ def render_launch_agent(
         "ProgramArguments": list(arguments),
         "LimitLoadToSessionType": "Aqua",
         "RunAtLoad": True,
-        "KeepAlive": True,
+        "KeepAlive": {"SuccessfulExit": False},
         "ProcessType": "Interactive",
         "ThrottleInterval": 30,
         "ExitTimeOut": 10,

@@ -1,4 +1,4 @@
-"""Auditable Swift source for the signed CONTX menu-bar host."""
+"""Auditable Swift source for the signed CONTX window host."""
 
 from __future__ import annotations
 
@@ -12,15 +12,6 @@ private let controlSchemaVersion = 1
 private let controlTimeoutSeconds: TimeInterval = 5.0
 private let collectorStopTimeoutSeconds: TimeInterval = 10.0
 private let maximumControlOutputBytes = 32 * 1024
-private let statusItemAutosaveName = "io.contx.desktop.status-item"
-private let statusItemIdentifier = "io.contx.desktop.status-item.button"
-#if CONTX_STATUS_ITEM_TEXT_DIAGNOSTIC
-private let statusItemLength = NSStatusItem.variableLength
-private let statusItemTextDiagnosticLabel = "CONTX TEST"
-#else
-private let statusItemLength = NSStatusItem.squareLength
-#endif
-
 private struct RuntimeCommand: Decodable {
     let path: String
     let sha256: String
@@ -68,7 +59,6 @@ private enum HostFailure: Error {
     case commandFailed
     case commandTimedOut
     case invalidControlResponse
-    case unavailableStatusItem
 }
 
 private enum HostViewState {
@@ -78,23 +68,6 @@ private enum HostViewState {
     case paused
     case active
     case error
-
-    var symbolName: String {
-        switch self {
-        case .starting:
-            return "circle.dotted"
-        case .disabled:
-            return "circle.slash"
-        case .stopped:
-            return "exclamationmark.circle"
-        case .paused:
-            return "pause.circle.fill"
-        case .active:
-            return "record.circle.fill"
-        case .error:
-            return "exclamationmark.triangle.fill"
-        }
-    }
 
     var statusText: String {
         switch self {
@@ -114,32 +87,27 @@ private enum HostViewState {
     }
 }
 
-private final class AppDelegate: NSObject, NSApplicationDelegate {
+private final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let worker = DispatchQueue(label: "io.contx.desktop.runtime")
     private var contract: RuntimeContract?
     private var collector: Process?
     private var shuttingDown = false
     private var refreshPending = false
-    private var statusItem: NSStatusItem?
-    private var statusLine: NSMenuItem?
-    private var pauseFifteenItem: NSMenuItem?
-    private var pauseIndefinitelyItem: NSMenuItem?
-    private var resumeItem: NSMenuItem?
-    private var restartItem: NSMenuItem?
+    private var window: NSWindow?
+    private var statusLine: NSTextField?
+    private var pauseFifteenItem: NSButton?
+    private var pauseIndefinitelyItem: NSButton?
+    private var resumeItem: NSButton?
+    private var restartItem: NSButton?
     private var timer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApplication.shared.setActivationPolicy(.accessory)
-        guard NSApplication.shared.activationPolicy() == .accessory else {
+        NSApplication.shared.setActivationPolicy(.regular)
+        guard NSApplication.shared.activationPolicy() == .regular else {
             NSApplication.shared.terminate(nil)
             return
         }
-        do {
-            try buildMenu()
-        } catch {
-            NSApplication.shared.terminate(nil)
-            return
-        }
+        buildWindow()
         apply(viewState: .starting, status: nil)
         do {
             contract = try loadRuntimeContract()
@@ -164,10 +132,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         worker.sync {
             stopCollector()
         }
-        if let statusItem {
-            NSStatusBar.system.removeStatusItem(statusItem)
-        }
-        statusItem = nil
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        NSApplication.shared.terminate(nil)
+        return false
+    }
+
+    func applicationShouldHandleReopen(
+        _ sender: NSApplication, hasVisibleWindows flag: Bool
+    ) -> Bool {
+        window?.makeKeyAndOrderFront(nil)
+        return true
     }
 
     @objc private func refreshTimerFired(_ timer: Timer) {
@@ -212,63 +188,91 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func buildMenu() throws {
-        let item = NSStatusBar.system.statusItem(
-            withLength: statusItemLength
+    private func buildWindow() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 400),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered,
+            defer: false
         )
-        item.autosaveName = NSStatusItem.AutosaveName(statusItemAutosaveName)
-        item.length = statusItemLength
-        item.isVisible = true
-        guard item.statusBar != nil, item.isVisible, let button = item.button else {
-            NSStatusBar.system.removeStatusItem(item)
-            throw HostFailure.unavailableStatusItem
-        }
-        button.identifier = NSUserInterfaceItemIdentifier(statusItemIdentifier)
-        let menu = NSMenu()
-        let status = NSMenuItem(
-            title: "Collection status",
-            action: nil,
-            keyEquivalent: ""
-        )
-        status.isEnabled = false
-        menu.addItem(status)
-        menu.addItem(.separator())
+        window.title = "CONTX"
+        window.identifier = NSUserInterfaceItemIdentifier("io.contx.desktop.control")
+        window.isReleasedWhenClosed = false
+        window.delegate = self
 
-        let pauseFifteen = menuItem(
+        let heading = NSTextField(labelWithString: "CONTX")
+        heading.font = .boldSystemFont(ofSize: 24)
+        let status = NSTextField(labelWithString: "Collector starting")
+        status.font = .systemFont(ofSize: 17, weight: .medium)
+        status.setAccessibilityIdentifier("io.contx.desktop.state")
+        let explanation = NSTextField(wrappingLabelWithString:
+            "Closing this window quits CONTX and stops its collector.")
+        explanation.textColor = .secondaryLabelColor
+
+        let pauseFifteen = controlButton(
             title: "Pause for 15 minutes",
-            action: #selector(pauseForFifteenMinutes(_:))
-        )
-        let pauseIndefinitely = menuItem(
-            title: "Pause indefinitely",
-            action: #selector(pauseIndefinitely(_:))
-        )
-        let resume = menuItem(
-            title: "Resume collection",
-            action: #selector(resumeCollection(_:))
-        )
-        let restart = menuItem(
+            action: #selector(pauseForFifteenMinutes(_:)))
+        let pauseIndefinitely = controlButton(
+            title: "Pause indefinitely", action: #selector(pauseIndefinitely(_:)))
+        let resume = controlButton(
+            title: "Resume collection", action: #selector(resumeCollection(_:)))
+        let restart = controlButton(
             title: "Restart collector while paused",
-            action: #selector(restartCollector(_:))
-        )
-        menu.addItem(pauseFifteen)
-        menu.addItem(pauseIndefinitely)
-        menu.addItem(resume)
-        menu.addItem(.separator())
-        menu.addItem(restart)
-        item.menu = menu
+            action: #selector(restartCollector(_:)))
+        let quit = NSButton(title: "Quit CONTX", target: NSApplication.shared,
+                            action: #selector(NSApplication.terminate(_:)))
+        quit.bezelStyle = .rounded
 
-        statusItem = item
+        let firstRow = NSStackView(views: [pauseFifteen, pauseIndefinitely])
+        let secondRow = NSStackView(views: [resume, restart])
+        firstRow.spacing = 8
+        secondRow.spacing = 8
+        let stack = NSStackView(views: [
+            heading, status, explanation, firstRow, secondRow, quit,
+        ])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 16
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        let content = window.contentView!
+        content.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(
+                equalTo: content.leadingAnchor, constant: 24),
+            stack.trailingAnchor.constraint(
+                equalTo: content.trailingAnchor, constant: -24),
+            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 24),
+            stack.bottomAnchor.constraint(
+                lessThanOrEqualTo: content.bottomAnchor, constant: -24),
+        ])
+
+        let mainMenu = NSMenu()
+        let appMenuItem = NSMenuItem()
+        let appMenu = NSMenu()
+        let quitMenuItem = NSMenuItem(title: "Quit CONTX",
+            action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        quitMenuItem.target = NSApplication.shared
+        appMenu.addItem(quitMenuItem)
+        appMenuItem.submenu = appMenu
+        mainMenu.addItem(appMenuItem)
+        NSApplication.shared.mainMenu = mainMenu
+
+        self.window = window
         statusLine = status
         pauseFifteenItem = pauseFifteen
         pauseIndefinitelyItem = pauseIndefinitely
         resumeItem = resume
         restartItem = restart
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        NSApplication.shared.activate()
     }
 
-    private func menuItem(title: String, action: Selector) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-        item.target = self
-        return item
+    private func controlButton(title: String, action: Selector) -> NSButton {
+        let button = NSButton(title: title, target: self, action: action)
+        button.bezelStyle = .rounded
+        button.isEnabled = false
+        return button
     }
 
     private func refreshAndStartIfNeeded() {
@@ -512,28 +516,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func apply(viewState: HostViewState, status: ControlStatus?) {
-        guard let item = statusItem, let button = item.button else {
-            return
-        }
-#if CONTX_STATUS_ITEM_TEXT_DIAGNOSTIC
-        button.image = nil
-        button.title = statusItemTextDiagnosticLabel
-#else
-        let image = NSImage(
-            systemSymbolName: viewState.symbolName,
-            accessibilityDescription: "CONTX — \(viewState.statusText)"
-        )
-        image?.isTemplate = true
-        if let image {
-            button.title = ""
-            button.image = image
-        } else {
-            button.image = nil
-            button.title = "●"
-        }
-#endif
-        button.toolTip = "CONTX — \(viewState.statusText)"
-        statusLine?.title = viewState.statusText
+        statusLine?.stringValue = viewState.statusText
 
         let enabled = status?.backgroundEnabled == true
         let running = status?.collectorRunning == true
@@ -606,7 +589,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 let application = NSApplication.shared
 private let delegate = AppDelegate()
 application.delegate = delegate
-application.setActivationPolicy(.accessory)
+application.setActivationPolicy(.regular)
 application.run()
 """
 
