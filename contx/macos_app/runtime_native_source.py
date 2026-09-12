@@ -72,6 +72,19 @@ private final class RuntimeVerifier {
               contract.files.count > 0, contract.files.count < 100000 else {
             throw HostFailure.invalidContract
         }
+        if let baseline, !hashAll {
+            // Directory ctime/mtime also detect new or removed names. Do not rebuild
+            // the manifest dictionary or re-enumerate unchanged directories each tick.
+            for (relative, previous) in baseline {
+                let path = relative == "." ? root : root + "/" + relative
+                var info = stat()
+                guard lstat(path, &info) == 0, info.st_uid == getuid(),
+                      RuntimeStamp(info) == previous else {
+                    throw HostFailure.changedExecutable
+                }
+            }
+            return
+        }
         var expected: [String: RuntimeFile] = [:]
         for record in contract.files {
             let components = record.path.split(

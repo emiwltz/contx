@@ -13,9 +13,12 @@ from contx.collection import CollectionControlService
 from contx.daemon import DaemonLease
 from contx.db import create_database_engine, upgrade_database
 from contx.errors import ConfigurationError
-from contx.macos_app import NativeHostControlService, NativeHostState
 from contx.macos_app import control as native_control
-from contx.macos_app.control import run_native_host_control
+from contx.macos_app.control import (
+    NativeHostControlService,
+    NativeHostState,
+    run_native_host_control,
+)
 from contx.settings import RuntimePaths, initialize_runtime_paths
 from tests.helpers import FixedClock
 
@@ -194,3 +197,21 @@ def _runtime_file_snapshot(
                 file_status.st_ctime_ns,
             )
     return snapshot
+
+
+def test_module_entrypoint_runs_once_without_import_warning(tmp_path: Path) -> None:
+    import os
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "-m", "contx.macos_app.control", "status"],
+        env={**os.environ, "CONTX_RUNTIME_ROOT": str(tmp_path / "empty-runtime")},
+        text=True,
+        capture_output=True,
+        timeout=15,
+        check=True,
+    )
+    assert result.stderr == ""
+    assert '"state":"disabled"' in result.stdout
+    assert not (tmp_path / "empty-runtime").exists()

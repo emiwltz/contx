@@ -55,6 +55,8 @@ def compile_probe(root: Path) -> Path:
             "CryptoKit",
             "-framework",
             "Foundation",
+            "-framework",
+            "Security",
             "-module-cache-path",
             str(root / "modules"),
             "-o",

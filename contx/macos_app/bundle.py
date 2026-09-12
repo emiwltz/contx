@@ -99,6 +99,8 @@ def build_contx_app_bundle(
                 "CryptoKit",
                 "-framework",
                 "Foundation",
+                "-framework",
+                "Security",
                 "-o",
                 str(executable),
             )

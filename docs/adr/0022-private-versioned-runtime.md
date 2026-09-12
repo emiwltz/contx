@@ -95,7 +95,9 @@ layer while retaining the native host/control and memory contracts.
 
 ## Implemented verification contract
 
-The version-2 inventory is embedded inside the native signed resources. All
+The version-2 inventory is embedded inside the native signed resources. The
+host validates its own complete resource signature with Security.framework
+before trusting the inventory. All
 runtime files, directories and internal symlinks are enumerated; regular files
 are SHA-256 checked, permissions and ownership checked, and external links
 rejected. Python and OptMem paths are fixed relative to the release root.
@@ -103,8 +105,9 @@ The old entrypoint-only version-1 contract is removed.
 
 The native host hashes the full release before its first Python call, before
 collector start/restart and before explicit control actions. Each one-second
-status iteration enumerates all nodes and compares device, inode, size, mode,
-mtime and ctime against that process's initial verified baseline. Additions,
+status iteration checks every previously inventoried node and compares device, inode, size, mode,
+mtime and ctime against that process's initial verified baseline. Directory
+stamps detect additions/removals without repeated directory listing. Additions,
 removals or stamp changes latch a failure, stop the owned collector and disable
 further control execution. Repairing disk contents does not clear the latch;
 a fresh verified host is required. This does not protect against a hostile
@@ -132,3 +135,9 @@ in-place overwrite. Any failed build removes only its newly created release.
 Existing releases and all user data remain untouched. Selection of an installed
 app/release is a later explicit installation action, performed with processes
 stopped; this build tool has no live switching or deletion command.
+
+The builder audits all Mach-O load commands, resolves private loader/rpath
+references and rejects external non-system dependencies before sealing. A dylib's
+LC_ID_DYLIB name is its identity, not a load dependency; original build-path IDs
+are not mistaken for links to the shared interpreter. A separate isolated import
+probe verifies actual loaded images on the target Mac.

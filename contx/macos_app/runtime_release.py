@@ -16,6 +16,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from contx.macos_app.native_dependencies import audit_native_dependencies
 from contx.memory_store.optmem import OPTMEM_SNAPSHOT_SHA256
 
 
@@ -269,6 +270,7 @@ def build_private_runtime(
         version = subprocess.check_output(
             [str(root / "env/bin/python3"), "-I", "-B", "--version"], text=True
         ).strip()
+        audit_native_dependencies(root)
         seal_tree(root)
         manifest = RuntimeManifest(
             root=str(root),

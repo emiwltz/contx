@@ -69,6 +69,8 @@ def main() -> None:
                 "CryptoKit",
                 "-framework",
                 "Foundation",
+                "-framework",
+                "Security",
                 "-o",
                 str(executable),
             ],

@@ -8,6 +8,7 @@ CONTX_APP_SWIFT_SOURCE = r"""import AppKit
 import CryptoKit
 import Darwin
 import Foundation
+import Security
 
 private let contractSchemaVersion = 2
 private let controlSchemaVersion = 1
@@ -529,6 +530,16 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
     }
 
     private func loadRuntimeContract() throws -> RuntimeContract {
+        // Resource seals are not a substitute for checking them before trusting
+        // the embedded manifest. Validate this exact bundle before reading it.
+        var signedCode: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(
+            Bundle.main.bundleURL as CFURL, SecCSFlags(), &signedCode
+        ) == errSecSuccess, let signedCode,
+        SecStaticCodeCheckValidity(signedCode,
+            SecCSFlags(rawValue: kSecCSStrictValidate), nil) == errSecSuccess else {
+            throw HostFailure.invalidBundle
+        }
         guard
             let url = Bundle.main.url(
                 forResource: "RuntimeContract",
@@ -607,7 +618,9 @@ CONTX_APP_SWIFT_SOURCE = CONTX_APP_SWIFT_SOURCE.replace(
     RUNTIME_VERIFY_SWIFT_SOURCE + "\nprivate enum ControlState",
 )
 
-ALLOWED_SWIFT_IMPORTS = frozenset({"AppKit", "CryptoKit", "Darwin", "Foundation"})
+ALLOWED_SWIFT_IMPORTS = frozenset(
+    {"AppKit", "CryptoKit", "Darwin", "Foundation", "Security"}
+)
 FORBIDDEN_SWIFT_TOKENS = (
     "ApplicationServices",
     "AXIsProcessTrusted",
