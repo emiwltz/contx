@@ -17,7 +17,7 @@ Passing this checkpoint does not establish controlled-day J1 acceptance,
 | Visible disabled application | Emi sees the control and opens its disabled-state menu; no collector or runtime mutation | Passed: visible disabled window and Dock, red-close exit, unchanged runtime |
 | Stable private runtime | Accepted packaging decision covers Python, modules, native dependencies and OptMem | Passed in isolation: sealed release, native corruption refusal and signed dispatch |
 | Installation and permissions | Verified signed installation and unchanged host/child permission attribution | Installed disabled launch and close passed; native and child granted preflight observed |
-| Short collection | Controlled metadata, one capture, then 15 minutes; exclusions, pause and stop verified | Metadata resume/pause and automatic stop observed; live manual close, capture and 15-minute session pending |
+| Short collection | Controlled metadata, one capture, then 15 minutes; exclusions, pause and stop verified | Metadata pause/resume and UI close observed; automated app-switch comparison inconclusive; capture and 15-minute session pending |
 | One-hour session | Inspectable complete pipeline, independent activity reference, resource measurements and defect review | Pending |
 
 ## Operating agreement
@@ -116,3 +116,12 @@ application durations without titles or images, paused successfully and stopped
 at the five-minute supervision bound. Normal data remained unchanged. Next verify
 manual close with a live collector and confirm the user's chosen applications
 before advancing to the controlled capture.
+
+## Autonomous Computer Use follow-up
+
+[Control trial](v0.1-computer-use-control-trial.md): two UI-triggered red closes
+while collecting stopped both native host and child before supervisor cleanup.
+Timed pause and resume also passed. The automated foreground-app comparison is
+inconclusive: targeting Finder/Spotify through accessibility did not produce the
+expected segments. No captures or model processing were enabled. Both trials
+ended disabled with unchanged normal data.
