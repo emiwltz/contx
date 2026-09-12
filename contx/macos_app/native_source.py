@@ -588,9 +588,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
         permissionSetupAvailable = status?.state == .disabled
             && status?.backgroundEnabled == false && status?.collectorRunning == false
         updatePermissionButtons()
-        if status == nil {
+        let unavailable = "CONTX est indisponible. Aucun accès n’est confirmé."
+        if viewState == .error {
+            permissionStatusLine?.stringValue = unavailable
+        } else if status != nil && permissionStatusLine?.stringValue == unavailable {
             permissionStatusLine?.stringValue =
-                "CONTX est indisponible. Aucun accès n’est confirmé."
+                "Autorisations à vérifier. Aucun accès n’est confirmé."
         }
 
         let enabled = status?.backgroundEnabled == true

@@ -31,6 +31,15 @@ extension AppDelegate {
             return PermissionAccess(schemaVersion: 1, screenRecording: true,
                 accessibility: false, permissionsRequested: false, contentRead: false)
         }
+        host.apply(viewState: .starting, status: nil)
+        host.apply(status: try host.readControlStatus())
+        check(host.permissionStatusLine?.stringValue.contains("indisponible") == false)
+        host.apply(viewState: .error, status: nil)
+        check(host.permissionStatusLine?.stringValue.contains("indisponible") == true)
+        host.apply(status: try host.readControlStatus())
+        check(host.permissionStatusLine?.stringValue.contains("indisponible") == false)
+        // Simulate a stale enabled button to exercise the worker's fresh state guard.
+        host.permissionSetupAvailable = true
         // No permission API is invoked by initialization or a status refresh.
         _ = try host.readControlStatus()
         check(requests.isEmpty && preflights == 0)
