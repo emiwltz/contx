@@ -46,3 +46,5 @@ Every ADR records:
 - [0020 — Put the collector behind a signed native macOS host](0020-native-macos-host.md)
 - [0021 — Use a native window for supervised prototype control](0021-native-window-control.md)
 - [0022 — Build a private versioned prototype runtime](0022-private-versioned-runtime.md)
+- [0023 — Add explicit permission setup to the native host](0023-explicit-native-permission-setup.md)
+- [0024 — Offer a bounded synthetic capture from the installed host](0024-native-synthetic-capture-test.md)

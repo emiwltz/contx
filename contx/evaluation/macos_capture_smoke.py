@@ -446,6 +446,10 @@ def _sample_expected_window(
     title: FocusedWindowTitleProbe,
 ) -> ActivitySample:
     metadata = application.read()
+    if metadata.process_id != os.getpid():
+        raise CollectorUnavailableError(
+            "The synthetic window process is not foreground"
+        )
     window_id = window.read(process_id=metadata.process_id)
     if window_id is None:
         raise CollectorUnavailableError(

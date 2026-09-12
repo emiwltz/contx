@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Protocol
 
 from contx.daemon.factory import (
@@ -49,6 +50,10 @@ def run_entrypoint(arguments: Sequence[str]) -> int:
     """Reject unknown modes before constructing a collection runtime."""
     if list(arguments) == ["--permission-preflight"]:
         return run_permission_preflight()
+    if len(arguments) == 2 and arguments[0] == "--synthetic-capture":
+        from contx.daemon.synthetic_capture import run_synthetic_capture
+
+        return run_synthetic_capture(Path(arguments[1]))
     if arguments:
         _write_standard_error("CONTX collector received invalid arguments.\n")
         return 64

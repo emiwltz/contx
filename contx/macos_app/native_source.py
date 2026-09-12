@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contx.macos_app.capture_native_source import CAPTURE_SWIFT_SOURCE
 from contx.macos_app.permission_native_source import PERMISSION_SWIFT_SOURCE
 from contx.macos_app.runtime_native_source import RUNTIME_VERIFY_SWIFT_SOURCE
 
@@ -258,8 +259,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
             + "Aucun contenu n’est lu pendant la vérification.")
         permissionStatus.setAccessibilityIdentifier("io.contx.desktop.permissions")
         permissionStatusLine = permissionStatus
+        let testCapture = controlButton(title: "Tester une capture fictive",
+            action: #selector(testSyntheticCapture(_:)))
         permissionButtons = [
-            screenPermission, accessibilityPermission, verifyPermission]
+            screenPermission, accessibilityPermission, verifyPermission, testCapture]
 
         let firstRow = NSStackView(views: [pauseFifteen, pauseIndefinitely])
         let secondRow = NSStackView(views: [resume, restart])
@@ -268,7 +271,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
         let stack = NSStackView(views: [
             heading, status, explanation, firstRow, secondRow,
             permissionExplanation, permissionRow, verifyPermission,
-            permissionStatus, quit,
+            permissionStatus, testCapture, quit,
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -481,7 +484,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
     private func runBoundedCommand(
         module: String,
         arguments: [String],
-        nativeHostChild: Bool
+        nativeHostChild: Bool,
+        timeout: TimeInterval = controlTimeoutSeconds
     ) throws -> CommandResult {
         try verifyRuntime()
         let process = Process()
@@ -512,7 +516,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
             if boundedCommand === process { boundedCommand = nil }
             commandLock.unlock()
         }
-        guard waitForExit(process, timeout: controlTimeoutSeconds) else {
+        guard waitForExit(process, timeout: timeout) else {
             process.terminate()
             if !waitForExit(process, timeout: 1.0) {
                 kill(process.processIdentifier, SIGKILL)
@@ -693,6 +697,7 @@ CONTX_APP_SWIFT_SOURCE = CONTX_APP_SWIFT_SOURCE.replace(
     "private enum ControlState",
     RUNTIME_VERIFY_SWIFT_SOURCE
     + PERMISSION_SWIFT_SOURCE
+    + CAPTURE_SWIFT_SOURCE
     + "\nprivate enum ControlState",
 )
 
