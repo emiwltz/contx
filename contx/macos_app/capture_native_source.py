@@ -20,6 +20,15 @@ private enum SyntheticCaptureError: Error {
 }
 
 extension AppDelegate {
+    private static func canonicalCapturePath(_ target: URL) throws -> String {
+        // Foundation strips /private from some paths; Python's realpath does not.
+        guard let resolved = realpath(target.path, nil) else {
+            throw HostFailure.invalidControlResponse
+        }
+        defer { free(resolved) }
+        return String(cString: resolved)
+    }
+
     @objc private func testSyntheticCapture(_ sender: Any?) {
         guard permissionSetupAvailable, !permissionBusy, !integrityFailed,
               !shuttingDown else { return }
@@ -64,7 +73,7 @@ extension AppDelegate {
                           let result = try? JSONDecoder().decode(
                             SyntheticCaptureResult.self, from: command.stdout),
                           result.schema_version == 1,
-                          result.output_path == target.path,
+                          result.output_path == (try Self.canonicalCapturePath(target)),
                           result.focus_race_reason == "focused_window_changed",
                           result.width > 0, result.width <= 8192,
                           result.height > 0, result.height <= 8192 else {

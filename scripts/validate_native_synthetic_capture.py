@@ -76,7 +76,7 @@ def main() -> None:
             check=True,
             timeout=120,
         )
-        for mode in ("success", "invalid", "enabled", "timeout", "cancel"):
+        for mode in ("success", "invalid", "wrongpath", "enabled", "timeout", "cancel"):
             release = root / mode
             (release / "env/bin").mkdir(parents=True)
             (release / "optmem").mkdir()
@@ -103,9 +103,11 @@ elif sys.argv[4:6] == ["contx.daemon.entrypoint", "--synthetic-capture"]:
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lE"
         "QVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=")
     target.write_bytes(png)
-    result = dict(schema_version=1, output_path=str(target), width=1, height=1,
+    result = dict(schema_version=1, output_path=str(target.resolve()),
+        width=1, height=1,
         content_hash=hashlib.sha256(png).hexdigest(),
         focus_race_reason="focused_window_changed")
+    if {mode!r} == "wrongpath": result["output_path"] = "/tmp/unrelated.png"
     print(json.dumps({{}} if {mode!r} == "invalid" else result))
 else: sys.exit(71)
 """)
