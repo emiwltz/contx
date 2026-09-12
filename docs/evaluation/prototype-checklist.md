@@ -17,7 +17,7 @@ Passing this checkpoint does not establish controlled-day J1 acceptance,
 | Visible disabled application | Emi sees the control and opens its disabled-state menu; no collector or runtime mutation | Passed: visible disabled window and Dock, red-close exit, unchanged runtime |
 | Stable private runtime | Accepted packaging decision covers Python, modules, native dependencies and OptMem | Passed in isolation: sealed release, native corruption refusal and signed dispatch |
 | Installation and permissions | Verified signed installation and unchanged host/child permission attribution | Installed disabled launch and close passed; native and child granted preflight observed |
-| Short collection | Controlled metadata, one capture, then 15 minutes; exclusions, pause and stop verified | Metadata controls and manual Finder/Zen sequence observed; sealed-runtime synthetic capture passed; native-host capture and 15-minute session pending |
+| Short collection | Controlled metadata, one capture, then 15 minutes; exclusions, pause and stop verified | Metadata controls, manual Finder/Zen sequence and installed-host synthetic capture passed; 15-minute session pending |
 | One-hour session | Inspectable complete pipeline, independent activity reference, resource measurements and defect review | Pending |
 
 ## Operating agreement
