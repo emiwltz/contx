@@ -100,8 +100,8 @@ and verified through synthetic/native validation, including signed dispatch.
 
 ## Next action
 
-Prepare a concrete final installation location, permission wording and recovery
-procedure for approval. Rebuild the release at that final absolute path; do not
+The [installation plan](v0.1-installation-plan.md) now specifies final locations,
+permission wording, disabled-launch checks and recovery for approval. Rebuild the release at that final absolute path; do not
 relocate the temporary environment. See [v0.1-private-runtime-validation.md](v0.1-private-runtime-validation.md)
 for completed evidence and limits. No real collection or installed LaunchAgent
 has been started.
