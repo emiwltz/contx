@@ -15,7 +15,7 @@ Passing this checkpoint does not establish controlled-day J1 acceptance,
 | Checkpoint | Acceptance evidence | Status |
 | --- | --- | --- |
 | Visible disabled application | Emi sees the control and opens its disabled-state menu; no collector or runtime mutation | Passed: visible disabled window and Dock, red-close exit, unchanged runtime |
-| Stable private runtime | Accepted packaging decision covers Python, modules, native dependencies and OptMem | Pending decision and implementation |
+| Stable private runtime | Accepted packaging decision covers Python, modules, native dependencies and OptMem | Isolated feasibility passed; ADR 0022 proposed, implementation pending |
 | Installation and permissions | Verified signed installation and unchanged host/child permission attribution | Pending runtime checkpoint and explicit authorization |
 | Short collection | Controlled metadata, one capture, then 15 minutes; exclusions, pause and stop verified | Pending |
 | One-hour session | Inspectable complete pipeline, independent activity reference, resource measurements and defect review | Pending |
@@ -90,9 +90,16 @@ Starlette/httpx deprecation warning); Ruff checks and formatting passed; mypy
 reported no errors in 127 source files. The removed test covered only the removed
 text-diagnostic build option.
 
+## Private runtime feasibility
+
+An isolated private Python plus non-editable production install passed import,
+web-asset, disabled-control and synthetic OptMem checks. See
+[v0.1-private-runtime-feasibility.md](v0.1-private-runtime-feasibility.md).
+The durable runtime contract is proposed in ADR 0022, not implemented or accepted.
+
 ## Next action
 
-Prepare the runtime packaging decision for the next checkpoint. The visible
-control checkpoint has passed for disabled operation. Real collector shutdown,
-loaded-LaunchAgent restart behavior and permission attribution remain unverified
-on the target Mac; synthetic tests do not authorize or replace those gates.
+Obtain the packaging decision on proposed ADR 0022, then implement and test the
+complete runtime verification and launch wiring. The visible control checkpoint
+has passed for disabled operation. Real collector shutdown, loaded-LaunchAgent
+restart behavior and permission attribution remain unverified on the target Mac.
