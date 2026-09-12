@@ -189,8 +189,9 @@ explicit user instruction.
 | **v0.9** | **J7 real pilot** | 7–14 day pilot, ground truth, with/without CONTX comparison, error analysis, OptMem decision. |
 | **v1.0** | **J8 hardening** | Fixes, optimization, install/upgrade/uninstall, recovery, distribution, licensing, and documentation. |
 
-**Active goal:** prepare final installation and permission verification before
-collector-child activation. The private versioned runtime and signed dispatch
+**Active goal:** prepare permission attribution verification before
+collector-child activation. The final application is installed; its disabled
+launch, human visibility, red-close exit and unchanged runtime checks passed. The private versioned runtime and signed dispatch
 passed isolated validation; see the
 [validation report](docs/evaluation/v0.1-private-runtime-validation.md).
 The native window passed disabled human visibility, Dock and red-close checks

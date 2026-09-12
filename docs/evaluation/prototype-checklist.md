@@ -16,7 +16,7 @@ Passing this checkpoint does not establish controlled-day J1 acceptance,
 | --- | --- | --- |
 | Visible disabled application | Emi sees the control and opens its disabled-state menu; no collector or runtime mutation | Passed: visible disabled window and Dock, red-close exit, unchanged runtime |
 | Stable private runtime | Accepted packaging decision covers Python, modules, native dependencies and OptMem | Passed in isolation: sealed release, native corruption refusal and signed dispatch |
-| Installation and permissions | Verified signed installation and unchanged host/child permission attribution | Prepared installation and explicit authorization remain |
+| Installation and permissions | Verified signed installation and unchanged host/child permission attribution | Installed disabled launch and human close check passed; permission attribution pending |
 | Short collection | Controlled metadata, one capture, then 15 minutes; exclusions, pause and stop verified | Pending |
 | One-hour session | Inspectable complete pipeline, independent activity reference, resource measurements and defect review | Pending |
 
@@ -100,8 +100,8 @@ and verified through synthetic/native validation, including signed dispatch.
 
 ## Next action
 
-The [installation plan](v0.1-installation-plan.md) now specifies final locations,
-permission wording, disabled-launch checks and recovery for approval. Rebuild the release at that final absolute path; do not
-relocate the temporary environment. See [v0.1-private-runtime-validation.md](v0.1-private-runtime-validation.md)
-for completed evidence and limits. No real collection or installed LaunchAgent
-has been started.
+The approved [installation plan](v0.1-installation-plan.md) has been executed
+through the first disabled launch. The final signature and inventory pass and
+runtime data is unchanged. Emi confirmed visibility and red-close disappearance; exact host exit and
+unchanged runtime state passed. Prepare the unchanged-host/child permission
+attribution experiment next. No real collection or installed LaunchAgent has been started.
