@@ -16,7 +16,7 @@ Passing this checkpoint does not establish controlled-day J1 acceptance,
 | --- | --- | --- |
 | Visible disabled application | Emi sees the control and opens its disabled-state menu; no collector or runtime mutation | Passed: visible disabled window and Dock, red-close exit, unchanged runtime |
 | Stable private runtime | Accepted packaging decision covers Python, modules, native dependencies and OptMem | Passed in isolation: sealed release, native corruption refusal and signed dispatch |
-| Installation and permissions | Verified signed installation and unchanged host/child permission attribution | Installed disabled launch and human close check passed; permission attribution pending |
+| Installation and permissions | Verified signed installation and unchanged host/child permission attribution | Installed disabled launch and close passed; native and child granted preflight observed |
 | Short collection | Controlled metadata, one capture, then 15 minutes; exclusions, pause and stop verified | Pending |
 | One-hour session | Inspectable complete pipeline, independent activity reference, resource measurements and defect review | Pending |
 
@@ -105,5 +105,6 @@ through the first disabled launch. The final signature and inventory pass and
 runtime data is unchanged. Emi confirmed visibility and red-close disappearance; exact host exit and
 unchanged runtime state passed. Accepted ADR 0023 adds explicit permission setup. The updated signed app is
 installed with previous versions retained; its disabled state and unchanged
-data checks pass. The first user-triggered, content-free native/child permission
-verification is pending. See [setup validation](v0.1-native-permission-setup-validation.md). No real collection or installed LaunchAgent has been started.
+data checks pass. Emi supplied granted Screen Recording and Accessibility preflight results for
+both native host and collector child. Post-check state and data remain unchanged.
+Prepare the bounded metadata-only collection experiment next. See [setup validation](v0.1-native-permission-setup-validation.md). No real collection or installed LaunchAgent has been started.
